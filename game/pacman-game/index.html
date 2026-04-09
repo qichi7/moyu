@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>吃豆人游戏</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <h1>吃豆人游戏</h1>
+            <div class="score-board">
+                <span>得分: <span id="score">0</span></span>
+                <span>最高分: <span id="high-score">0</span></span>
+            </div>
+        </div>
+        <div class="game-area" id="game-area"></div>
+        <div class="controls">
+            <p>使用方向键控制吃豆人移动，空格键开始/暂停游戏</p>
+            <button id="start-btn">开始游戏</button>
+            <button id="restart-btn">重新开始</button>
+        </div>
+        
+        <div class="settings-container">
+            <div class="settings-section">
+                <h3>🎮 游戏设置</h3>
+                <div class="setting-item">
+                    <label>游戏速度</label>
+                    <div class="control-group">
+                        <input type="range" id="speed-control" min="1" max="10" value="5">
+                        <span id="speed-value" class="value-display">5</span>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>幽灵数量</label>
+                    <div class="control-group">
+                        <input type="number" id="ghost-count" min="1" max="10" value="3">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h3>🔊 音效设置</h3>
+                <div class="setting-item">
+                    <label>启用音效</label>
+                    <div class="control-group">
+                        <input type="checkbox" id="enable-sound" checked>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>音量控制</label>
+                    <div class="control-group">
+                        <input type="range" id="volume-control" min="0" max="100" value="50">
+                        <span class="value-display">50%</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h3>🎨 自定义图片</h3>
+                <div class="setting-item">
+                    <label>吃豆人图片</label>
+                    <div class="control-group">
+                        <div class="file-input-wrapper">
+                            <label class="file-label" for="pacman-open-upload">张嘴图片</label>
+                            <input type="file" id="pacman-open-upload" accept="image/*">
+                        </div>
+                        <div class="file-input-wrapper">
+                            <label class="file-label" for="pacman-closed-upload">闭嘴图片</label>
+                            <input type="file" id="pacman-closed-upload" accept="image/*">
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>幽灵图片</label>
+                    <div class="control-group">
+                        <div class="file-input-wrapper">
+                            <label class="file-label" for="ghost-upload">上传图片组</label>
+                            <input type="file" id="ghost-upload" accept="image/*" multiple>
+                        </div>
+                        <small class="help-text">按编号顺序替换幽灵，图片数量不足时剩余幽灵使用默认样式</small>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>豆子图片</label>
+                    <div class="control-group">
+                        <div class="file-input-wrapper">
+                            <label class="file-label" for="dot-upload">上传豆子图片</label>
+                            <input type="file" id="dot-upload" accept="image/*">
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>胜利图片</label>
+                    <div class="control-group">
+                        <div class="file-input-wrapper">
+                            <label class="file-label" for="win-image-upload">上传胜利图片</label>
+                            <input type="file" id="win-image-upload" accept="image/*">
+                        </div>
+                    </div>
+               顶>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="game.js"></script>
+</body>
+</html>
