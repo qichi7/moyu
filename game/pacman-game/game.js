@@ -99,10 +99,10 @@ class PacmanGame {
         this.dots = [];
         this.collectDots();
         
-        // 初始化无敌果实
-        this.initializePowerFruits();
-        
         this.initializeGhosts();
+        
+        // 初始化无敌果实（在幽灵初始化之后，避免重叠）
+        this.initializePowerFruits();
     }
 
     initializeGhosts() {
@@ -153,21 +153,56 @@ class PacmanGame {
         this.isInvincible = false;
         this.invincibleTimer = 0;
         
-        // 在地图固定位置放置无敌果实（使用特殊标记值2）
-        const fruitPositions = [
+        // 定义幽灵所有可能的位置
+        const allGhostPositions = [
+            { x: 17, y: 1 },
             { x: 1, y: 13 },
             { x: 17, y: 13 },
-            { x: 9, y: 7 }
+            { x: 9, y: 1 },
+            { x: 1, y: 7 },
+            { x: 17, y: 7 },
+            { x: 9, y: 13 },
+            { x: 5, y: 1 },
+            { x: 13, y: 1 },
+            { x: 9, y: 4 }
         ];
         
-        fruitPositions.forEach(pos => {
-            // 确保位置是可通行的且没有豆子
-            const hasDot = this.dots.some(d => d.x === pos.x && d.y === pos.y);
-            if (hasDot) {
-                this.dots = this.dots.filter(d => !(d.x === pos.x && d.y === pos.y));
+        // 吃豆人初始位置
+        const pacmanPos = { x: 1, y: 1 };
+        
+        // 查找可用的无敌果实位置（避开墙壁、吃豆人、幽灵）
+        const findValidPosition = () => {
+            for (let y = 0; y < this.rows; y++) {
+                for (let x = 0; x < this.cols; x++) {
+                    // 检查是否是墙壁
+                    if (this.map[y][x] === 1) continue;
+                    
+                    // 检查是否是吃豆人位置
+                    if (x === pacmanPos.x && y === pacmanPos.y) continue;
+                    
+                    // 检查是否是幽灵位置
+                    const isGhostPos = allGhostPositions.some(g => g.x === x && g.y === y);
+                    if (isGhostPos) continue;
+                    
+                    // 检查是否已被选为无敌果实位置
+                    const isAlreadyFruit = this.powerFruits.some(f => f.x === x && f.y === y);
+                    if (isAlreadyFruit) continue;
+                    
+                    return { x, y };
+                }
             }
-            this.powerFruits.push({ x: pos.x, y: pos.y, collected: false });
-        });
+            return null;
+        };
+        
+        // 放置3个无敌果实
+        for (let i = 0; i < 3; i++) {
+            const pos = findValidPosition();
+            if (pos) {
+                // 移除该位置的豆子
+                this.dots = this.dots.filter(d => !(d.x === pos.x && d.y === pos.y));
+                this.powerFruits.push({ x: pos.x, y: pos.y, collected: false });
+            }
+        }
     }
 
     setupEventListeners() {
