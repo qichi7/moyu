@@ -83,57 +83,94 @@ class PacmanGame {
         this.canvas.width = this.cols * this.cellSize;
         this.canvas.height = this.rows * this.cellSize;
         
-        this.pacman = {
-            x: 1,
-            y: 1,
-            displayX: 1,
-            displayY: 1,
-            targetX: 1,
-            targetY: 1,
-            direction: 'right',
-            nextDirection: 'right',
-            isMoving: false,
-            moveProgress: 0
-        };
+        // 获取所有可用位置（非墙壁）
+        this.availablePositions = this.getAvailablePositions();
+        
+        // 随机初始化吃豆人位置
+        this.initializePacmanRandom();
         
         this.dots = [];
         this.collectDots();
         
-        this.initializeGhosts();
+        // 随机初始化幽灵位置
+        this.initializeGhostsRandom();
         
-        // 初始化无敌果实（在幽灵初始化之后，避免重叠）
-        this.initializePowerFruits();
+        // 随机初始化无敌果实位置
+        this.initializePowerFruitsRandom();
+    }
+    
+    getAvailablePositions() {
+        const positions = [];
+        for (let y = 0; y < this.rows; y++) {
+            for (let x = 0; x < this.cols; x++) {
+                if (this.map[y][x] === 0) {
+                    positions.push({ x, y });
+                }
+            }
+        }
+        return positions;
+    }
+    
+    getRandomPosition(excludePositions = []) {
+        // 过滤出可用位置（排除已占用的位置）
+        const available = this.availablePositions.filter(pos => {
+            return !excludePositions.some(ex => ex.x === pos.x && ex.y === pos.y);
+        });
+        
+        if (available.length === 0) return null;
+        
+        const randomIndex = Math.floor(Math.random() * available.length);
+        return available[randomIndex];
+    }
+    
+    initializePacmanRandom() {
+        const pos = this.getRandomPosition();
+        const directions = ['up', 'down', 'left', 'right'];
+        const randomDirection = directions[Math.floor(Math.random() * directions.length)];
+        
+        this.pacman = {
+            x: pos.x,
+            y: pos.y,
+            displayX: pos.x,
+            displayY: pos.y,
+            targetX: pos.x,
+            targetY: pos.y,
+            direction: randomDirection,
+            nextDirection: randomDirection,
+            isMoving: false,
+            moveProgress: 0
+        };
+        
+        // 记录吃豆人位置为已占用
+        this.occupiedPositions = [{ x: pos.x, y: pos.y }];
     }
 
-    initializeGhosts() {
+    initializeGhostsRandom() {
         const ghostColors = ['#ff0000', '#00ffff', '#ffb8ff', '#ffb852', '#00ff00', '#ff00ff', '#ffffff', '#ffff00', '#0080ff', '#ff8000'];
-        const ghostPositions = [
-            { x: 17, y: 1, direction: 'left' },
-            { x: 1, y: 13, direction: 'right' },
-            { x: 17, y: 13, direction: 'up' },
-            { x: 9, y: 1, direction: 'down' },
-            { x: 1, y: 7, direction: 'right' },
-            { x: 17, y: 7, direction: 'left' },
-            { x: 9, y: 13, direction: 'up' },
-            { x: 5, y: 1, direction: 'down' },
-            { x: 13, y: 1, direction: 'down' },
-            { x: 9, y: 4, direction: 'left' }
-        ];
+        const directions = ['up', 'down', 'left', 'right'];
         
         this.ghosts = [];
-        for (let i = 0; i < this.ghostCount && i < ghostPositions.length; i++) {
-            this.ghosts.push({
-                x: ghostPositions[i].x,
-                y: ghostPositions[i].y,
-                displayX: ghostPositions[i].x,
-                displayY: ghostPositions[i].y,
-                targetX: ghostPositions[i].x,
-                targetY: ghostPositions[i].y,
-                color: ghostColors[i % ghostColors.length],
-                direction: ghostPositions[i].direction,
-                isMoving: false,
-                moveProgress: 0
-            });
+        for (let i = 0; i < this.ghostCount; i++) {
+            const pos = this.getRandomPosition(this.occupiedPositions);
+            if (pos) {
+                const randomDirection = directions[Math.floor(Math.random() * directions.length)];
+                
+                this.ghosts.push({
+                    x: pos.x,
+                    y: pos.y,
+                    displayX: pos.x,
+                    displayY: pos.y,
+                    targetX: pos.x,
+                    targetY: pos.y,
+                    color: ghostColors[i % ghostColors.length],
+                    direction: randomDirection,
+                    isMoving: false,
+                    moveProgress: 0
+                });
+                
+                // 记录幽灵位置为已占用
+                this.occupiedPositions.push({ x: pos.x, y: pos.y });
+            }
         }
     }
 
@@ -148,59 +185,21 @@ class PacmanGame {
         }
     }
     
-    initializePowerFruits() {
+    initializePowerFruitsRandom() {
         this.powerFruits = [];
         this.isInvincible = false;
         this.invincibleTimer = 0;
         
-        // 定义幽灵所有可能的位置
-        const allGhostPositions = [
-            { x: 17, y: 1 },
-            { x: 1, y: 13 },
-            { x: 17, y: 13 },
-            { x: 9, y: 1 },
-            { x: 1, y: 7 },
-            { x: 17, y: 7 },
-            { x: 9, y: 13 },
-            { x: 5, y: 1 },
-            { x: 13, y: 1 },
-            { x: 9, y: 4 }
-        ];
-        
-        // 吃豆人初始位置
-        const pacmanPos = { x: 1, y: 1 };
-        
-        // 查找可用的无敌果实位置（避开墙壁、吃豆人、幽灵）
-        const findValidPosition = () => {
-            for (let y = 0; y < this.rows; y++) {
-                for (let x = 0; x < this.cols; x++) {
-                    // 检查是否是墙壁
-                    if (this.map[y][x] === 1) continue;
-                    
-                    // 检查是否是吃豆人位置
-                    if (x === pacmanPos.x && y === pacmanPos.y) continue;
-                    
-                    // 检查是否是幽灵位置
-                    const isGhostPos = allGhostPositions.some(g => g.x === x && g.y === y);
-                    if (isGhostPos) continue;
-                    
-                    // 检查是否已被选为无敌果实位置
-                    const isAlreadyFruit = this.powerFruits.some(f => f.x === x && f.y === y);
-                    if (isAlreadyFruit) continue;
-                    
-                    return { x, y };
-                }
-            }
-            return null;
-        };
-        
-        // 放置3个无敌果实
+        // 放置3个无敌果实，避开已占用的位置
         for (let i = 0; i < 3; i++) {
-            const pos = findValidPosition();
+            const pos = this.getRandomPosition(this.occupiedPositions);
             if (pos) {
                 // 移除该位置的豆子
                 this.dots = this.dots.filter(d => !(d.x === pos.x && d.y === pos.y));
                 this.powerFruits.push({ x: pos.x, y: pos.y, collected: false });
+                
+                // 记录果实位置为已占用
+                this.occupiedPositions.push({ x: pos.x, y: pos.y });
             }
         }
     }
