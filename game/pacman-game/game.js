@@ -21,10 +21,25 @@ class PacmanGame {
         this.dotImage = null;
         this.useCustomDotImage = false;
         
+        this.powerFruitImage = null;
+        this.useCustomPowerFruitImage = false;
+        
         this.ghostCount = 3;
         
         this.winImage = null;
         this.useCustomWinImage = false;
+        
+        this.loseImage = null;
+        this.useCustomLoseImage = false;
+        
+        // 无敌果实系统
+        this.powerFruits = [];
+        this.isInvincible = false;
+        this.invincibleTimer = 0;
+        this.invincibleDuration = 5000; // 5秒无敌时间
+        
+        // 手动获胜积分数
+        this.winScoreThreshold = null; // null表示默认（吃完豆子获胜）
         
         this.soundEnabled = true;
         this.volume = 0.5;
@@ -84,6 +99,9 @@ class PacmanGame {
         this.dots = [];
         this.collectDots();
         
+        // 初始化无敌果实
+        this.initializePowerFruits();
+        
         this.initializeGhosts();
     }
 
@@ -128,6 +146,28 @@ class PacmanGame {
                 }
             }
         }
+    }
+    
+    initializePowerFruits() {
+        this.powerFruits = [];
+        this.isInvincible = false;
+        this.invincibleTimer = 0;
+        
+        // 在地图固定位置放置无敌果实（使用特殊标记值2）
+        const fruitPositions = [
+            { x: 1, y: 13 },
+            { x: 17, y: 13 },
+            { x: 9, y: 7 }
+        ];
+        
+        fruitPositions.forEach(pos => {
+            // 确保位置是可通行的且没有豆子
+            const hasDot = this.dots.some(d => d.x === pos.x && d.y === pos.y);
+            if (hasDot) {
+                this.dots = this.dots.filter(d => !(d.x === pos.x && d.y === pos.y));
+            }
+            this.powerFruits.push({ x: pos.x, y: pos.y, collected: false });
+        });
     }
 
     setupEventListeners() {
@@ -302,6 +342,60 @@ class PacmanGame {
                 }
             });
         }
+        
+        // 失败图片上传
+        const loseImageInput = document.getElementById('lose-image-upload');
+        if (loseImageInput) {
+            loseImageInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            this.loseImage = img;
+                            this.useCustomLoseImage = true;
+                        };
+                        img.src = event.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+        }
+        
+        // 无敌果实图片上传
+        const powerFruitInput = document.getElementById('power-fruit-upload');
+        if (powerFruitInput) {
+            powerFruitInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            this.powerFruitImage = img;
+                            this.useCustomPowerFruitImage = true;
+                            this.render();
+                        };
+                        img.src = event.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+        }
+        
+        // 获胜积分数设置
+        const winScoreInput = document.getElementById('win-score-threshold');
+        if (winScoreInput) {
+            winScoreInput.addEventListener('change', (e) => {
+                const value = parseInt(e.target.value);
+                if (value > 0) {
+                    this.winScoreThreshold = value;
+                } else {
+                    this.winScoreThreshold = null;
+                }
+            });
+        }
     }
     
     setupAudio() {
@@ -419,6 +513,24 @@ class PacmanGame {
                 oscillator.start();
                 oscillator.stop(this.audioContext.currentTime + 0.5);
                 break;
+            case 'powerup':
+                // 无敌果实音效
+                oscillator.frequency.setValueAtTime(600, this.audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(1200, this.audioContext.currentTime + 0.2);
+                oscillator.type = 'sine';
+                gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.3);
+                oscillator.start();
+                oscillator.stop(this.audioContext.currentTime + 0.3);
+                break;
+            case 'eatghost':
+                // 吃幽灵音效
+                oscillator.frequency.setValueAtTime(800, this.audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(1600, this.audioContext.currentTime + 0.15);
+                oscillator.type = 'square';
+                gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.15);
+                oscillator.start();
+                oscillator.stop(this.audioContext.currentTime + 0.15);
+                break;
         }
     }
     
@@ -461,6 +573,8 @@ class PacmanGame {
         this.gameOver = false;
         this.paused = false;
         this.score = 0;
+        this.isInvincible = false;
+        this.invincibleTimer = 0;
         this.updateScore();
         this.initializeMap();
         this.render();
@@ -498,6 +612,15 @@ class PacmanGame {
         const deltaTime = timestamp - this.lastTime;
         this.lastTime = timestamp;
         
+        // 处理无敌状态计时
+        if (this.isInvincible) {
+            this.invincibleTimer -= deltaTime;
+            if (this.invincibleTimer <= 0) {
+                this.isInvincible = false;
+                this.invincibleTimer = 0;
+            }
+        }
+        
         this.moveTimer += deltaTime;
         
         if (this.moveTimer >= this.moveInterval) {
@@ -509,6 +632,12 @@ class PacmanGame {
         
         this.updateDisplayPositions(deltaTime);
         this.render();
+        
+        // 检查获胜条件
+        if (this.winScoreThreshold !== null && this.score >= this.winScoreThreshold) {
+            this.winGame();
+            return;
+        }
         
         if (this.dots.length === 0) {
             this.winGame();
@@ -705,6 +834,21 @@ class PacmanGame {
     }
 
     checkCollisions() {
+        // 检查无敌果实碰撞
+        const fruitIndex = this.powerFruits.findIndex(fruit => 
+            !fruit.collected && fruit.x === this.pacman.x && fruit.y === this.pacman.y
+        );
+        
+        if (fruitIndex !== -1) {
+            this.powerFruits[fruitIndex].collected = true;
+            this.isInvincible = true;
+            this.invincibleTimer = this.invincibleDuration;
+            this.score += 50;
+            this.updateScore();
+            this.playSound('powerup');
+        }
+        
+        // 检查豆子碰撞
         const dotIndex = this.dots.findIndex(dot => 
             dot.x === this.pacman.x && dot.y === this.pacman.y
         );
@@ -728,9 +872,39 @@ class PacmanGame {
             }, closeMouthTime);
         }
         
-        this.ghosts.forEach(ghost => {
+        // 检查幽灵碰撞
+        this.ghosts.forEach((ghost, index) => {
             if (ghost.x === this.pacman.x && ghost.y === this.pacman.y) {
-                this.loseGame();
+                if (this.isInvincible) {
+                    // 无敌状态：吃掉幽灵
+                    this.score += 100;
+                    this.updateScore();
+                    this.playSound('eatghost');
+                    // 重置幽灵位置
+                    const ghostPositions = [
+                        { x: 17, y: 1 },
+                        { x: 1, y: 13 },
+                        { x: 17, y: 13 },
+                        { x: 9, y: 1 },
+                        { x: 1, y: 7 },
+                        { x: 17, y: 7 },
+                        { x: 9, y: 13 },
+                        { x: 5, y: 1 },
+                        { x: 13, y: 1 },
+                        { x: 9, y: 4 }
+                    ];
+                    if (ghostPositions[index]) {
+                        ghost.x = ghostPositions[index].x;
+                        ghost.y = ghostPositions[index].y;
+                        ghost.displayX = ghost.x;
+                        ghost.displayY = ghost.y;
+                        ghost.targetX = ghost.x;
+                        ghost.targetY = ghost.y;
+                    }
+                } else {
+                    // 正常状态：游戏结束
+                    this.loseGame();
+                }
             }
         });
     }
@@ -768,12 +942,22 @@ class PacmanGame {
         overlay.className = 'game-over-overlay';
         
         let imageHTML = '';
-        if (isWin && this.useCustomWinImage && this.winImage) {
-            imageHTML = `<img src="${this.winImage.src}" class="win-image" alt="胜利图片">`;
+        let imageClass = '';
+        
+        if (isWin) {
+            imageClass = 'win-image shake-animation';
+            if (this.useCustomWinImage && this.winImage) {
+                imageHTML = `<img src="${this.winImage.src}" class="${imageClass}" alt="胜利图片">`;
+            }
+        } else {
+            imageClass = 'lose-image';
+            if (this.useCustomLoseImage && this.loseImage) {
+                imageHTML = `<img src="${this.loseImage.src}" class="${imageClass}" alt="失败图片">`;
+            }
         }
         
         overlay.innerHTML = `
-            <div class="game-over-content">
+            <div class="game-over-content ${isWin ? 'win-content' : 'lose-content'}">
                 ${imageHTML}
                 <h2>${title}</h2>
                 <p>${message}</p>
@@ -800,8 +984,10 @@ class PacmanGame {
         
         this.drawMap();
         this.drawDots();
+        this.drawPowerFruits();
         this.drawPacman();
         this.drawGhosts();
+        this.drawInvincibleIndicator();
     }
 
     drawMap() {
@@ -837,6 +1023,64 @@ class PacmanGame {
                 this.ctx.arc(x, y, radius, 0, Math.PI * 2);
                 this.ctx.fill();
             });
+        }
+    }
+    
+    drawPowerFruits() {
+        this.powerFruits.forEach(fruit => {
+            if (!fruit.collected) {
+                const x = fruit.x * this.cellSize;
+                const y = fruit.y * this.cellSize;
+                const size = this.cellSize;
+                
+                if (this.useCustomPowerFruitImage && this.powerFruitImage) {
+                    this.ctx.drawImage(this.powerFruitImage, x, y, size, size);
+                } else {
+                    // 默认无敌果实样式：闪烁的大豆子
+                    const centerX = x + size / 2;
+                    const centerY = y + size / 2;
+                    const radius = size / 3;
+                    
+                    // 闪烁效果
+                    const flash = Math.sin(Date.now() / 200) * 0.3 + 0.7;
+                    
+                    this.ctx.fillStyle = `rgba(0, 255, 255, ${flash})`;
+                    this.ctx.beginPath();
+                    this.ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                    this.ctx.fill();
+                    
+                    // 外圈光环
+                    this.ctx.strokeStyle = '#00ffff';
+                    this.ctx.lineWidth = 2;
+                    this.ctx.beginPath();
+                    this.ctx.arc(centerX, centerY, radius + 3, 0, Math.PI * 2);
+                    this.ctx.stroke();
+                }
+            }
+        });
+    }
+    
+    drawInvincibleIndicator() {
+        if (this.isInvincible) {
+            // 在吃豆人周围绘制闪烁光环
+            const x = this.pacman.displayX * this.cellSize + this.cellSize / 2;
+            const y = this.pacman.displayY * this.cellSize + this.cellSize / 2;
+            const radius = this.cellSize / 2 + 5;
+            
+            const flash = Math.sin(Date.now() / 100) * 0.5 + 0.5;
+            
+            this.ctx.strokeStyle = `rgba(255, 0, 255, ${flash})`;
+            this.ctx.lineWidth = 3;
+            this.ctx.beginPath();
+            this.ctx.arc(x, y, radius, 0, Math.PI * 2);
+            this.ctx.stroke();
+            
+            // 显示剩余时间
+            const seconds = Math.ceil(this.invincibleTimer / 1000);
+            this.ctx.fillStyle = '#ff00ff';
+            this.ctx.font = '12px Arial';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText(`无敌: ${seconds}s`, this.canvas.width / 2, 15);
         }
     }
 

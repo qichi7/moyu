@@ -38,6 +38,13 @@
                         <input type="number" id="ghost-count" min="1" max="10" value="3">
                     </div>
                 </div>
+                <div class="setting-item">
+                    <label>获胜积分数</label>
+                    <div class="control-group">
+                        <input type="number" id="win-score-threshold" min="0" max="10000" value="0" placeholder="0=默认">
+                        <small class="help-text">设为0时，吃完所有豆子获胜；设为其他数值时，达到积分即获胜</small>
+                    </div>
+                </div>
             </div>
             
             <div class="settings-section">
@@ -92,17 +99,35 @@
                     </div>
                 </div>
                 <div class="setting-item">
+                    <label>无敌果实图片</label>
+                    <div class="control-group">
+                        <div class="file-input-wrapper">
+                            <label class="file-label" for="power-fruit-upload">上传果实图片</label>
+                            <input type="file" id="power-fruit-upload" accept="image/*">
+                        </div>
+                        <small class="help-text">吃了无敌果实后，5秒内可以吃幽灵获得100分</small>
+                    </div>
+                </div>
+                <div class="setting-item">
                     <label>胜利图片</label>
                     <div class="control-group">
                         <div class="file-input-wrapper">
                             <label class="file-label" for="win-image-upload">上传胜利图片</label>
                             <input type="file" id="win-image-upload" accept="image/*">
                         </div>
+                        <small class="help-text">胜利时图片会有晃动效果</small>
+                        </div>
                     </div>
-               顶>
+                <div class="setting-item">
+                    <label>失败图片</label>
+                    <div class="control-group">
+                        <div class="file-input-wrapper">
+                            <label class="file-label" for="lose-image-upload">上传失败图片</label>
+                            <input type="file" id="lose-image-upload" accept="image/*">
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>
     </div>
     <script src="game.js"></script>
 </body>
