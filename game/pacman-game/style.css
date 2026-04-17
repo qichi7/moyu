@@ -417,7 +417,7 @@ body {
 
 /* 手机触屏控制区域 */
 .mobile-controls {
-    display: none;
+    display: block;
     margin-top: 20px;
     padding: 20px;
     background: rgba(255, 255, 255, 0.05);
