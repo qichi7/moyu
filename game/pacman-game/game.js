@@ -47,9 +47,9 @@ class PacmanGame {
         
         this.fps = 60;
         this.lastTime = 0;
-        this.moveTimer = 0;
         this.gameSpeed = 5;
-        this.moveInterval = 200;
+        // 移动速度：格/毫秒（speed=5时，每格200ms）
+        this.moveSpeed = 0.005; // 每毫秒移动0.005格
         
         this.initializeMap();
         this.setupEventListeners();
@@ -57,6 +57,25 @@ class PacmanGame {
         this.setupAudio();
         this.setupSpeedControl();
         this.render();
+    }
+    
+    updateMoveSpeed() {
+        // 根据游戏速度计算移动速度（格/毫秒）
+        const speedTable = {
+            1: 0.0025,  // 400ms/格
+            2: 0.00286, // 350ms/格
+            3: 0.00333, // 300ms/格
+            4: 0.004,   // 250ms/格
+            5: 0.005,   // 200ms/格（默认）
+            6: 0.00556, // 180ms/格
+            7: 0.00625, // 160ms/格
+            8: 0.00714, // 140ms/格
+            9: 0.00833, // 120ms/格
+            10: 0.01    // 100ms/格
+        };
+        this.moveSpeed = speedTable[this.gameSpeed] || 0.005;
+        // 幽灵速度略慢
+        this.ghostMoveSpeed = this.moveSpeed * 0.8;
     }
 
     initializeMap() {
@@ -128,21 +147,27 @@ class PacmanGame {
         const directions = ['up', 'down', 'left', 'right'];
         const randomDirection = directions[Math.floor(Math.random() * directions.length)];
         
+        // 浮点位置系统
         this.pacman = {
-            x: pos.x,
+            x: pos.x,           // 浮点数，实时位置
             y: pos.y,
-            displayX: pos.x,
-            displayY: pos.y,
-            targetX: pos.x,
-            targetY: pos.y,
+            gridX: pos.x,       // 整数，当前格子
+            gridY: pos.y,
+            targetGridX: pos.x, // 整数，目标格子
+            targetGridY: pos.y,
+            nextGridX: pos.x,   // 整数，下一个目标格子
+            nextGridY: pos.y,
             direction: randomDirection,
             nextDirection: randomDirection,
             isMoving: false,
-            moveProgress: 0
+            speed: this.moveSpeed,
+            isEaten: false
         };
         
         // 记录吃豆人位置为已占用
         this.occupiedPositions = [{ x: pos.x, y: pos.y }];
+        
+        this.updateMoveSpeed();
     }
 
     initializeGhostsRandom() {
@@ -155,17 +180,18 @@ class PacmanGame {
             if (pos) {
                 const randomDirection = directions[Math.floor(Math.random() * directions.length)];
                 
+                // 浮点位置系统
                 this.ghosts.push({
-                    x: pos.x,
+                    x: pos.x,           // 浮点数，实时位置
                     y: pos.y,
-                    displayX: pos.x,
-                    displayY: pos.y,
-                    targetX: pos.x,
-                    targetY: pos.y,
+                    gridX: pos.x,       // 整数，当前格子
+                    gridY: pos.y,
+                    targetGridX: pos.x, // 整数，目标格子
+                    targetGridY: pos.y,
                     color: ghostColors[i % ghostColors.length],
                     direction: randomDirection,
                     isMoving: false,
-                    moveProgress: 0,
+                    speed: this.ghostMoveSpeed,
                     isEaten: false
                 });
                 
@@ -595,11 +621,11 @@ class PacmanGame {
                 if (speedValue) {
                     speedValue.textContent = this.gameSpeed;
                 }
-                this.updateMoveInterval();
+                this.updateMoveSpeed();
             });
         }
         
-        this.updateMoveInterval();
+        this.updateMoveSpeed();
     }
     
     updateFileLabel(input, text) {
@@ -611,21 +637,7 @@ class PacmanGame {
         }
     }
     
-    updateMoveInterval() {
-        const speedIntervals = {
-            1: 400,
-            2: 350,
-            3: 300,
-            4: 250,
-            5: 200,
-            6: 180,
-            7: 160,
-            8: 140,
-            9: 120,
-            10: 100
-        };
-        this.moveInterval = speedIntervals[this.gameSpeed] || 200;
-    }
+    // 旧的updateMoveInterval已删除，由updateMoveSpeed替代
     
     initAudioContext() {
         try {
@@ -725,7 +737,6 @@ class PacmanGame {
         this.gameRunning = true;
         this.paused = false;
         this.lastTime = 0;
-        this.moveTimer = 0;
         requestAnimationFrame((ts) => this.gameLoop(ts));
     }
 
@@ -736,16 +747,17 @@ class PacmanGame {
         this.score = 0;
         this.isInvincible = false;
         this.invincibleTimer = 0;
+        this.lastTime = 0;
         this.updateScore();
         this.initializeMap();
+        this.updateMoveSpeed();
         this.render();
     }
-
+    
     togglePause() {
         this.paused = !this.paused;
         if (!this.paused) {
             this.lastTime = 0;
-            this.moveTimer = 0;
             requestAnimationFrame((ts) => this.gameLoop(ts));
         } else {
             this.drawPauseScreen();
@@ -782,19 +794,10 @@ class PacmanGame {
             }
         }
         
-        this.moveTimer += deltaTime;
+        // 每帧更新移动（浮点位置）
+        this.updateMovement(deltaTime);
         
-        if (this.moveTimer >= this.moveInterval) {
-            this.movePacman();
-            this.moveGhosts();
-            // 移动后立即检测碰撞（检测移动轨迹交叉）
-            this.checkCollisionsImmediate();
-            this.moveTimer = 0;
-        }
-        
-        this.updateDisplayPositions(deltaTime);
-        
-        // 每帧都检查碰撞（使用display位置更精确）
+        // 每帧检查碰撞
         this.checkCollisionsContinuous();
         
         this.render();
@@ -813,151 +816,251 @@ class PacmanGame {
         requestAnimationFrame((ts) => this.gameLoop(ts));
     }
     
-    updateDisplayPositions(deltaTime) {
-        const moveSpeed = deltaTime / this.moveInterval;
+    // 核心移动更新函数（浮点位置系统）
+    updateMovement(deltaTime) {
+        // 更新吃豆人移动
+        this.updatePacmanMovement(deltaTime);
         
-        if (this.pacman.isMoving) {
-            this.pacman.moveProgress += moveSpeed;
-            if (this.pacman.moveProgress >= 1) {
-                this.pacman.moveProgress = 0;
-                this.pacman.isMoving = false;
-                this.pacman.displayX = this.pacman.targetX;
-                this.pacman.displayY = this.pacman.targetY;
-                // 移动完成后检查逻辑位置碰撞
-                this.checkCollisions();
-            } else {
-                this.pacman.displayX = this.pacman.x + (this.pacman.targetX - this.pacman.x) * this.pacman.moveProgress;
-                this.pacman.displayY = this.pacman.y + (this.pacman.targetY - this.pacman.y) * this.pacman.moveProgress;
+        // 更新幽灵移动
+        this.updateGhostsMovement(deltaTime);
+        
+        // 检测碰撞
+        this.checkCollisionDuringMovement();
+    }
+    
+    // 吃豆人移动更新
+    updatePacmanMovement(deltaTime) {
+        // 如果有新方向，尝试转向
+        if (this.pacman.nextDirection !== this.pacman.direction) {
+            const nextDir = this.getDirectionOffset(this.pacman.nextDirection);
+            const nextGridX = this.pacman.gridX + nextDir.dx;
+            const nextGridY = this.pacman.gridY + nextDir.dy;
+            
+            // 只有在格子中心时才能转向
+            const atGridCenter = Math.abs(this.pacman.x - this.pacman.gridX) < 0.1 &&
+                                 Math.abs(this.pacman.y - this.pacman.gridY) < 0.1;
+            
+            if (atGridCenter && this.isValidMove(nextGridX, nextGridY)) {
+                // 不能原地回头
+                if (!this.isOppositeDirection(this.pacman.direction, this.pacman.nextDirection)) {
+                    this.pacman.direction = this.pacman.nextDirection;
+                    this.pacman.targetGridX = nextGridX;
+                    this.pacman.targetGridY = nextGridY;
+                    this.pacman.isMoving = true;
+                }
             }
         }
         
-        this.ghosts.forEach(ghost => {
-            if (ghost.isMoving) {
-                ghost.moveProgress += moveSpeed;
-                if (ghost.moveProgress >= 1) {
-                    ghost.moveProgress = 0;
-                    ghost.isMoving = false;
-                    ghost.displayX = ghost.targetX;
-                    ghost.displayY = ghost.targetY;
-                } else {
-                    ghost.displayX = ghost.x + (ghost.targetX - ghost.x) * ghost.moveProgress;
-                    ghost.displayY = ghost.y + (ghost.targetY - ghost.y) * ghost.moveProgress;
+        // 继续当前方向移动
+        if (!this.pacman.isMoving && this.pacman.direction) {
+            const dir = this.getDirectionOffset(this.pacman.direction);
+            const nextGridX = this.pacman.gridX + dir.dx;
+            const nextGridY = this.pacman.gridY + dir.dy;
+            
+            if (this.isValidMove(nextGridX, nextGridY)) {
+                this.pacman.targetGridX = nextGridX;
+                this.pacman.targetGridY = nextGridY;
+                this.pacman.isMoving = true;
+            }
+        }
+        
+        // 更新位置
+        if (this.pacman.isMoving) {
+            const dir = this.getDirectionOffset(this.pacman.direction);
+            this.pacman.x += dir.dx * this.pacman.speed * deltaTime;
+            this.pacman.y += dir.dy * this.pacman.speed * deltaTime;
+            
+            // 检查是否到达目标格子
+            if (this.hasReachedTarget(this.pacman)) {
+                this.pacman.x = this.pacman.targetGridX;
+                this.pacman.y = this.pacman.targetGridY;
+                this.pacman.gridX = this.pacman.targetGridX;
+                this.pacman.gridY = this.pacman.targetGridY;
+                this.pacman.isMoving = false;
+                
+                // 检查下一个格子是否可通行
+                const nextDir = this.getDirectionOffset(this.pacman.direction);
+                const nextGridX = this.pacman.gridX + nextDir.dx;
+                const nextGridY = this.pacman.gridY + nextDir.dy;
+                
+                if (!this.isValidMove(nextGridX, nextGridY)) {
+                    // 尝试随机转向
+                    this.tryRandomTurn(this.pacman);
                 }
             }
-        });
-        
-        // 移动过程中检测中间位置碰撞（轨迹交叉检测）
-        if (this.pacman.isMoving || this.ghosts.some(g => g.isMoving)) {
-            this.checkMidpointCollision();
         }
     }
     
-    // 检测移动过程中的中间位置碰撞（轨迹交叉检测）
-    checkMidpointCollision() {
-        this.ghosts.forEach((ghost, index) => {
-            if (this.gameOver) return;
-            
-            // 计算两者在轨迹上的位置关系
-            const pacmanStart = { x: this.pacman.x, y: this.pacman.y };
-            const pacmanEnd = { x: this.pacman.targetX, y: this.pacman.targetY };
-            const ghostStart = { x: ghost.x, y: ghost.y };
-            const ghostEnd = { x: ghost.targetX, y: ghost.targetY };
-            
-            // 检测两者是否在同一直线上移动（水平或垂直）
-            const sameHorizontalLine = pacmanStart.y === pacmanEnd.y && ghostStart.y === ghostEnd.y && pacmanStart.y === ghostStart.y;
-            const sameVerticalLine = pacmanStart.x === pacmanEnd.x && ghostStart.x === ghostEnd.x && pacmanStart.x === ghostStart.x;
-            
-            if (sameHorizontalLine || sameVerticalLine) {
-                // 计算轨迹是否相交
-                if (sameHorizontalLine) {
-                    // 水平移动
-                    const pacmanDir = pacmanEnd.x - pacmanStart.x; // 正数向右，负数向左
-                    const ghostDir = ghostEnd.x - ghostStart.x;
-                    
-                    // 相向移动检测
-                    if ((pacmanDir > 0 && ghostDir < 0) || (pacmanDir < 0 && ghostDir > 0)) {
-                        // 检测是否会相遇：起点之间有距离，终点会跨越
-                        const willCross = (pacmanStart.x < ghostStart.x && pacmanEnd.x >= ghostStart.x) ||
-                                          (pacmanStart.x > ghostStart.x && pacmanEnd.x <= ghostStart.x);
-                        
-                        if (willCross) {
-                            // 计算相遇点
-                            // 使用相对进度计算是否已经相遇
-                            const distance = Math.abs(ghostStart.x - pacmanStart.x);
-                            const pacmanProgress = this.pacman.moveProgress;
-                            const ghostProgress = ghost.isMoving ? ghost.moveProgress : 0;
-                            
-                            // 检测是否已经到达相遇点
-                            if (pacmanDir > 0 && ghostDir < 0) {
-                                // 吃豆人向右，幽灵向左
-                                const pacmanCurrent = pacmanStart.x + pacmanDir * pacmanProgress;
-                                const ghostCurrent = ghostStart.x + ghostDir * ghostProgress;
-                                
-                                if (pacmanCurrent >= ghostCurrent) {
-                                    this.handleCollision(ghost, index);
-                                }
-                            } else if (pacmanDir < 0 && ghostDir > 0) {
-                                // 吃豆人向左，幽灵向右
-                                const pacmanCurrent = pacmanStart.x + pacmanDir * pacmanProgress;
-                                const ghostCurrent = ghostStart.x + ghostDir * ghostProgress;
-                                
-                                if (pacmanCurrent <= ghostCurrent) {
-                                    this.handleCollision(ghost, index);
-                                }
-                            }
-                        }
-                    }
-                } else if (sameVerticalLine) {
-                    // 垂直移动
-                    const pacmanDir = pacmanEnd.y - pacmanStart.y; // 正数向下，负数向上
-                    const ghostDir = ghostEnd.y - ghostStart.y;
-                    
-                    // 相向移动检测
-                    if ((pacmanDir > 0 && ghostDir < 0) || (pacmanDir < 0 && ghostDir > 0)) {
-                        const willCross = (pacmanStart.y < ghostStart.y && pacmanEnd.y >= ghostStart.y) ||
-                                          (pacmanStart.y > ghostStart.y && pacmanEnd.y <= ghostStart.y);
-                        
-                        if (willCross) {
-                            if (pacmanDir > 0 && ghostDir < 0) {
-                                // 吃豆人向下，幽灵向上
-                                const pacmanCurrent = pacmanStart.y + pacmanDir * this.pacman.moveProgress;
-                                const ghostCurrent = ghostStart.y + ghostDir * (ghost.isMoving ? ghost.moveProgress : 0);
-                                
-                                if (pacmanCurrent >= ghostCurrent) {
-                                    this.handleCollision(ghost, index);
-                                }
-                            } else if (pacmanDir < 0 && ghostDir > 0) {
-                                // 吃豆人向上，幽灵向下
-                                const pacmanCurrent = pacmanStart.y + pacmanDir * this.pacman.moveProgress;
-                                const ghostCurrent = ghostStart.y + ghostDir * (ghost.isMoving ? ghost.moveProgress : 0);
-                                
-                                if (pacmanCurrent <= ghostCurrent) {
-                                    this.handleCollision(ghost, index);
-                                }
-                            }
-                        }
-                    }
+    // 幽灵移动更新
+    updateGhostsMovement(deltaTime) {
+        this.ghosts.forEach(ghost => {
+            // 如果幽灵不在移动，选择新方向
+            if (!ghost.isMoving) {
+                const validDirs = this.getValidDirections(ghost.gridX, ghost.gridY);
+                if (validDirs.length > 0) {
+                    const randomDir = validDirs[Math.floor(Math.random() * validDirs.length)];
+                    ghost.direction = randomDir;
+                    const dir = this.getDirectionOffset(randomDir);
+                    ghost.targetGridX = ghost.gridX + dir.dx;
+                    ghost.targetGridY = ghost.gridY + dir.dy;
+                    ghost.isMoving = true;
                 }
             }
             
-            // 通用碰撞检测：距离小于阈值
-            const dx = Math.abs(this.pacman.displayX - ghost.displayX);
-            const dy = Math.abs(this.pacman.displayY - ghost.displayY);
+            // 更新位置
+            if (ghost.isMoving) {
+                const dir = this.getDirectionOffset(ghost.direction);
+                ghost.x += dir.dx * ghost.speed * deltaTime;
+                ghost.y += dir.dy * ghost.speed * deltaTime;
+                
+                // 检查是否到达目标格子
+                if (this.hasReachedTarget(ghost)) {
+                    ghost.x = ghost.targetGridX;
+                    ghost.y = ghost.targetGridY;
+                    ghost.gridX = ghost.targetGridX;
+                    ghost.gridY = ghost.targetGridY;
+                    ghost.isMoving = false;
+                }
+            }
+        });
+    }
+    
+    // 检查是否到达目标格子
+    hasReachedTarget(entity) {
+        const dx = entity.targetGridX - entity.x;
+        const dy = entity.targetGridY - entity.y;
+        const dir = this.getDirectionOffset(entity.direction);
+        
+        // 根据方向检查是否已经越过或到达目标
+        if (dir.dx > 0) return entity.x >= entity.targetGridX;
+        if (dir.dx < 0) return entity.x <= entity.targetGridX;
+        if (dir.dy > 0) return entity.y >= entity.targetGridY;
+        if (dir.dy < 0) return entity.y <= entity.targetGridY;
+        return true;
+    }
+    
+    // 获取有效方向列表
+    getValidDirections(gridX, gridY) {
+        const directions = ['up', 'down', 'left', 'right'];
+        return directions.filter(dir => {
+            const offset = this.getDirectionOffset(dir);
+            return this.isValidMove(gridX + offset.dx, gridY + offset.dy);
+        });
+    }
+    
+    // 尝试随机转向
+    tryRandomTurn(entity) {
+        const leftTurns = { 'up': 'left', 'down': 'right', 'left': 'down', 'right': 'up' };
+        const rightTurns = { 'up': 'right', 'down': 'left', 'left': 'up', 'right': 'down' };
+        
+        const validTurns = [];
+        const leftDir = leftTurns[entity.direction];
+        const rightDir = rightTurns[entity.direction];
+        
+        const leftOffset = this.getDirectionOffset(leftDir);
+        const rightOffset = this.getDirectionOffset(rightDir);
+        
+        if (this.isValidMove(entity.gridX + leftOffset.dx, entity.gridY + leftOffset.dy)) {
+            validTurns.push(leftDir);
+        }
+        if (this.isValidMove(entity.gridX + rightOffset.dx, entity.gridY + rightOffset.dy)) {
+            validTurns.push(rightDir);
+        }
+        
+        if (validTurns.length > 0) {
+            entity.direction = validTurns[Math.floor(Math.random() * validTurns.length)];
+            const dir = this.getDirectionOffset(entity.direction);
+            entity.targetGridX = entity.gridX + dir.dx;
+            entity.targetGridY = entity.gridY + dir.dy;
+            entity.isMoving = true;
+        }
+    }
+    
+    // 判断是否为相反方向
+    isOppositeDirection(dir1, dir2) {
+        const opposites = { 'up': 'down', 'down': 'up', 'left': 'right', 'right': 'left' };
+        return opposites[dir1] === dir2;
+    }
+    
+    // 移动过程中的碰撞检测
+    checkCollisionDuringMovement() {
+        this.ghosts.forEach((ghost, index) => {
+            if (this.gameOver) return;
             
+            // 使用浮点位置检测碰撞
+            const dx = Math.abs(this.pacman.x - ghost.x);
+            const dy = Math.abs(this.pacman.y - ghost.y);
+            
+            // 碰撞阈值：0.4格
             if (dx < 0.4 && dy < 0.4) {
                 this.handleCollision(ghost, index);
             }
         });
     }
     
-    // 移动开始后立即检测碰撞（检测初始位置）
-    checkCollisionsImmediate() {
-        this.ghosts.forEach((ghost, index) => {
-            // 检测当前位置相同
-            if (ghost.x === this.pacman.x && ghost.y === this.pacman.y) {
-                this.handleCollision(ghost, index);
+// 检测移动过程中的中间位置碰撞（轨迹交叉检测）
+    // 旧的checkMidpointCollision和checkCollisionsImmediate已删除
+    // 碰撞检测现在由checkCollisionDuringMovement和checkCollisionsContinuous处理
+    
+    // 删除旧的movePacman和moveGhosts函数，已被updateMovement替代
+    
+    getDirectionOffset(direction) {
+        const offsets = {
+            'up': { dx: 0, dy: -1 },
+            'down': { dx: 0, dy: 1 },
+            'left': { dx: -1, dy: 0 },
+            'right': { dx: 1, dy: 0 }
+        };
+        return offsets[direction] || { dx: 0, dy: 0 };
+    }
+    
+    isValidMove(x, y) {
+        if (x < 0 || x >= this.cols || y < 0 || y >= this.rows) {
+            return false;
+        }
+        return this.map[Math.round(y)][Math.round(x)] !== 1;
+    }
+    
+    // 碰撞检测（使用浮点位置）
+    checkCollisionsContinuous() {
+        // 检查无敌果实碰撞（使用格子位置）
+        const gridX = Math.round(this.pacman.x);
+        const gridY = Math.round(this.pacman.y);
+        
+        const fruitIndex = this.powerFruits.findIndex(fruit => 
+            !fruit.collected && fruit.x === gridX && fruit.y === gridY
+        );
+        
+        if (fruitIndex !== -1) {
+            this.powerFruits[fruitIndex].collected = true;
+            this.isInvincible = true;
+            this.invincibleTimer = this.invincibleDuration;
+            this.score += 50;
+            this.updateScore();
+            this.playSound('powerup');
+        }
+        
+        // 检查豆子碰撞
+        const dotIndex = this.dots.findIndex(dot => 
+            dot.x === gridX && dot.y === gridY
+        );
+        
+        if (dotIndex !== -1) {
+            this.dots.splice(dotIndex, 1);
+            this.score += 10;
+            this.updateScore();
+            this.playSound('eat');
+            
+            if (this.pacmanMouthAnimation) {
+                clearTimeout(this.pacmanMouthAnimation);
             }
-        });
+            
+            this.pacmanMouthOpen = false;
+            this.pacmanMouthAnimation = setTimeout(() => {
+                this.pacmanMouthOpen = true;
+                this.pacmanMouthAnimation = null;
+            }, 50);
+        }
     }
     
     // 处理碰撞
@@ -965,7 +1068,6 @@ class PacmanGame {
         if (this.gameOver) return;
         
         if (this.isInvincible) {
-            // 无敌状态：吃掉幽灵
             if (!ghost.isEaten) {
                 ghost.isEaten = true;
                 this.score += 100;
@@ -974,271 +1076,25 @@ class PacmanGame {
                 this.resetGhostPosition(ghost, index);
             }
         } else {
-            // 正常状态：游戏结束
             this.loseGame();
         }
     }
     
-    // 连续碰撞检测（简化版本，主要检测豆子和果实）
-    checkCollisionsContinuous() {
-        // 检查无敌果实碰撞
-        const fruitIndex = this.powerFruits.findIndex(fruit => 
-            !fruit.collected && fruit.x === this.pacman.x && fruit.y === this.pacman.y
-        );
-        
-        if (fruitIndex !== -1) {
-            this.powerFruits[fruitIndex].collected = true;
-            this.isInvincible = true;
-            this.invincibleTimer = this.invincibleDuration;
-            this.score += 50;
-            this.updateScore();
-            this.playSound('powerup');
-        }
-        
-        // 检查豆子碰撞
-        const dotIndex = this.dots.findIndex(dot => 
-            dot.x === this.pacman.x && dot.y === this.pacman.y
-        );
-        
-        if (dotIndex !== -1) {
-            this.dots.splice(dotIndex, 1);
-            this.score += 10;
-            this.updateScore();
-            this.playSound('eat');
-            
-            if (this.pacmanMouthAnimation) {
-                clearTimeout(this.pacmanMouthAnimation);
-            }
-            
-            this.pacmanMouthOpen = false;
-            const closeMouthTime = 50;
-            
-            this.pacmanMouthAnimation = setTimeout(() => {
-                this.pacmanMouthOpen = true;
-                this.pacmanMouthAnimation = null;
-            }, closeMouthTime);
-        }
-        
-        // 幽灵碰撞由checkMidpointCollision处理，这里只做补充检测
-        // 针对静止状态的幽灵
-        this.ghosts.forEach((ghost, index) => {
-            if (!ghost.isMoving && !this.pacman.isMoving) {
-                // 两者都静止时，检测当前位置
-                if (ghost.x === this.pacman.x && ghost.y === this.pacman.y) {
-                    this.handleCollision(ghost, index);
-                }
-            }
-        });
-    }
-    
     // 重置幽灵到随机位置
     resetGhostPosition(ghost, index) {
-        const pos = this.getRandomPosition([
+        const excludePositions = [
             { x: Math.round(this.pacman.x), y: Math.round(this.pacman.y) }
-        ]);
+        ];
+        const pos = this.getRandomPosition(excludePositions);
         if (pos) {
             ghost.x = pos.x;
             ghost.y = pos.y;
-            ghost.displayX = pos.x;
-            ghost.displayY = pos.y;
-            ghost.targetX = pos.x;
-            ghost.targetY = pos.y;
+            ghost.gridX = pos.x;
+            ghost.gridY = pos.y;
+            ghost.targetGridX = pos.x;
+            ghost.targetGridY = pos.y;
+            ghost.isMoving = false;
             ghost.isEaten = false;
-        }
-    }
-
-    movePacman() {
-        const { x, y } = this.pacman;
-        let newX = x;
-        let newY = y;
-        
-        const directions = {
-            'up': { dx: 0, dy: -1 },
-            'down': { dx: 0, dy: 1 },
-            'left': { dx: -1, dy: 0 },
-            'right': { dx: 1, dy: 0 }
-        };
-        
-        const oppositeDirections = {
-            'up': 'down',
-            'down': 'up',
-            'left': 'right',
-            'right': 'left'
-        };
-        
-        const leftTurns = {
-            'up': 'left',
-            'down': 'right',
-            'left': 'down',
-            'right': 'up'
-        };
-        
-        const rightTurns = {
-            'up': 'right',
-            'down': 'left',
-            'left': 'up',
-            'right': 'down'
-        };
-        
-        const nextDir = directions[this.pacman.nextDirection];
-        const nextX = x + nextDir.dx;
-        const nextY = y + nextDir.dy;
-        
-        if (this.isValidMove(nextX, nextY)) {
-            if (this.pacman.nextDirection !== oppositeDirections[this.pacman.direction]) {
-                this.pacman.direction = this.pacman.nextDirection;
-                newX = nextX;
-                newY = nextY;
-            } else {
-                const currentDirari = directions[this.pacman.direction];
-                const currentNextX = x + currentDirari.dx;
-                const currentNextY = y + currentDirari.dy;
-                
-                if (this.isValidMove(currentNextX, currentNextY)) {
-                    newX = currentNextX;
-                    newY = currentNextY;
-                } else {
-                    const leftTurn = leftTurns[this.pacman.direction];
-                    const rightTurn = rightTurns[this.pacman.direction];
-                    
-                    const validTurns = [];
-                    if (this.isValidMove(x + directions[leftTurn].dx, y + directions[leftTurn].dy)) {
-                        validTurns.push(leftTurn);
-                    }
-                    if (this.isValidMove(x + directions[rightTurn].dx, y + directions[rightTurn].dy)) {
-                        validTurns.push(rightTurn);
-                    }
-                    
-                    if (validTurns.length > 0) {
-                        const randomTurn = validTurns[Math.floor(Math.random() * validTurns.length)];
-                        this.pacman.direction = randomTurn;
-                        const turnDir = directions[randomTurn];
-                        newX = x + turnDir.dx;
-                        newY = y + turnDir.dy;
-                    }
-                }
-            }
-        } else {
-            const currentDirari = directions[this.pacman.direction];
-            const currentNextX = x + currentDirari.dx;
-            const currentNextY = y + currentDirari.dy;
-            
-            if (this.isValidMove(currentNextX, currentNextY)) {
-                newX = currentNextX;
-                newY = currentNextY;
-            } else {
-                const leftTurn = leftTurns[this.pacman.direction];
-                const rightTurn = rightTurns[this.pacman.direction];
-                
-                const validTurns = [];
-                if (this.isValidMove(x + directions[leftTurn].dx, y + directions[leftTurn].dy)) {
-                    validTurns.push(leftTurn);
-                }
-                if (this.isValidMove(x + directions[rightTurn].dx, y + directions[rightTurn].dy)) {
-                    validTurns.push(rightTurn);
-                }
-                
-                if (validTurns.length > 0) {
-                    const randomTurn = validTurns[Math.floor(Math.random() * validTurns.length)];
-                    this.pacman.direction = randomTurn;
-                    const turnDirari = directions[randomTurn];
-                    newX = x + turnDirari.dx;
-                    newY = y + turnDirari.dy;
-                }
-            }
-        }
-        
-        if (newX !== this.pacman.x || newY !== this.pacman.y) {
-            this.pacman.x = newX;
-            this.pacman.y = newY;
-            this.pacman.targetX = newX;
-            this.pacman.targetY = newY;
-            this.pacman.isMoving = true;
-            this.pacman.moveProgress = 0;
-        }
-    }
-
-    moveGhosts() {
-        this.ghosts.forEach(ghost => {
-            const directions = ['up', 'down', 'left', 'right'];
-            const validDirections = directions.filter(dir => {
-                const { dx, dy } = this.getDirectionOffset(dir);
-                const newX = ghost.x + dx;
-                const newY = ghost.y + dy;
-                return this.isValidMove(newX, newY);
-            });
-            
-            if (validDirections.length > 0) {
-                const randomIndex = Math.floor(Math.random() * validDirections.length);
-                ghost.direction = validDirections[randomIndex];
-                const { dx, dy } = this.getDirectionOffset(ghost.direction);
-                const newX = ghost.x + dx;
-                const newY = ghost.y + dy;
-                ghost.x = newX;
-                ghost.y = newY;
-                ghost.targetX = newX;
-                ghost.targetY = newY;
-                ghost.isMoving = true;
-                ghost.moveProgress = 0;
-            }
-        });
-    }
-
-    getDirectionOffset(direction) {
-        const offsets = {
-            'up': { dx: 0, dy: -1 },
-            'down': { dx: 0, dy: 1 },
-            'left': { dx: -1, dy: 0 },
-            'right': { dx: 1, dy: 0 }
-        };
-        return offsets[direction];
-    }
-
-    isValidMove(x, y) {
-        if (x < 0 || x >= this.cols || y < 0 || y >= this.rows) {
-            return false;
-        }
-        return this.map[y][x] !== 1;
-    }
-
-    // 移动完成后的碰撞检查（逻辑位置）
-    checkCollisions() {
-        // 检查无敌果实碰撞
-        const fruitIndex = this.powerFruits.findIndex(fruit => 
-            !fruit.collected && fruit.x === this.pacman.x && fruit.y === this.pacman.y
-        );
-        
-        if (fruitIndex !== -1) {
-            this.powerFruits[fruitIndex].collected = true;
-            this.isInvincible = true;
-            this.invincibleTimer = this.invincibleDuration;
-            this.score += 50;
-            this.updateScore();
-            this.playSound('powerup');
-        }
-        
-        // 检查豆子碰撞
-        const dotIndex = this.dots.findIndex(dot => 
-            dot.x === this.pacman.x && dot.y === this.pacman.y
-        );
-        
-        if (dotIndex !== -1) {
-            this.dots.splice(dotIndex, 1);
-            this.score += 10;
-            this.updateScore();
-            this.playSound('eat');
-            
-            if (this.pacmanMouthAnimation) {
-                clearTimeout(this.pacmanMouthAnimation);
-            }
-            
-            this.pacmanMouthOpen = false;
-            const closeMouthTime = 50;
-            
-            this.pacmanMouthAnimation = setTimeout(() => {
-                this.pacmanMouthOpen = true;
-                this.pacmanMouthAnimation = null;
-            }, closeMouthTime);
         }
     }
 
@@ -1395,9 +1251,9 @@ class PacmanGame {
     
     drawInvincibleIndicator() {
         if (this.isInvincible) {
-            // 在吃豆人周围绘制闪烁光环
-            const x = this.pacman.displayX * this.cellSize + this.cellSize / 2;
-            const y = this.pacman.displayY * this.cellSize + this.cellSize / 2;
+            // 在吃豆人周围绘制闪烁光环（使用浮点位置）
+            const x = this.pacman.x * this.cellSize + this.cellSize / 2;
+            const y = this.pacman.y * this.cellSize + this.cellSize / 2;
             const radius = this.cellSize / 2 + 5;
             
             const flash = Math.sin(Date.now() / 100) * 0.5 + 0.5;
@@ -1418,8 +1274,9 @@ class PacmanGame {
     }
 
     drawPacman() {
-        const x = this.pacman.displayX * this.cellSize;
-        const y = this.pacman.displayY * this.cellSize;
+        // 使用浮点位置渲染
+        const x = this.pacman.x * this.cellSize;
+        const y = this.pacman.y * this.cellSize;
         const size = this.cellSize;
         
         if (this.useCustomPacmanImages) {
@@ -1515,8 +1372,9 @@ class PacmanGame {
 
     drawGhosts() {
         this.ghosts.forEach((ghost, index) => {
-            const x = ghost.displayX * this.cellSize;
-            const y = ghost.displayY * this.cellSize;
+            // 使用浮点位置渲染
+            const x = ghost.x * this.cellSize;
+            const y = ghost.y * this.cellSize;
             const size = this.cellSize;
             
             if (this.useCustomGhostImages && this.ghostImages[index]) {
