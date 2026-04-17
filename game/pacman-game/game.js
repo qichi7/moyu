@@ -845,64 +845,125 @@ class PacmanGame {
                 }
             }
         });
+        
+        // 移动过程中检测中间位置碰撞（轨迹交叉检测）
+        if (this.pacman.isMoving || this.ghosts.some(g => g.isMoving)) {
+            this.checkMidpointCollision();
+        }
     }
     
-    // 移动开始后立即检测碰撞（检测相向移动穿过）
-    checkCollisionsImmediate() {
-        // 检查幽灵是否与吃豆人位置相同或即将穿过
+    // 检测移动过程中的中间位置碰撞（轨迹交叉检测）
+    checkMidpointCollision() {
         this.ghosts.forEach((ghost, index) => {
-            // 检测1：当前位置相同
+            if (this.gameOver) return;
+            
+            // 计算两者在轨迹上的位置关系
+            const pacmanStart = { x: this.pacman.x, y: this.pacman.y };
+            const pacmanEnd = { x: this.pacman.targetX, y: this.pacman.targetY };
+            const ghostStart = { x: ghost.x, y: ghost.y };
+            const ghostEnd = { x: ghost.targetX, y: ghost.targetY };
+            
+            // 检测两者是否在同一直线上移动（水平或垂直）
+            const sameHorizontalLine = pacmanStart.y === pacmanEnd.y && ghostStart.y === ghostEnd.y && pacmanStart.y === ghostStart.y;
+            const sameVerticalLine = pacmanStart.x === pacmanEnd.x && ghostStart.x === ghostEnd.x && pacmanStart.x === ghostStart.x;
+            
+            if (sameHorizontalLine || sameVerticalLine) {
+                // 计算轨迹是否相交
+                if (sameHorizontalLine) {
+                    // 水平移动
+                    const pacmanDir = pacmanEnd.x - pacmanStart.x; // 正数向右，负数向左
+                    const ghostDir = ghostEnd.x - ghostStart.x;
+                    
+                    // 相向移动检测
+                    if ((pacmanDir > 0 && ghostDir < 0) || (pacmanDir < 0 && ghostDir > 0)) {
+                        // 检测是否会相遇：起点之间有距离，终点会跨越
+                        const willCross = (pacmanStart.x < ghostStart.x && pacmanEnd.x >= ghostStart.x) ||
+                                          (pacmanStart.x > ghostStart.x && pacmanEnd.x <= ghostStart.x);
+                        
+                        if (willCross) {
+                            // 计算相遇点
+                            // 使用相对进度计算是否已经相遇
+                            const distance = Math.abs(ghostStart.x - pacmanStart.x);
+                            const pacmanProgress = this.pacman.moveProgress;
+                            const ghostProgress = ghost.isMoving ? ghost.moveProgress : 0;
+                            
+                            // 检测是否已经到达相遇点
+                            if (pacmanDir > 0 && ghostDir < 0) {
+                                // 吃豆人向右，幽灵向左
+                                const pacmanCurrent = pacmanStart.x + pacmanDir * pacmanProgress;
+                                const ghostCurrent = ghostStart.x + ghostDir * ghostProgress;
+                                
+                                if (pacmanCurrent >= ghostCurrent) {
+                                    this.handleCollision(ghost, index);
+                                }
+                            } else if (pacmanDir < 0 && ghostDir > 0) {
+                                // 吃豆人向左，幽灵向右
+                                const pacmanCurrent = pacmanStart.x + pacmanDir * pacmanProgress;
+                                const ghostCurrent = ghostStart.x + ghostDir * ghostProgress;
+                                
+                                if (pacmanCurrent <= ghostCurrent) {
+                                    this.handleCollision(ghost, index);
+                                }
+                            }
+                        }
+                    }
+                } else if (sameVerticalLine) {
+                    // 垂直移动
+                    const pacmanDir = pacmanEnd.y - pacmanStart.y; // 正数向下，负数向上
+                    const ghostDir = ghostEnd.y - ghostStart.y;
+                    
+                    // 相向移动检测
+                    if ((pacmanDir > 0 && ghostDir < 0) || (pacmanDir < 0 && ghostDir > 0)) {
+                        const willCross = (pacmanStart.y < ghostStart.y && pacmanEnd.y >= ghostStart.y) ||
+                                          (pacmanStart.y > ghostStart.y && pacmanEnd.y <= ghostStart.y);
+                        
+                        if (willCross) {
+                            if (pacmanDir > 0 && ghostDir < 0) {
+                                // 吃豆人向下，幽灵向上
+                                const pacmanCurrent = pacmanStart.y + pacmanDir * this.pacman.moveProgress;
+                                const ghostCurrent = ghostStart.y + ghostDir * (ghost.isMoving ? ghost.moveProgress : 0);
+                                
+                                if (pacmanCurrent >= ghostCurrent) {
+                                    this.handleCollision(ghost, index);
+                                }
+                            } else if (pacmanDir < 0 && ghostDir > 0) {
+                                // 吃豆人向上，幽灵向下
+                                const pacmanCurrent = pacmanStart.y + pacmanDir * this.pacman.moveProgress;
+                                const ghostCurrent = ghostStart.y + ghostDir * (ghost.isMoving ? ghost.moveProgress : 0);
+                                
+                                if (pacmanCurrent <= ghostCurrent) {
+                                    this.handleCollision(ghost, index);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // 通用碰撞检测：距离小于阈值
+            const dx = Math.abs(this.pacman.displayX - ghost.displayX);
+            const dy = Math.abs(this.pacman.displayY - ghost.displayY);
+            
+            if (dx < 0.4 && dy < 0.4) {
+                this.handleCollision(ghost, index);
+            }
+        });
+    }
+    
+    // 移动开始后立即检测碰撞（检测初始位置）
+    checkCollisionsImmediate() {
+        this.ghosts.forEach((ghost, index) => {
+            // 检测当前位置相同
             if (ghost.x === this.pacman.x && ghost.y === this.pacman.y) {
                 this.handleCollision(ghost, index);
-                return;
-            }
-            
-            // 检测2：相向移动穿过
-            // 吃豆人从A移动到B，幽灵从B移动到A（目标位置互换）
-            const pacmanFrom = { x: this.pacman.x, y: this.pacman.y };
-            const pacmanTo = { x: this.pacman.targetX, y: this.pacman.targetY };
-            const ghostFrom = { x: ghost.x, y: ghost.y };
-            const ghostTo = { x: ghost.targetX, y: ghost.targetY };
-            
-            // 检查起点终点是否互换（直接穿过）
-            if (pacmanFrom.x === ghostTo.x && pacmanFrom.y === ghostTo.y &&
-                ghostFrom.x === pacmanTo.x && ghostFrom.y === pacmanTo.y) {
-                this.handleCollision(ghost, index);
-                return;
-            }
-            
-            // 检查相邻位置相向移动（会在中间相遇）
-            // 水平方向相邻且相向移动
-            if (Math.abs(pacmanFrom.y - ghostFrom.y) < 1 && 
-                pacmanFrom.x !== ghostFrom.x) {
-                const dx = Math.abs(pacmanFrom.x - ghostFrom.x);
-                if (dx <= 1) {
-                    // 检查是否相向移动
-                    if ((pacmanTo.x > pacmanFrom.x && ghostTo.x < ghostFrom.x) ||
-                        (pacmanTo.x < pacmanFrom.x && ghostTo.x > ghostFrom.x)) {
-                        this.handleCollision(ghost, index);
-                        return;
-                    }
-                }
-            }
-            
-            // 垂直方向相邻且相向移动
-            if (Math.abs(pacmanFrom.x - ghostFrom.x) < 1 && 
-                pacmanFrom.y !== ghostFrom.y) {
-                const dy = Math.abs(pacmanFrom.y - ghostFrom.y);
-                if (dy <= 1) {
-                    if ((pacmanTo.y > pacmanFrom.y && ghostTo.y < ghostFrom.y) ||
-                        (pacmanTo.y < pacmanFrom.y && ghostTo.y > ghostFrom.y)) {
-                        this.handleCollision(ghost, index);
-                        return;
-                    }
-                }
             }
         });
     }
     
     // 处理碰撞
     handleCollision(ghost, index) {
+        if (this.gameOver) return;
+        
         if (this.isInvincible) {
             // 无敌状态：吃掉幽灵
             if (!ghost.isEaten) {
@@ -918,7 +979,7 @@ class PacmanGame {
         }
     }
     
-    // 连续碰撞检测（使用display位置，更精确）
+    // 连续碰撞检测（简化版本，主要检测豆子和果实）
     checkCollisionsContinuous() {
         // 检查无敌果实碰撞
         const fruitIndex = this.powerFruits.findIndex(fruit => 
@@ -958,78 +1019,14 @@ class PacmanGame {
             }, closeMouthTime);
         }
         
-        // 检查幽灵碰撞（使用display位置，距离小于0.5格就判定碰撞）
-        // 同时检测相向移动穿过的情况
+        // 幽灵碰撞由checkMidpointCollision处理，这里只做补充检测
+        // 针对静止状态的幽灵
         this.ghosts.forEach((ghost, index) => {
-            const dx = Math.abs(this.pacman.displayX - ghost.displayX);
-            const dy = Math.abs(this.pacman.displayY - ghost.displayY);
-            
-            // 检测1：当前位置距离碰撞
-            let isColliding = dx < 0.5 && dy < 0.5;
-            
-            // 检测2：相向移动穿过检测
-            // 吃豆人从A移动到B，幽灵从B移动到A，两者会穿过
-            if (!isColliding && this.pacman.isMoving && ghost.isMoving) {
-                const pacmanFrom = { x: this.pacman.x, y: this.pacman.y };
-                const pacmanTo = { x: this.pacman.targetX, y: this.pacman.targetY };
-                const ghostFrom = { x: ghost.x, y: ghost.y };
-                const ghostTo = { x: ghost.targetX, y: ghost.targetY };
-                
-                // 检查是否相向穿过（起点终点互换）
-                if (pacmanFrom.x === ghostTo.x && pacmanFrom.y === ghostTo.y &&
-                    ghostFrom.x === pacmanTo.x && ghostFrom.y === pacmanTo.y) {
-                    isColliding = true;
+            if (!ghost.isMoving && !this.pacman.isMoving) {
+                // 两者都静止时，检测当前位置
+                if (ghost.x === this.pacman.x && ghost.y === this.pacman.y) {
+                    this.handleCollision(ghost, index);
                 }
-                
-                // 检查移动轨迹是否相交（在同一轴线上相向移动）
-                // 水平方向相向
-                if (pacmanFrom.y === pacmanTo.y && ghostFrom.y === ghostTo.y && 
-                    pacmanFrom.y === ghostFrom.y) {
-                    // 吃豆人向右，幽灵向左
-                    if (pacmanTo.x > pacmanFrom.x && ghostTo.x < ghostFrom.x) {
-                        // 检查是否穿过
-                        if (pacmanFrom.x < ghostFrom.x && pacmanTo.x >= ghostFrom.x &&
-                            ghostTo.x <= pacmanFrom.x) {
-                            isColliding = true;
-                        }
-                    }
-                    // 吃豆人向左，幽灵向右
-                    if (pacmanTo.x < pacmanFrom.x && ghostTo.x > ghostFrom.x) {
-                        if (pacmanFrom.x > ghostFrom.x && pacmanTo.x <= ghostFrom.x &&
-                            ghostTo.x >= pacmanFrom.x) {
-                            isColliding = true;
-                        }
-                    }
-                }
-                
-                // 垂直方向相向
-                if (pacmanFrom.x === pacmanTo.x && ghostFrom.x === ghostTo.x && 
-                    pacmanFrom.x === ghostFrom.x) {
-                    // 吃豆人向下，幽灵向上
-                    if (pacmanTo.y > pacmanFrom.y && ghostTo.y < ghostFrom.y) {
-                        if (pacmanFrom.y < ghostFrom.y && pacmanTo.y >= ghostFrom.y &&
-                            ghostTo.y <= pacmanFrom.y) {
-                            isColliding = true;
-                        }
-                    }
-                    // 吃豆人向上，幽灵向下
-                    if (pacmanTo.y < pacmanFrom.y && ghostTo.y > ghostFrom.y) {
-                        if (pacmanFrom.y > ghostFrom.y && pacmanTo.y <= ghostFrom.y &&
-                            ghostTo.y >= pacmanFrom.y) {
-                            isColliding = true;
-                        }
-                    }
-                }
-            }
-            
-            // 检测3：移动过程中的近距离检测（扩大检测范围）
-            if (!isColliding) {
-                // 使用更大的检测范围（0.8格）
-                isColliding = dx < 0.8 && dy < 0.8;
-            }
-            
-            if (isColliding) {
-                this.handleCollision(ghost, index);
             }
         });
     }
