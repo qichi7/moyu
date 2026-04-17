@@ -24,21 +24,19 @@
         
         <!-- 手机触屏控制区域 -->
         <div class="mobile-controls">
-            <div class="dpad-container">
-                <button class="dpad-btn dpad-up" id="btn-up">
-                    <span class="arrow-icon">▲</span>
+            <div class="joystick-container">
+                <div class="joystick-base" id="joystick-base">
+                    <div class="joystick-stick" id="joystick-stick"></div>
+                </div>
+            </div>
+            <div class="mobile-buttons">
+                <button class="mobile-btn pause-btn" id="btn-pause">
+                    <span class="btn-icon">⏸</span>
+                    <span class="btn-text">暂停</span>
                 </button>
-                <button class="dpad-btn dpad-left" id="btn-left">
-                    <span class="arrow-icon">◀</span>
-                </button>
-                <button class="dpad-btn dpad-center" id="btn-pause">
-                    <span class="pause-icon">⏸</span>
-                </button>
-                <button class="dpad-btn dpad-right" id="btn-right">
-                    <span class="arrow-icon">▶</span>
-                </button>
-                <button class="dpad-btn dpad-down" id="btn-down">
-                    <span class="arrow-icon">▼</span>
+                <button class="mobile-btn start-btn" id="mobile-start">
+                    <span class="btn-icon">▶</span>
+                    <span class="btn-text">开始</span>
                 </button>
             </div>
         </div>

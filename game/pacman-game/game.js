@@ -256,55 +256,102 @@ class PacmanGame {
     }
     
     setupMobileControls() {
-        // 方向按钮
-        const btnUp = document.getElementById('btn-up');
-        const btnDown = document.getElementById('btn-down');
-        const btnLeft = document.getElementById('btn-left');
-        const btnRight = document.getElementById('btn-right');
+        // 摇杆控制
+        const joystickBase = document.getElementById('joystick-base');
+        const joystickStick = document.getElementById('joystick-stick');
         const btnPause = document.getElementById('btn-pause');
+        const mobileStart = document.getElementById('mobile-start');
         
-        // 处理方向按钮点击
-        const handleDirection = (direction) => {
-            if (!this.gameRunning && !this.gameOver) {
-                this.startGame();
-            }
-            this.pacman.nextDirection = direction;
-        };
-        
-        // 上
-        if (btnUp) {
-            btnUp.addEventListener('touchstart', (e) => {
+        if (joystickBase && joystickStick) {
+            let isDragging = false;
+            
+            // 动态获取尺寸（避免初始化时元素未渲染）
+            const getSizes = () => {
+                const baseRect = joystickBase.getBoundingClientRect();
+                return {
+                    baseRadius: baseRect.width / 2,
+                    stickRadius: joystickStick.offsetWidth / 2,
+                    maxDistance: baseRect.width / 2 - joystickStick.offsetWidth / 2 - 5
+                };
+            };
+            
+            const handleJoystickMove = (clientX, clientY) => {
+                const sizes = getSizes();
+                const rect = joystickBase.getBoundingClientRect();
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
+                
+                let dx = clientX - centerX;
+                let dy = clientY - centerY;
+                
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance > sizes.maxDistance && sizes.maxDistance > 0) {
+                    dx = dx / distance * sizes.maxDistance;
+                    dy = dy / distance * sizes.maxDistance;
+                }
+                
+                joystickStick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+                
+                // 根据摇杆方向设置吃豆人方向
+                if (distance > 20) { // 死区阈值
+                    if (!this.gameRunning && !this.gameOver) {
+                        this.startGame();
+                    }
+                    
+                    // 判断主要方向
+                    if (Math.abs(dx) > Math.abs(dy)) {
+                        this.pacman.nextDirection = dx > 0 ? 'right' : 'left';
+                    } else {
+                        this.pacman.nextDirection = dy > 0 ? 'down' : 'up';
+                    }
+                }
+            };
+            
+            const resetJoystick = () => {
+                joystickStick.style.transform = 'translate(-50%, -50%)';
+            };
+            
+            // 触屏事件
+            joystickBase.addEventListener('touchstart', (e) => {
                 e.preventDefault();
-                handleDirection('up');
+                isDragging = true;
+                const touch = e.touches[0];
+                handleJoystickMove(touch.clientX, touch.clientY);
             });
-            btnUp.addEventListener('click', () => handleDirection('up'));
-        }
-        
-        // 下
-        if (btnDown) {
-            btnDown.addEventListener('touchstart', (e) => {
+            
+            joystickBase.addEventListener('touchmove', (e) => {
                 e.preventDefault();
-                handleDirection('down');
+                if (isDragging) {
+                    const touch = e.touches[0];
+                    handleJoystickMove(touch.clientX, touch.clientY);
+                }
             });
-            btnDown.addEventListener('click', () => handleDirection('down'));
-        }
-        
-        // 左
-        if (btnLeft) {
-            btnLeft.addEventListener('touchstart', (e) => {
+            
+            joystickBase.addEventListener('touchend', (e) => {
                 e.preventDefault();
-                handleDirection('left');
+                isDragging = false;
+                resetJoystick();
             });
-            btnLeft.addEventListener('click', () => handleDirection('left'));
-        }
-        
-        // 右
-        if (btnRight) {
-            btnRight.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                handleDirection('right');
+            
+            // 鼠标事件（用于桌面测试）
+            joystickBase.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                handleJoystickMove(e.clientX, e.clientY);
             });
-            btnRight.addEventListener('click', () => handleDirection('right'));
+            
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    handleJoystickMove(e.clientX, e.clientY);
+                }
+            });
+            
+            document.addEventListener('mouseup', () => {
+                if (isDragging) {
+                    isDragging = false;
+                    resetJoystick();
+                }
+            });
         }
         
         // 暂停按钮
@@ -325,6 +372,21 @@ class PacmanGame {
                 } else if (this.gameRunning) {
                     this.togglePause();
                 } else {
+                    this.startGame();
+                }
+            });
+        }
+        
+        // 开始按钮
+        if (mobileStart) {
+            mobileStart.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (!this.gameRunning) {
+                    this.startGame();
+                }
+            });
+            mobileStart.addEventListener('click', () => {
+                if (!this.gameRunning) {
                     this.startGame();
                 }
             });
@@ -739,11 +801,14 @@ class PacmanGame {
         if (this.moveTimer >= this.moveInterval) {
             this.movePacman();
             this.moveGhosts();
-            this.checkCollisions();
             this.moveTimer = 0;
         }
         
         this.updateDisplayPositions(deltaTime);
+        
+        // 每帧都检查碰撞（使用display位置更精确）
+        this.checkCollisionsContinuous();
+        
         this.render();
         
         // 检查获胜条件
@@ -770,6 +835,8 @@ class PacmanGame {
                 this.pacman.isMoving = false;
                 this.pacman.displayX = this.pacman.targetX;
                 this.pacman.displayY = this.pacman.targetY;
+                // 移动完成后检查逻辑位置碰撞
+                this.checkCollisions();
             } else {
                 this.pacman.displayX = this.pacman.x + (this.pacman.targetX - this.pacman.x) * this.pacman.moveProgress;
                 this.pacman.displayY = this.pacman.y + (this.pacman.targetY - this.pacman.y) * this.pacman.moveProgress;
@@ -790,6 +857,86 @@ class PacmanGame {
                 }
             }
         });
+    }
+    
+    // 连续碰撞检测（使用display位置，更精确）
+    checkCollisionsContinuous() {
+        // 检查无敌果实碰撞
+        const fruitIndex = this.powerFruits.findIndex(fruit => 
+            !fruit.collected && fruit.x === this.pacman.x && fruit.y === this.pacman.y
+        );
+        
+        if (fruitIndex !== -1) {
+            this.powerFruits[fruitIndex].collected = true;
+            this.isInvincible = true;
+            this.invincibleTimer = this.invincibleDuration;
+            this.score += 50;
+            this.updateScore();
+            this.playSound('powerup');
+        }
+        
+        // 检查豆子碰撞
+        const dotIndex = this.dots.findIndex(dot => 
+            dot.x === this.pacman.x && dot.y === this.pacman.y
+        );
+        
+        if (dotIndex !== -1) {
+            this.dots.splice(dotIndex, 1);
+            this.score += 10;
+            this.updateScore();
+            this.playSound('eat');
+            
+            if (this.pacmanMouthAnimation) {
+                clearTimeout(this.pacmanMouthAnimation);
+            }
+            
+            this.pacmanMouthOpen = false;
+            const closeMouthTime = 50;
+            
+            this.pacmanMouthAnimation = setTimeout(() => {
+                this.pacmanMouthOpen = true;
+                this.pacmanMouthAnimation = null;
+            }, closeMouthTime);
+        }
+        
+        // 检查幽灵碰撞（使用display位置，距离小于0.5格就判定碰撞）
+        this.ghosts.forEach((ghost, index) => {
+            const dx = Math.abs(this.pacman.displayX - ghost.displayX);
+            const dy = Math.abs(this.pacman.displayY - ghost.displayY);
+            
+            if (dx < 0.5 && dy < 0.5) {
+                if (this.isInvincible) {
+                    // 无敌状态：吃掉幽灵
+                    if (!ghost.isEaten) {
+                        ghost.isEaten = true;
+                        this.score += 100;
+                        this.updateScore();
+                        this.playSound('eatghost');
+                        // 重置幽灵到随机位置
+                        this.resetGhostPosition(ghost, index);
+                    }
+                } else {
+                    // 正常状态：游戏结束
+                    this.loseGame();
+                }
+            }
+        });
+    }
+    
+    // 重置幽灵到随机位置
+    resetGhostPosition(ghost, index) {
+        const pos = this.getRandomPosition([
+            { x: Math.round(this.pacman.x), y: Math.round(this.pacman.y) }
+        ]);
+        if (pos) {
+            ghost.x = pos.x;
+            ghost.y = pos.y;
+            ghost.displayX = pos.x;
+            ghost.displayY = pos.y;
+            ghost.targetX = pos.x;
+            ghost.targetY = pos.y;
+            ghost.isEaten = false;
+        }
     }
 
     movePacman() {
@@ -946,6 +1093,7 @@ class PacmanGame {
         return this.map[y][x] !== 1;
     }
 
+    // 移动完成后的碰撞检查（逻辑位置）
     checkCollisions() {
         // 检查无敌果实碰撞
         const fruitIndex = this.powerFruits.findIndex(fruit => 
@@ -984,42 +1132,6 @@ class PacmanGame {
                 this.pacmanMouthAnimation = null;
             }, closeMouthTime);
         }
-        
-        // 检查幽灵碰撞
-        this.ghosts.forEach((ghost, index) => {
-            if (ghost.x === this.pacman.x && ghost.y === this.pacman.y) {
-                if (this.isInvincible) {
-                    // 无敌状态：吃掉幽灵
-                    this.score += 100;
-                    this.updateScore();
-                    this.playSound('eatghost');
-                    // 重置幽灵位置
-                    const ghostPositions = [
-                        { x: 17, y: 1 },
-                        { x: 1, y: 13 },
-                        { x: 17, y: 13 },
-                        { x: 9, y: 1 },
-                        { x: 1, y: 7 },
-                        { x: 17, y: 7 },
-                        { x: 9, y: 13 },
-                        { x: 5, y: 1 },
-                        { x: 13, y: 1 },
-                        { x: 9, y: 4 }
-                    ];
-                    if (ghostPositions[index]) {
-                        ghost.x = ghostPositions[index].x;
-                        ghost.y = ghostPositions[index].y;
-                        ghost.displayX = ghost.x;
-                        ghost.displayY = ghost.y;
-                        ghost.targetX = ghost.x;
-                        ghost.targetY = ghost.y;
-                    }
-                } else {
-                    // 正常状态：游戏结束
-                    this.loseGame();
-                }
-            }
-        });
     }
 
     updateScore() {

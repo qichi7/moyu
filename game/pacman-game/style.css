@@ -424,6 +424,152 @@ body {
     border-radius: 15px;
 }
 
+/* 摇杆容器 */
+.joystick-container {
+    display: flex;
+    justify-content: center;
+    padding: 10px;
+}
+
+.joystick-base {
+    width: 150px;
+    height: 150px;
+    background: radial-gradient(circle, rgba(255, 235, 59, 0.2) 0%, rgba(255, 193, 7, 0.3) 100%);
+    border-radius: 50%;
+    border: 3px solid #ffeb3b;
+    position: relative;
+    touch-action: none;
+    box-shadow: 0 4px 20px rgba(255, 235, 59, 0.3);
+}
+
+.joystick-stick {
+    width: 60px;
+    height: 60px;
+    background: linear-gradient(135deg, #ffeb3b 0%, #ffc107 100%);
+    border-radius: 50%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 4px 15px rgba(255, 235, 59, 0.5);
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.joystick-stick:active {
+    background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%);
+}
+
+/* 摇杆方向指示箭头 */
+.joystick-base::before,
+.joystick-base::after {
+    content: '';
+    position: absolute;
+    font-size: 20px;
+    color: rgba(255, 235, 59, 0.5);
+}
+
+/* 按钮区域 */
+.mobile-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.mobile-btn {
+    padding: 12px 25px;
+    border-radius: 25px;
+    border: none;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+}
+
+.pause-btn {
+    background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+    color: #fff;
+    box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+}
+
+.pause-btn:active {
+    background: linear-gradient(135deg, #45a049 0%, #388e3c 100%);
+    transform: scale(0.95);
+}
+
+.start-btn {
+    background: linear-gradient(135deg, #ffeb3b 0%, #ffc107 100%);
+    color: #000;
+    box-shadow: 0 4px 15px rgba(255, 235, 59, 0.4);
+}
+
+.start-btn:active {
+    background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%);
+    transform: scale(0.95);
+}
+
+.btn-icon {
+    font-size: 20px;
+}
+
+.btn-text {
+    font-size: 14px;
+}
+
+/* 小屏幕设备显示控制按钮 */
+@media (max-width: 600px) {
+    .mobile-controls {
+        display: block;
+    }
+    
+    .joystick-base {
+        width: 120px;
+        height: 120px;
+    }
+    
+    .joystick-stick {
+        width: 50px;
+        height: 50px;
+    }
+    
+    .mobile-btn {
+        padding: 10px 20px;
+        font-size: 14px;
+    }
+}
+
+/* 平板设备也显示控制按钮 */
+@media (pointer: coarse) {
+    .mobile-controls {
+        display: block;
+    }
+}
+
+@media (max-width: 768px) {
+    .settings-container {
+        grid-template-columns: 1fr;
+    }
+    
+    .game-container {
+        padding: 20px;
+    }
+    
+    .header h1 {
+        font-size: 2em;
+    }
+    
+    .mobile-controls {
+        display: block;
+    }
+}
+
 .dpad-container {
     display: grid;
     grid-template-areas:
