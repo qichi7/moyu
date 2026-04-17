@@ -409,4 +409,131 @@ body {
     .header h1 {
         font-size: 2em;
     }
+    
+    .mobile-controls {
+        display: block;
+    }
+}
+
+/* 手机触屏控制区域 */
+.mobile-controls {
+    display: none;
+    margin-top: 20px;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 15px;
+}
+
+.dpad-container {
+    display: grid;
+    grid-template-areas:
+        " . up . "
+        "left center right"
+        " . down . ";
+    grid-template-columns: repeat(3, 70px);
+    grid-template-rows: repeat(3, 70px);
+    gap: 5px;
+    justify-content: center;
+}
+
+.dpad-btn {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    border: none;
+    background: linear-gradient(135deg, #ffeb3b 0%, #ffc107 100%);
+    color: #000;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 15px rgba(255, 235, 59, 0.4);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+}
+
+.dpad-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 20px rgba(255, 235, 59, 0.6);
+}
+
+.dpad-btn:active {
+    transform: scale(0.95);
+    background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%);
+}
+
+.dpad-up {
+    grid-area: up;
+}
+
+.dpad-down {
+    grid-area: down;
+}
+
+.dpad-left {
+    grid-area: left;
+}
+
+.dpad-right {
+    grid-area: right;
+}
+
+.dpad-center {
+    grid-area: center;
+    background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+    color: #fff;
+    box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+}
+
+.dpad-center:hover {
+    box-shadow: 0 6px 20px rgba(76, 175, 80, 0.6);
+}
+
+.dpad-center:active {
+    background: linear-gradient(135deg, #45a049 0%, #388e3c 100%);
+}
+
+.arrow-icon {
+    font-size: 28px;
+}
+
+.pause-icon {
+    font-size: 24px;
+}
+
+/* 小屏幕设备显示控制按钮 */
+@media (max-width: 600px) {
+    .mobile-controls {
+        display: block;
+    }
+    
+    .dpad-container {
+        grid-template-columns: repeat(3, 60px);
+        grid-template-rows: repeat(3, 60px);
+    }
+    
+    .dpad-btn {
+        width: 60px;
+        height: 60px;
+        font-size: 20px;
+    }
+    
+    .arrow-icon {
+        font-size: 24px;
+    }
+    
+    .pause-icon {
+        font-size: 20px;
+    }
+}
+
+/* 平板设备也显示控制按钮 */
+@media (pointer: coarse) {
+    .mobile-controls {
+        display: block;
+    }
 }

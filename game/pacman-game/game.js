@@ -250,6 +250,85 @@ class PacmanGame {
 
         document.getElementById('start-btn').addEventListener('click', () => this.startGame());
         document.getElementById('restart-btn').addEventListener('click', () => this.restartGame());
+        
+        // 移动端触屏控制按钮
+        this.setupMobileControls();
+    }
+    
+    setupMobileControls() {
+        // 方向按钮
+        const btnUp = document.getElementById('btn-up');
+        const btnDown = document.getElementById('btn-down');
+        const btnLeft = document.getElementById('btn-left');
+        const btnRight = document.getElementById('btn-right');
+        const btnPause = document.getElementById('btn-pause');
+        
+        // 处理方向按钮点击
+        const handleDirection = (direction) => {
+            if (!this.gameRunning && !this.gameOver) {
+                this.startGame();
+            }
+            this.pacman.nextDirection = direction;
+        };
+        
+        // 上
+        if (btnUp) {
+            btnUp.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                handleDirection('up');
+            });
+            btnUp.addEventListener('click', () => handleDirection('up'));
+        }
+        
+        // 下
+        if (btnDown) {
+            btnDown.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                handleDirection('down');
+            });
+            btnDown.addEventListener('click', () => handleDirection('down'));
+        }
+        
+        // 左
+        if (btnLeft) {
+            btnLeft.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                handleDirection('left');
+            });
+            btnLeft.addEventListener('click', () => handleDirection('left'));
+        }
+        
+        // 右
+        if (btnRight) {
+            btnRight.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                handleDirection('right');
+            });
+            btnRight.addEventListener('click', () => handleDirection('right'));
+        }
+        
+        // 暂停按钮
+        if (btnPause) {
+            btnPause.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (this.gameOver) {
+                    this.restartGame();
+                } else if (this.gameRunning) {
+                    this.togglePause();
+                } else {
+                    this.startGame();
+                }
+            });
+            btnPause.addEventListener('click', () => {
+                if (this.gameOver) {
+                    this.restartGame();
+                } else if (this.gameRunning) {
+                    this.togglePause();
+                } else {
+                    this.startGame();
+                }
+            });
+        }
     }
 
     setupImageUpload() {
