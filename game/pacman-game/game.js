@@ -376,21 +376,6 @@ class PacmanGame {
                 }
             });
         }
-        
-        // 开始按钮
-        if (mobileStart) {
-            mobileStart.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                if (!this.gameRunning) {
-                    this.startGame();
-                }
-            });
-            mobileStart.addEventListener('click', () => {
-                if (!this.gameRunning) {
-                    this.startGame();
-                }
-            });
-        }
     }
 
     setupImageUpload() {

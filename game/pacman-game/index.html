@@ -16,28 +16,33 @@
             </div>
         </div>
         <div class="game-area" id="game-area"></div>
-        <div class="controls">
-            <p>使用方向键控制吃豆人移动，空格键开始/暂停游戏</p>
-            <button id="start-btn">开始游戏</button>
-            <button id="restart-btn">重新开始</button>
-        </div>
         
-        <!-- 手机触屏控制区域 -->
-        <div class="mobile-controls">
-            <div class="joystick-container">
-                <div class="joystick-base" id="joystick-base">
-                    <div class="joystick-stick" id="joystick-stick"></div>
+        <!-- 控制区域 -->
+        <div class="control-area">
+            <div class="control-left">
+                <div class="joystick-container">
+                    <div class="joystick-base" id="joystick-base">
+                        <div class="joystick-stick" id="joystick-stick"></div>
+                        <div class="joystick-label">拖拽控制方向</div>
+                    </div>
                 </div>
             </div>
-            <div class="mobile-buttons">
-                <button class="mobile-btn pause-btn" id="btn-pause">
-                    <span class="btn-icon">⏸</span>
-                    <span class="btn-text">暂停</span>
-                </button>
-                <button class="mobile-btn start-btn" id="mobile-start">
-                    <span class="btn-icon">▶</span>
-                    <span class="btn-text">开始</span>
-                </button>
+            <div class="control-right">
+                <p class="control-tip">键盘：方向键移动，空格暂停</p>
+                <div class="action-buttons">
+                    <button class="action-btn start-btn" id="start-btn">
+                        <span class="btn-icon">▶</span>
+                        <span class="btn-text">开始</span>
+                    </button>
+                    <button class="action-btn pause-btn" id="btn-pause">
+                        <span class="btn-icon">⏸</span>
+                        <span class="btn-text">暂停</span>
+                    </button>
+                    <button class="action-btn restart-btn" id="restart-btn">
+                        <span class="btn-icon">🔄</span>
+                        <span class="btn-text">重开</span>
+                    </button>
+                </div>
             </div>
         </div>
         
