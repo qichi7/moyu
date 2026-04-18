@@ -144,8 +144,18 @@ class PacmanGame {
     
     initializePacmanRandom() {
         const pos = this.getRandomPosition();
-        const directions = ['up', 'down', 'left', 'right'];
-        const randomDirection = directions[Math.floor(Math.random() * directions.length)];
+        
+        // 选择一个可行的初始方向
+        const validDirs = this.getValidDirections(pos.x, pos.y);
+        let initialDirection;
+        
+        if (validDirs.length > 0) {
+            // 从可行方向中随机选择
+            initialDirection = validDirs[Math.floor(Math.random() * validDirs.length)];
+        } else {
+            // 如果没有可行方向（极端情况），随机选择一个
+            initialDirection = ['up', 'down', 'left', 'right'][Math.floor(Math.random() * 4)];
+        }
         
         // 浮点位置系统
         this.pacman = {
@@ -157,8 +167,9 @@ class PacmanGame {
             targetGridY: pos.y,
             nextGridX: pos.x,   // 整数，下一个目标格子
             nextGridY: pos.y,
-            direction: randomDirection,
-            nextDirection: randomDirection,
+            direction: initialDirection,
+            nextDirection: initialDirection,
+            lastDirection: initialDirection, // 上一个方向，用于禁止回头
             isMoving: false,
             speed: this.moveSpeed,
             isEaten: false
@@ -172,13 +183,20 @@ class PacmanGame {
 
     initializeGhostsRandom() {
         const ghostColors = ['#ff0000', '#00ffff', '#ffb8ff', '#ffb852', '#00ff00', '#ff00ff', '#ffffff', '#ffff00', '#0080ff', '#ff8000'];
-        const directions = ['up', 'down', 'left', 'right'];
         
         this.ghosts = [];
         for (let i = 0; i < this.ghostCount; i++) {
             const pos = this.getRandomPosition(this.occupiedPositions);
             if (pos) {
-                const randomDirection = directions[Math.floor(Math.random() * directions.length)];
+                // 选择可行的初始方向
+                const validDirs = this.getValidDirections(pos.x, pos.y);
+                let initialDirection;
+                
+                if (validDirs.length > 0) {
+                    initialDirection = validDirs[Math.floor(Math.random() * validDirs.length)];
+                } else {
+                    initialDirection = ['up', 'down', 'left', 'right'][Math.floor(Math.random() * 4)];
+                }
                 
                 // 浮点位置系统
                 this.ghosts.push({
@@ -189,7 +207,7 @@ class PacmanGame {
                     targetGridX: pos.x, // 整数，目标格子
                     targetGridY: pos.y,
                     color: ghostColors[i % ghostColors.length],
-                    direction: randomDirection,
+                    direction: initialDirection,
                     isMoving: false,
                     speed: this.ghostMoveSpeed,
                     isEaten: false
@@ -841,8 +859,12 @@ class PacmanGame {
                                  Math.abs(this.pacman.y - this.pacman.gridY) < 0.1;
             
             if (atGridCenter && this.isValidMove(nextGridX, nextGridY)) {
-                // 不能原地回头
-                if (!this.isOppositeDirection(this.pacman.direction, this.pacman.nextDirection)) {
+                // 如果当前正在移动，不能原地回头
+                if (this.pacman.isMoving && this.isOppositeDirection(this.pacman.direction, this.pacman.nextDirection)) {
+                    // 不允许回头
+                } else {
+                    // 允许转向
+                    this.pacman.lastDirection = this.pacman.direction;
                     this.pacman.direction = this.pacman.nextDirection;
                     this.pacman.targetGridX = nextGridX;
                     this.pacman.targetGridY = nextGridY;
@@ -861,6 +883,9 @@ class PacmanGame {
                 this.pacman.targetGridX = nextGridX;
                 this.pacman.targetGridY = nextGridY;
                 this.pacman.isMoving = true;
+            } else {
+                // 前方碰墙，尝试随机转向
+                this.tryRandomTurn(this.pacman);
             }
         }
         
@@ -948,7 +973,7 @@ class PacmanGame {
         });
     }
     
-    // 尝试随机转向
+    // 尝试随机转向（排除回头方向）
     tryRandomTurn(entity) {
         const leftTurns = { 'up': 'left', 'down': 'right', 'left': 'down', 'right': 'up' };
         const rightTurns = { 'up': 'right', 'down': 'left', 'left': 'up', 'right': 'down' };
@@ -957,14 +982,33 @@ class PacmanGame {
         const leftDir = leftTurns[entity.direction];
         const rightDir = rightTurns[entity.direction];
         
+        // 记录当前方向，防止回头
+        entity.lastDirection = entity.direction;
+        
         const leftOffset = this.getDirectionOffset(leftDir);
         const rightOffset = this.getDirectionOffset(rightDir);
         
+        // 检查左转是否可行且不是回头
         if (this.isValidMove(entity.gridX + leftOffset.dx, entity.gridY + leftOffset.dy)) {
-            validTurns.push(leftDir);
+            if (!this.isOppositeDirection(leftDir, entity.lastDirection)) {
+                validTurns.push(leftDir);
+            }
         }
+        
+        // 检查右转是否可行且不是回头
         if (this.isValidMove(entity.gridX + rightOffset.dx, entity.gridY + rightOffset.dy)) {
-            validTurns.push(rightDir);
+            if (!this.isOppositeDirection(rightDir, entity.lastDirection)) {
+                validTurns.push(rightDir);
+            }
+        }
+        
+        // 如果左右都不能走，尝试回头方向（只有当前方向和回头方向可选时才回头）
+        if (validTurns.length === 0) {
+            const oppositeDir = this.getOppositeDirection(entity.direction);
+            const oppositeOffset = this.getDirectionOffset(oppositeDir);
+            if (this.isValidMove(entity.gridX + oppositeOffset.dx, entity.gridY + oppositeOffset.dy)) {
+                validTurns.push(oppositeDir);
+            }
         }
         
         if (validTurns.length > 0) {
@@ -974,6 +1018,12 @@ class PacmanGame {
             entity.targetGridY = entity.gridY + dir.dy;
             entity.isMoving = true;
         }
+    }
+    
+    // 获取相反方向
+    getOppositeDirection(dir) {
+        const opposites = { 'up': 'down', 'down': 'up', 'left': 'right', 'right': 'left' };
+        return opposites[dir] || dir;
     }
     
     // 判断是否为相反方向
