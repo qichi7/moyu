@@ -859,9 +859,9 @@ class PacmanGame {
                                  Math.abs(this.pacman.y - this.pacman.gridY) < 0.1;
             
             if (atGridCenter && this.isValidMove(nextGridX, nextGridY)) {
-                // 如果当前正在移动，不能原地回头
-                if (this.pacman.isMoving && this.isOppositeDirection(this.pacman.direction, this.pacman.nextDirection)) {
-                    // 不允许回头
+                // 禁止回头（无论是否正在移动）
+                if (this.isOppositeDirection(this.pacman.direction, this.pacman.nextDirection)) {
+                    // 不允许回头，忽略这个方向输入
                 } else {
                     // 允许转向
                     this.pacman.lastDirection = this.pacman.direction;
@@ -973,7 +973,7 @@ class PacmanGame {
         });
     }
     
-    // 尝试随机转向（排除回头方向）
+    // 尝试随机转向（吃豆人不能回头）
     tryRandomTurn(entity) {
         const leftTurns = { 'up': 'left', 'down': 'right', 'left': 'down', 'right': 'up' };
         const rightTurns = { 'up': 'right', 'down': 'left', 'left': 'up', 'right': 'down' };
@@ -1002,12 +1002,17 @@ class PacmanGame {
             }
         }
         
-        // 如果左右都不能走，尝试回头方向（只有当前方向和回头方向可选时才回头）
+        // 吃豆人不能回头，如果没有其他选择就停止不动
+        // 幽灵可以回头（如果左右都不能走，尝试回头方向）
         if (validTurns.length === 0) {
             const oppositeDir = this.getOppositeDirection(entity.direction);
             const oppositeOffset = this.getDirectionOffset(oppositeDir);
             if (this.isValidMove(entity.gridX + oppositeOffset.dx, entity.gridY + oppositeOffset.dy)) {
-                validTurns.push(oppositeDir);
+                // 只有幽灵可以回头，吃豆人不行
+                // 判断是否是吃豆人：吃豆人有 nextDirection 属性
+                if (!entity.nextDirection) {
+                    validTurns.push(oppositeDir);
+                }
             }
         }
         
