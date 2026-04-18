@@ -54,12 +54,20 @@ class PacmanGame {
         this.mapRows = 15;
         this.mapCols = 19;
         
+        // 预生成的地图缓存
+        this.nextMapCache = null;
+        this.isGeneratingMap = false;
+        
         this.initializeMap();
         this.setupEventListeners();
         this.setupImageUpload();
         this.setupAudio();
         this.setupSpeedControl();
         this.setupRefreshMapButton();
+        
+        // 预生成下一个地图
+        this.pregenerateNextMap();
+        
         this.render();
     }
     
@@ -418,7 +426,26 @@ class PacmanGame {
         }
     }
     
-    // 刷新地图
+    // 预生成下一个地图（异步）
+    pregenerateNextMap() {
+        if (this.isGeneratingMap) return;
+        
+        this.isGeneratingMap = true;
+        
+        // 使用 setTimeout 异步生成，避免阻塞主线程
+        setTimeout(() => {
+            try {
+                this.nextMapCache = this.generateRandomMap();
+                console.log('下一个地图已预生成完成');
+            } catch (e) {
+                console.error('预生成地图失败:', e);
+                this.nextMapCache = null;
+            }
+            this.isGeneratingMap = false;
+        }, 100); // 延迟100ms开始生成
+    }
+    
+    // 刷新地图（使用预生成的地图）
     refreshMap() {
         // 停止当前游戏
         this.gameRunning = false;
@@ -432,8 +459,66 @@ class PacmanGame {
         // 更新分数显示
         this.updateScore();
         
-        // 重新生成随机地图
-        this.initializeMap();
+        // 使用预生成的地图或等待生成完成
+        if (this.nextMapCache) {
+            // 直接使用预生成的地图
+            this.map = this.nextMapCache;
+            this.nextMapCache = null;
+            console.log('使用预生成的地图');
+        } else {
+            // 如果预生成未完成，等待生成
+            if (this.isGeneratingMap) {
+                console.log('等待预生成地图完成...');
+                // 等待生成完成后再使用
+                const waitForMap = () => {
+                    if (this.nextMapCache) {
+                        this.map = this.nextMapCache;
+                        this.nextMapCache = null;
+                        this.applyNewMap();
+                    } else if (this.isGeneratingMap) {
+                        setTimeout(waitForMap, 50);
+                    } else {
+                        // 生成失败，重新生成
+                        this.map = this.generateRandomMap();
+                        this.applyNewMap();
+                    }
+                };
+                waitForMap();
+                return;
+            } else {
+                // 没有预生成，直接生成
+                this.map = this.generateRandomMap();
+                console.log('直接生成新地图');
+            }
+        }
+        
+        this.applyNewMap();
+        
+        // 立即预生成下一个地图
+        this.pregenerateNextMap();
+    }
+    
+    // 应用新地图
+    applyNewMap() {
+        this.rows = this.map.length;
+        this.cols = this.map[0].length;
+        this.canvas.width = this.cols * this.cellSize;
+        this.canvas.height = this.rows * this.cellSize;
+        
+        // 获取所有可用位置（非墙壁）
+        this.availablePositions = this.getAvailablePositions();
+        
+        // 随机初始化吃豆人位置
+        this.initializePacmanRandom();
+        
+        this.dots = [];
+        this.collectDots();
+        
+        // 随机初始化幽灵位置
+        this.initializeGhostsRandom();
+        
+        // 随机初始化无敌果实位置
+        this.initializePowerFruitsRandom();
         
         // 更新移动速度
         this.updateMoveSpeed();
