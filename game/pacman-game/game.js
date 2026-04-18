@@ -51,11 +51,15 @@ class PacmanGame {
         // 移动速度：格/毫秒（speed=5时，每格200ms）
         this.moveSpeed = 0.005; // 每毫秒移动0.005格
         
+        this.mapRows = 15;
+        this.mapCols = 19;
+        
         this.initializeMap();
         this.setupEventListeners();
         this.setupImageUpload();
         this.setupAudio();
         this.setupSpeedControl();
+        this.setupRefreshMapButton();
         this.render();
     }
     
@@ -79,23 +83,8 @@ class PacmanGame {
     }
 
     initializeMap() {
-        this.map = [
-            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-            [1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            [1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1],
-            [1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1],
-            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            [1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1],
-            [1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-            [1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1],
-            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            [1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1],
-            [1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            [1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1],
-            [1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1],
-            [1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1],
-            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-        ];
+        // 生成随机地图
+        this.map = this.generateRandomMap();
         
         this.rows = this.map.length;
         this.cols = this.map[0].length;
@@ -116,6 +105,341 @@ class PacmanGame {
         
         // 随机初始化无敌果实位置
         this.initializePowerFruitsRandom();
+    }
+    
+    // 生成随机地图
+    generateRandomMap() {
+        const rows = this.mapRows;
+        const cols = this.mapCols;
+        
+        // 初始化全为墙壁的地图
+        let map = [];
+        for (let y = 0; y < rows; y++) {
+            map[y] = [];
+            for (let x = 0; x < cols; x++) {
+                map[y][x] = 1;
+            }
+        }
+        
+        // 使用改进的随机Prim算法生成迷宫
+        // 1. 随机选择一个起始点
+        const startX = Math.floor(Math.random() * (cols - 2)) + 1;
+        const startY = Math.floor(Math.random() * (rows - 2)) + 1;
+        map[startY][startX] = 0;
+        
+        // 墙壁列表
+        let walls = [];
+        this.addWalls(map, startX, startY, walls, rows, cols);
+        
+        // Prim算法生成迷宫
+        while (walls.length > 0) {
+            // 随机选择一堵墙
+            const wallIndex = Math.floor(Math.random() * walls.length);
+            const wall = walls[wallIndex];
+            walls.splice(wallIndex, 1);
+            
+            const { x, y, nx, ny } = wall;
+            
+            // 如果新格子是墙壁，打通它
+            if (map[ny][nx] === 1) {
+                map[y][x] = 0;
+                map[ny][nx] = 0;
+                this.addWalls(map, nx, ny, walls, rows, cols);
+            }
+        }
+        
+        // 2. 增加通道密度，确保有足够的空间
+        this.addExtraPassages(map, rows, cols);
+        
+        // 3. 消除死胡同：确保每个点至少有两个方向可以移动
+        this.removeDeadEnds(map, rows, cols);
+        
+        // 4. 确保地图连通性
+        this.ensureConnectivity(map, rows, cols);
+        
+        return map;
+    }
+    
+    // 添加墙壁到列表
+    addWalls(map, x, y, walls, rows, cols) {
+        const directions = [
+            { dx: 0, dy: -1, wallY: y - 1, wallX: x, nextY: y - 2, nextX: x },
+            { dx: 0, dy: 1, wallY: y + 1, wallX: x, nextY: y + 2, nextX: x },
+            { dx: -1, dy: 0, wallY: y, wallX: x - 1, nextY: y, nextX: x - 2 },
+            { dx: 1, dy: 0, wallY: y, wallX: x + 1, nextY: y, nextX: x + 2 }
+        ];
+        
+        for (const dir of directions) {
+            // 检查墙壁和新格子是否在边界内
+            if (dir.wallX > 0 && dir.wallX < cols - 1 &&
+                dir.wallY > 0 && dir.wallY < rows - 1 &&
+                dir.nextX > 0 && dir.nextX < cols - 1 &&
+                dir.nextY > 0 && dir.nextY < rows - 1) {
+                
+                // 如果新格子是墙壁，添加到列表
+                if (map[dir.nextY][dir.nextX] === 1) {
+                    walls.push({
+                        x: dir.wallX,
+                        y: dir.wallY,
+                        nx: dir.nextX,
+                        ny: dir.nextY
+                    });
+                }
+            }
+        }
+    }
+    
+    // 增加额外通道
+    addExtraPassages(map, rows, cols) {
+        // 随机打通一些墙壁，增加通道密度
+        const extraPassages = Math.floor((rows * cols) * 0.15); // 15%的额外通道
+        
+        for (let i = 0; i < extraPassages; i++) {
+            const x = Math.floor(Math.random() * (cols - 2)) + 1;
+            const y = Math.floor(Math.random() * (rows - 2)) + 1;
+            
+            if (map[y][x] === 1) {
+                // 检查周围是否有通道
+                const neighbors = this.countNeighborPassages(map, x, y, rows, cols);
+                if (neighbors >= 1 && neighbors <= 3) {
+                    map[y][x] = 0;
+                }
+            }
+        }
+    }
+    
+    // 计算周围的通道数量
+    countNeighborPassages(map, x, y, rows, cols) {
+        let count = 0;
+        const directions = [
+            { dx: 0, dy: -1 },
+            { dx: 0, dy: 1 },
+            { dx: -1, dy: 0 },
+            { dx: 1, dy: 0 }
+        ];
+        
+        for (const dir of directions) {
+            const nx = x + dir.dx;
+            const ny = y + dir.dy;
+            if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && map[ny][nx] === 0) {
+                count++;
+            }
+        }
+        
+        return count;
+    }
+    
+    // 消除死胡同
+    removeDeadEnds(map, rows, cols) {
+        // 多次迭代消除死胡同
+        let changed = true;
+        while (changed) {
+            changed = false;
+            for (let y = 1; y < rows - 1; y++) {
+                for (let x = 1; x < cols - 1; x++) {
+                    if (map[y][x] === 0) {
+                        const passages = this.countNeighborPassages(map, x, y, rows, cols);
+                        if (passages < 2) {
+                            // 这是一个死胡同，尝试打通一个墙壁
+                            const directions = [
+                                { dx: 0, dy: -1 },
+                                { dx: 0, dy: 1 },
+                                { dx: -1, dy: 0 },
+                                { dx: 1, dy: 0 }
+                            ];
+                            
+                            // 随机打乱方向顺序
+                            directions.sort(() => Math.random() - 0.5);
+                            
+                            for (const dir of directions) {
+                                const nx = x + dir.dx;
+                                const ny = y + dir.dy;
+                                if (nx > 0 && nx < cols - 1 && ny > 0 && ny < rows - 1 && map[ny][nx] === 1) {
+                                    // 检查打通后是否能连通更多通道
+                                    const newPassages = this.countNeighborPassages(map, nx, ny, rows, cols);
+                                    if (newPassages >= 0) {
+                                        map[ny][nx] = 0;
+                                        changed = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // 确保地图连通性
+    ensureConnectivity(map, rows, cols) {
+        // 使用BFS检查连通性
+        const visited = [];
+        for (let y = 0; y < rows; y++) {
+            visited[y] = [];
+            for (let x = 0; x < cols; x++) {
+                visited[y][x] = false;
+            }
+        }
+        
+        // 找到第一个通道格子
+        let startX = -1, startY = -1;
+        for (let y = 1; y < rows - 1; y++) {
+            for (let x = 1; x < cols - 1; x++) {
+                if (map[y][x] === 0) {
+                    startX = x;
+                    startY = y;
+                    break;
+                }
+            }
+            if (startX !== -1) break;
+        }
+        
+        if (startX === -1) {
+            // 如果没有通道，创建一个中心通道
+            const centerX = Math.floor(cols / 2);
+            const centerY = Math.floor(rows / 2);
+            map[centerY][centerX] = 0;
+            return;
+        }
+        
+        // BFS遍历所有可达格子
+        const queue = [{ x: startX, y: startY }];
+        visited[startY][startX] = true;
+        
+        while (queue.length > 0) {
+            const current = queue.shift();
+            const directions = [
+                { dx: 0, dy: -1 },
+                { dx: 0, dy: 1 },
+                { dx: -1, dy: 0 },
+                { dx: 1, dy: 0 }
+            ];
+            
+            for (const dir of directions) {
+                const nx = current.x + dir.dx;
+                const ny = current.y + dir.dy;
+                
+                if (nx >= 0 && nx < cols && ny >= 0 && ny < rows &&
+                    map[ny][nx] === 0 && !visited[ny][nx]) {
+                    visited[ny][nx] = true;
+                    queue.push({ x: nx, y: ny });
+                }
+            }
+        }
+        
+        // 找出所有未连通的通道格子并打通连接
+        for (let y = 1; y < rows - 1; y++) {
+            for (let x = 1; x < cols - 1; x++) {
+                if (map[y][x] === 0 && !visited[y][x]) {
+                    // 这个格子未连通，尝试连接到已连通区域
+                    const directions = [
+                        { dx: 0, dy: -1 },
+                        { dx: 0, dy: 1 },
+                        { dx: -1, dy: 0 },
+                        { dx: 1, dy: 0 }
+                    ];
+                    
+                    for (const dir of directions) {
+                        const nx = x + dir.dx;
+                        const ny = y + dir.dy;
+                        
+                        if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && visited[ny][nx]) {
+                            // 找到已连通区域，打通连接
+                            // 可能需要打通中间的墙壁
+                            // 简化处理：直接标记为已访问
+                            visited[y][x] = true;
+                            break;
+                        }
+                    }
+                    
+                    // 如果还是未连通，打通通往最近已连通格子的路径
+                    if (!visited[y][x]) {
+                        this.connectToMainArea(map, x, y, visited, rows, cols);
+                    }
+                }
+            }
+        }
+    }
+    
+    // 将未连通区域连接到主区域
+    connectToMainArea(map, startX, startY, visited, rows, cols) {
+        // BFS找到最近的已连通格子
+        const localVisited = [];
+        for (let y = 0; y < rows; y++) {
+            localVisited[y] = [];
+            for (let x = 0; x < cols; x++) {
+                localVisited[y][x] = false;
+            }
+        }
+        
+        const queue = [{ x: startX, y: startY, path: [] }];
+        localVisited[startY][startX] = true;
+        
+        while (queue.length > 0) {
+            const current = queue.shift();
+            
+            if (visited[current.y][current.x]) {
+                // 找到已连通区域，打通路径
+                for (const point of current.path) {
+                    map[point.y][point.x] = 0;
+                    visited[point.y][point.x] = true;
+                }
+                return;
+            }
+            
+            const directions = [
+                { dx: 0, dy: -1 },
+                { dx: 0, dy: 1 },
+                { dx: -1, dy: 0 },
+                { dx: 1, dy: 0 }
+            ];
+            
+            for (const dir of directions) {
+                const nx = current.x + dir.dx;
+                const ny = current.y + dir.dy;
+                
+                if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && !localVisited[ny][nx]) {
+                    localVisited[ny][nx] = true;
+                    const newPath = [...current.path, { x: nx, y: ny }];
+                    queue.push({ x: nx, y: ny, path: newPath });
+                }
+            }
+        }
+    }
+    
+    // 设置刷新地图按钮
+    setupRefreshMapButton() {
+        const refreshMapBtn = document.getElementById('refresh-map-btn');
+        if (refreshMapBtn) {
+            refreshMapBtn.addEventListener('click', () => {
+                this.refreshMap();
+            });
+        }
+    }
+    
+    // 刷新地图
+    refreshMap() {
+        // 停止当前游戏
+        this.gameRunning = false;
+        this.gameOver = false;
+        this.paused = false;
+        this.score = 0;
+        this.isInvincible = false;
+        this.invincibleTimer = 0;
+        this.lastTime = 0;
+        
+        // 更新分数显示
+        this.updateScore();
+        
+        // 重新生成随机地图
+        this.initializeMap();
+        
+        // 更新移动速度
+        this.updateMoveSpeed();
+        
+        // 渲染新地图
+        this.render();
     }
     
     getAvailablePositions() {
