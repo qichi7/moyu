@@ -338,7 +338,7 @@ class PacmanGame {
         return has2x2;
     }
     
-    // 消除死胡同（禁止2x2正方形）
+    // 消除死胡同（优先不形成2x2，必要时强制打通）
     removeDeadEnds(map, rows, cols) {
         // 多次迭代消除死胡同
         let changed = true;
@@ -360,12 +360,26 @@ class PacmanGame {
                             // 随机打乱方向顺序
                             directions.sort(() => Math.random() - 0.5);
                             
+                            // 第一优先：不形成2x2正方形
                             for (const dir of directions) {
                                 const nx = x + dir.dx;
                                 const ny = y + dir.dy;
                                 if (nx > 0 && nx < cols - 1 && ny > 0 && ny < rows - 1 && map[ny][nx] === 1) {
-                                    // 检查打通后是否会形成2x2正方形
                                     if (!this.wouldCreate2x2Square(map, nx, ny, rows, cols)) {
+                                        map[ny][nx] = 0;
+                                        changed = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            // 如果还是死胡同（所有墙壁都会形成2x2），强制打通一个
+                            if (!changed && passages < 2) {
+                                for (const dir of directions) {
+                                    const nx = x + dir.dx;
+                                    const ny = y + dir.dy;
+                                    if (nx > 0 && nx < cols - 1 && ny > 0 && ny < rows - 1 && map[ny][nx] === 1) {
+                                        // 强制打通，消除死胡同（2x2问题会在循环中处理）
                                         map[ny][nx] = 0;
                                         changed = true;
                                         break;
@@ -1568,47 +1582,42 @@ class PacmanGame {
         });
     }
     
-    // 尝试随机转向（吃豆人不能回头）
+    // 尝试随机转向（吃豆人碰墙只能左拐或右拐，不能回头）
     tryRandomTurn(entity) {
         const leftTurns = { 'up': 'left', 'down': 'right', 'left': 'down', 'right': 'up' };
         const rightTurns = { 'up': 'right', 'down': 'left', 'left': 'up', 'right': 'down' };
         
         const validTurns = [];
-        const leftDir = leftTurns[entity.direction];
-        const rightDir = rightTurns[entity.direction];
+        const currentDir = entity.direction;
         
-        // 记录当前方向，防止回头
-        entity.lastDirection = entity.direction;
+        const leftDir = leftTurns[currentDir];
+        const rightDir = rightTurns[currentDir];
         
         const leftOffset = this.getDirectionOffset(leftDir);
         const rightOffset = this.getDirectionOffset(rightDir);
         
-        // 检查左转是否可行且不是回头
+        // 只检查左转和右转是否可行（左转和右转本身就不是回头方向）
         if (this.isValidMove(entity.gridX + leftOffset.dx, entity.gridY + leftOffset.dy)) {
-            if (!this.isOppositeDirection(leftDir, entity.lastDirection)) {
-                validTurns.push(leftDir);
-            }
+            validTurns.push(leftDir);
         }
         
-        // 检查右转是否可行且不是回头
         if (this.isValidMove(entity.gridX + rightOffset.dx, entity.gridY + rightOffset.dy)) {
-            if (!this.isOppositeDirection(rightDir, entity.lastDirection)) {
-                validTurns.push(rightDir);
-            }
+            validTurns.push(rightDir);
         }
         
         // 吃豆人不能回头，如果没有其他选择就停止不动
         // 幽灵可以回头（如果左右都不能走，尝试回头方向）
         if (validTurns.length === 0) {
-            const oppositeDir = this.getOppositeDirection(entity.direction);
-            const oppositeOffset = this.getDirectionOffset(oppositeDir);
-            if (this.isValidMove(entity.gridX + oppositeOffset.dx, entity.gridY + oppositeOffset.dy)) {
-                // 只有幽灵可以回头，吃豆人不行
-                // 判断是否是吃豆人：吃豆人有 nextDirection 属性
-                if (!entity.nextDirection) {
+            // 判断是否是吃豆人：吃豆人有 nextDirection 属性
+            if (!entity.nextDirection) {
+                // 幽灵可以回头
+                const oppositeDir = this.getOppositeDirection(currentDir);
+                const oppositeOffset = this.getDirectionOffset(oppositeDir);
+                if (this.isValidMove(entity.gridX + oppositeOffset.dx, entity.gridY + oppositeOffset.dy)) {
                     validTurns.push(oppositeDir);
                 }
             }
+            // 吃豆人没有 validTurns，保持 isMoving = false，停止不动
         }
         
         if (validTurns.length > 0) {
