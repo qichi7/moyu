@@ -159,13 +159,33 @@ class PacmanGame {
         // 2. 增加通道密度，确保有足够的空间
         this.addExtraPassages(map, rows, cols);
         
-        // 3. 消除死胡同：确保每个点至少有两个方向可以移动
-        this.removeDeadEnds(map, rows, cols);
+        // 3. 循环消除死胡同和2x2正方形，直到两者都满足
+        // 因为消除死胡同可能形成2x2正方形，消除2x2正方形可能形成死胡同
+        const maxIterations = 20;  // 最大迭代次数，避免无限循环
+        for (let i = 0; i < maxIterations; i++) {
+            // 消除死胡同
+            const hadDeadEnds = this.hasDeadEnds(map, rows, cols);
+            if (hadDeadEnds) {
+                this.removeDeadEnds(map, rows, cols);
+            }
+            
+            // 消除2x2正方形
+            const had2x2Squares = this.has2x2Squares(map, rows, cols);
+            if (had2x2Squares) {
+                this.remove2x2Squares(map, rows, cols);
+            }
+            
+            // 如果两者都没有，跳出循环
+            if (!hadDeadEnds && !had2x2Squares) {
+                break;
+            }
+        }
         
         // 4. 确保地图连通性
         this.ensureConnectivity(map, rows, cols);
         
-        // 5. 消除2x2正方形（最后检查）
+        // 5. 最终验证（最后一次消除可能产生的问题）
+        this.removeDeadEnds(map, rows, cols);
         this.remove2x2Squares(map, rows, cols);
         
         return map;
@@ -240,6 +260,34 @@ class PacmanGame {
         }
         
         return count;
+    }
+    
+    // 检查是否有死胡同
+    hasDeadEnds(map, rows, cols) {
+        for (let y = 1; y < rows - 1; y++) {
+            for (let x = 1; x < cols - 1; x++) {
+                if (map[y][x] === 0) {
+                    const passages = this.countNeighborPassages(map, x, y, rows, cols);
+                    if (passages < 2) {
+                        return true;  // 有死胡同
+                    }
+                }
+            }
+        }
+        return false;  // 没有死胡同
+    }
+    
+    // 检查是否有2x2正方形
+    has2x2Squares(map, rows, cols) {
+        for (let y = 1; y < rows - 2; y++) {
+            for (let x = 1; x < cols - 2; x++) {
+                if (map[y][x] === 0 && map[y][x+1] === 0 && 
+                    map[y+1][x] === 0 && map[y+1][x+1] === 0) {
+                    return true;  // 有2x2正方形
+                }
+            }
+        }
+        return false;  // 没有2x2正方形
     }
     
     // 检查打通某个格子后是否会形成2x2正方形
@@ -468,12 +516,17 @@ class PacmanGame {
         }
     }
     
-    // 消除2x2正方形（最终检查）
+    // 消除2x2正方形（确保不造成死胡同）
     remove2x2Squares(map, rows, cols) {
         // 多次迭代，直到没有2x2正方形
         let has2x2 = true;
-        while (has2x2) {
+        let iterations = 0;
+        const maxIterations = 100;  // 最大迭代次数
+        
+        while (has2x2 && iterations < maxIterations) {
             has2x2 = false;
+            iterations++;
+            
             for (let y = 1; y < rows - 2; y++) {
                 for (let x = 1; x < cols - 2; x++) {
                     // 检查是否存在2x2正方形
@@ -481,7 +534,6 @@ class PacmanGame {
                         map[y+1][x] === 0 && map[y+1][x+1] === 0) {
                         
                         // 找到2x2正方形，需要将其中一个格子变为墙壁
-                        // 选择变成墙壁的格子：优先选择不会造成死胡同的格子
                         const candidates = [
                             { x: x, y: y },
                             { x: x+1, y: y },
@@ -489,37 +541,65 @@ class PacmanGame {
                             { x: x+1, y: y+1 }
                         ];
                         
+                        // 随机打乱顺序
+                        candidates.sort(() => Math.random() - 0.5);
+                        
                         // 找一个合适的格子变成墙壁
                         for (const candidate of candidates) {
-                            // 临时变成墙壁，检查是否会造成死胡同或断开连通性
-                            const originalValue = map[candidate.y][candidate.x];
-                            map[candidate.y][candidate.x] = 1;
-                            
-                            // 检查周围3个格子是否都还能保持至少2个通道
-                            const otherThree = candidates.filter(c => c.x !== candidate.x || c.y !== candidate.y);
-                            let allValid = true;
-                            
-                            for (const other of otherThree) {
-                                const passages = this.countNeighborPassages(map, other.x, other.y, rows, cols);
-                                if (passages < 2) {
-                                    allValid = false;
-                                    break;
-                                }
-                            }
-                            
-                            if (allValid) {
-                                // 这个格子可以变成墙壁
+                            // 检查将这个格子变成墙壁后是否会造成死胡同
+                            if (this.canConvertToWall(map, candidate.x, candidate.y, rows, cols)) {
+                                map[candidate.y][candidate.x] = 1;
                                 has2x2 = true;
                                 break;
-                            } else {
-                                // 恢复原值
-                                map[candidate.y][candidate.x] = originalValue;
                             }
+                        }
+                        
+                        // 如果找到2x2正方形但无法消除，跳过（等后续迭代处理）
+                        if (has2x2) {
+                            break;  // 找到一个就处理，然后重新扫描
                         }
                     }
                 }
+                if (has2x2) {
+                    break;
+                }
             }
         }
+    }
+    
+    // 检查某个格子是否可以变成墙壁（不造成死胡同）
+    canConvertToWall(map, x, y, rows, cols) {
+        // 临时变成墙壁
+        const originalValue = map[y][x];
+        map[y][x] = 1;
+        
+        // 检查所有邻居（包括不在2x2内的邻居）
+        const neighbors = [
+            { dx: 0, dy: -1 },
+            { dx: 0, dy: 1 },
+            { dx: -1, dy: 0 },
+            { dx: 1, dy: 0 }
+        ];
+        
+        let allValid = true;
+        for (const neighbor of neighbors) {
+            const nx = x + neighbor.dx;
+            const ny = y + neighbor.dy;
+            
+            // 检查邻居格子是否变成死胡同
+            if (nx > 0 && nx < cols - 1 && ny > 0 && ny < rows - 1 && map[ny][nx] === 0) {
+                const passages = this.countNeighborPassages(map, nx, ny, rows, cols);
+                if (passages < 2) {
+                    allValid = false;
+                    break;
+                }
+            }
+        }
+        
+        // 恢复原值
+        map[y][x] = originalValue;
+        
+        return allValid;
     }
     
     // 设置刷新地图按钮
