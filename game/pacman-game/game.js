@@ -165,6 +165,9 @@ class PacmanGame {
         // 4. 确保地图连通性
         this.ensureConnectivity(map, rows, cols);
         
+        // 5. 消除2x2正方形（最后检查）
+        this.remove2x2Squares(map, rows, cols);
+        
         return map;
     }
     
@@ -197,7 +200,7 @@ class PacmanGame {
         }
     }
     
-    // 增加额外通道
+    // 增加额外通道（禁止2x2正方形）
     addExtraPassages(map, rows, cols) {
         // 随机打通一些墙壁，增加通道密度
         const extraPassages = Math.floor((rows * cols) * 0.15); // 15%的额外通道
@@ -209,7 +212,9 @@ class PacmanGame {
             if (map[y][x] === 1) {
                 // 检查周围是否有通道
                 const neighbors = this.countNeighborPassages(map, x, y, rows, cols);
-                if (neighbors >= 1 && neighbors <= 3) {
+                // 检查打通后是否会形成2x2正方形
+                if (neighbors >= 1 && neighbors <= 3 && 
+                    !this.wouldCreate2x2Square(map, x, y, rows, cols)) {
                     map[y][x] = 0;
                 }
             }
@@ -237,7 +242,55 @@ class PacmanGame {
         return count;
     }
     
-    // 消除死胡同
+    // 检查打通某个格子后是否会形成2x2正方形
+    wouldCreate2x2Square(map, x, y, rows, cols) {
+        // 临时打通该格子
+        const originalValue = map[y][x];
+        map[y][x] = 0;
+        
+        // 检查以(x,y)为四个角的任意一个2x2区域
+        // 需要检查4种情况：当前格子作为左上、右上、左下、右下角
+        let has2x2 = false;
+        
+        // 检查当前格子作为左上角的2x2区域
+        if (y + 1 < rows && x + 1 < cols) {
+            if (map[y][x] === 0 && map[y][x+1] === 0 && 
+                map[y+1][x] === 0 && map[y+1][x+1] === 0) {
+                has2x2 = true;
+            }
+        }
+        
+        // 检查当前格子作为右上角的2x2区域
+        if (!has2x2 && y + 1 < rows && x - 1 >= 0) {
+            if (map[y][x-1] === 0 && map[y][x] === 0 && 
+                map[y+1][x-1] === 0 && map[y+1][x] === 0) {
+                has2x2 = true;
+            }
+        }
+        
+        // 检查当前格子作为左下角的2x2区域
+        if (!has2x2 && y - 1 >= 0 && x + 1 < cols) {
+            if (map[y-1][x] === 0 && map[y-1][x+1] === 0 && 
+                map[y][x] === 0 && map[y][x+1] === 0) {
+                has2x2 = true;
+            }
+        }
+        
+        // 检查当前格子作为右下角的2x2区域
+        if (!has2x2 && y - 1 >= 0 && x - 1 >= 0) {
+            if (map[y-1][x-1] === 0 && map[y-1][x] === 0 && 
+                map[y][x-1] === 0 && map[y][x] === 0) {
+                has2x2 = true;
+            }
+        }
+        
+        // 恢复原值
+        map[y][x] = originalValue;
+        
+        return has2x2;
+    }
+    
+    // 消除死胡同（禁止2x2正方形）
     removeDeadEnds(map, rows, cols) {
         // 多次迭代消除死胡同
         let changed = true;
@@ -263,9 +316,8 @@ class PacmanGame {
                                 const nx = x + dir.dx;
                                 const ny = y + dir.dy;
                                 if (nx > 0 && nx < cols - 1 && ny > 0 && ny < rows - 1 && map[ny][nx] === 1) {
-                                    // 检查打通后是否能连通更多通道
-                                    const newPassages = this.countNeighborPassages(map, nx, ny, rows, cols);
-                                    if (newPassages >= 0) {
+                                    // 检查打通后是否会形成2x2正方形
+                                    if (!this.wouldCreate2x2Square(map, nx, ny, rows, cols)) {
                                         map[ny][nx] = 0;
                                         changed = true;
                                         break;
@@ -411,6 +463,60 @@ class PacmanGame {
                     localVisited[ny][nx] = true;
                     const newPath = [...current.path, { x: nx, y: ny }];
                     queue.push({ x: nx, y: ny, path: newPath });
+                }
+            }
+        }
+    }
+    
+    // 消除2x2正方形（最终检查）
+    remove2x2Squares(map, rows, cols) {
+        // 多次迭代，直到没有2x2正方形
+        let has2x2 = true;
+        while (has2x2) {
+            has2x2 = false;
+            for (let y = 1; y < rows - 2; y++) {
+                for (let x = 1; x < cols - 2; x++) {
+                    // 检查是否存在2x2正方形
+                    if (map[y][x] === 0 && map[y][x+1] === 0 && 
+                        map[y+1][x] === 0 && map[y+1][x+1] === 0) {
+                        
+                        // 找到2x2正方形，需要将其中一个格子变为墙壁
+                        // 选择变成墙壁的格子：优先选择不会造成死胡同的格子
+                        const candidates = [
+                            { x: x, y: y },
+                            { x: x+1, y: y },
+                            { x: x, y: y+1 },
+                            { x: x+1, y: y+1 }
+                        ];
+                        
+                        // 找一个合适的格子变成墙壁
+                        for (const candidate of candidates) {
+                            // 临时变成墙壁，检查是否会造成死胡同或断开连通性
+                            const originalValue = map[candidate.y][candidate.x];
+                            map[candidate.y][candidate.x] = 1;
+                            
+                            // 检查周围3个格子是否都还能保持至少2个通道
+                            const otherThree = candidates.filter(c => c.x !== candidate.x || c.y !== candidate.y);
+                            let allValid = true;
+                            
+                            for (const other of otherThree) {
+                                const passages = this.countNeighborPassages(map, other.x, other.y, rows, cols);
+                                if (passages < 2) {
+                                    allValid = false;
+                                    break;
+                                }
+                            }
+                            
+                            if (allValid) {
+                                // 这个格子可以变成墙壁
+                                has2x2 = true;
+                                break;
+                            } else {
+                                // 恢复原值
+                                map[candidate.y][candidate.x] = originalValue;
+                            }
+                        }
+                    }
                 }
             }
         }
