@@ -174,21 +174,10 @@
                 <button class="tab-btn" data-tab="week">本周榜</button>
                 <button class="tab-btn" data-tab="all">总榜</button>
             </div>
-            <div class="leaderboard-api-config" id="gist-config-section">
-                <h4>GitHub Gist 配置</h4>
-                <div class="config-item">
-                    <label>Gist ID：</label>
-                    <input type="text" id="gist-id" placeholder="如：abc123def456" style="width: 100%; padding: 8px; margin-top: 5px; background: rgba(0,0,0,0.5); border: 1px solid #444; border-radius: 5px; color: #fff;">
-                    <small style="color: #888;">创建 Gist 后，URL 最后一段就是 ID</small>
-                </div>
-                <div class="config-item">
-                    <label>Gist Token：</label>
-                    <input type="text" id="gist-token" placeholder="如：ghp_xxxxx" style="width: 100%; padding: 8px; margin-top: 5px; background: rgba(0,0,0,0.5); border: 1px solid #444; border-radius: 5px; color: #fff;">
-                    <small style="color: #888;">保存成绩需要 Token，只读取不需要</small>
-                </div>
-                <button id="save-gist-btn" style="margin-top: 10px; padding: 8px 16px; background: linear-gradient(135deg, #4caf50 0%, #45a049 100%); color: #fff; border: none; border-radius: 15px; cursor: pointer;">保存配置</button>
-                <a href="https://gist.github.com/" target="_blank" style="margin-left: 10px; color: #ffeb3b;">创建 Gist</a>
-                <a href="https://github.com/settings/tokens" target="_blank" style="margin-left: 10px; color: #ffeb3b;">创建 Token</a>
+            <div class="leaderboard-api-config" id="gist-config-section" style="display: none;">
+                <!-- Gist ID 已硬编码到代码中，Token 在保存成绩时输入 -->
+                <small style="color: #888; display: block; margin-bottom: 10px;">排行榜数据存储在 GitHub Gist，保存成绩时需要输入 Token</small>
+                <a href="https://github.com/settings/tokens" target="_blank" style="color: #ffeb3b;">创建 Token（需要 gist 权限）</a>
             </div>
             <div class="leaderboard-table-container">
                 <table class="leaderboard-table" id="leaderboard-table">

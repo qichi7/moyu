@@ -1,10 +1,15 @@
 // 排行榜管理类（GitHub Gist）
 class LeaderboardManager {
+    // ========== 硬编码配置（请修改此处）==========
+    // 在创建 Gist 后，将 URL 最后一段的哈希字符串填入此处
+    // 例如：https://gist.github.com/qichi7/abc123def456 -> ID 是 abc123def456
+    static HARDCODED_GIST_ID = '81ae842d7a71d3150bcf18f9578a47b1'; // 硬编码 Gist ID
+    
     constructor() {
         this.maxEntries = 10;
         
-        // GitHub Gist 配置
-        this.gistId = localStorage.getItem('pacmanGistId') || '';
+        // GitHub Gist 配置 - 硬编码 ID，Token 临时输入
+        this.gistId = LeaderboardManager.HARDCODED_GIST_ID;
         this.gistToken = localStorage.getItem('pacmanGistToken') || '';
         this.gistFilename = 'leaderboard.json';
         
@@ -12,14 +17,13 @@ class LeaderboardManager {
         this.cacheKey = 'pacmanLeaderboardCache';
     }
     
-    // GitHub Gist 配置
-    setGistConfig(gistId, gistToken = null) {
-        this.gistId = gistId;
-        this.gistToken = gistToken || '';
-        localStorage.setItem('pacmanGistId', gistId);
-        localStorage.setItem('pacmanGistToken', gistToken || '');
+    // 设置 Token（用于保存成绩）
+    setToken(token) {
+        this.gistToken = token;
+        localStorage.setItem('pacmanGistToken', token);
     }
     
+    // 获取硬编码的 Gist ID
     getGistId() {
         return this.gistId;
     }
@@ -28,7 +32,7 @@ class LeaderboardManager {
         return this.gistToken;
     }
     
-    // 是否已配置 Gist
+    // 是否已配置 Gist（ID 硬编码后始终返回 true）
     isConfigured() {
         return this.gistId !== '';
     }
@@ -871,38 +875,23 @@ class PacmanGame {
             });
         });
         
-        // Gist 配置初始化
-        const gistIdInput = document.getElementById('gist-id');
-        const gistTokenInput = document.getElementById('gist-token');
-        
-        if (gistIdInput) gistIdInput.value = this.leaderboardManager.getGistId();
-        if (gistTokenInput) gistTokenInput.value = this.leaderboardManager.getGistToken();
-        
-        // Gist 配置保存
-        const saveGistBtn = document.getElementById('save-gist-btn');
-        
-        if (saveGistBtn) {
-            saveGistBtn.addEventListener('click', () => {
-                const gistId = gistIdInput ? gistIdInput.value.trim() : '';
-                const gistToken = gistTokenInput ? gistTokenInput.value.trim() : '';
-                
-                if (gistId) {
-                    this.leaderboardManager.setGistConfig(gistId, gistToken);
-                    alert('GitHub Gist 配置已保存！');
-                    this.updateLeaderboardTable('all');
-                } else {
-                    alert('请输入 Gist ID！');
-                }
-            });
-        }
-        
-        // 清空按钮
+        // 清空按钮（需要 Token）
         const clearBtn = document.getElementById('clear-leaderboard');
         if (clearBtn) {
             clearBtn.addEventListener('click', async () => {
-                if (confirm('确定要清空排行榜吗？此操作不可恢复！')) {
-                    await this.leaderboardManager.clearLeaderboard();
-                    this.updateLeaderboardTable('all');
+                // 检查是否有 Token
+                if (!this.leaderboardManager.getGistToken()) {
+                    this.showTokenInputForAction('clear', () => {
+                        if (confirm('确定要清空排行榜吗？此操作不可恢复！')) {
+                            this.leaderboardManager.clearLeaderboard();
+                            this.updateLeaderboardTable('all');
+                        }
+                    });
+                } else {
+                    if (confirm('确定要清空排行榜吗？此操作不可恢复！')) {
+                        await this.leaderboardManager.clearLeaderboard();
+                        this.updateLeaderboardTable('all');
+                    }
                 }
             });
         }
@@ -1015,28 +1004,35 @@ class PacmanGame {
         // 自动聚焦输入框
         nameInput.focus();
         
-        // 提交按钮
+        // 提交按钮 - 检查 Token
         submitBtn.addEventListener('click', async () => {
             const name = nameInput.value.trim();
             if (name.length >= 3 && name.length <= 12) {
-                // 显示保存提示
-                submitBtn.disabled = true;
-                submitBtn.textContent = '保存中...';
-                
-                try {
-                    const success = await this.leaderboardManager.addEntry(name, score, isWin);
+                // 检查是否有 Token
+                if (!this.leaderboardManager.getGistToken()) {
+                    // 没有 Token，弹出 Token 输入框
                     overlay.remove();
-                    if (success) {
-                        this.showSuccessMessage(name, score, isWin);
-                    } else {
-                        alert('保存失败，分数未超过现有记录或API不可用');
+                    this.showTokenInputForSave(name, score, isWin);
+                } else {
+                    // 有 Token，直接保存
+                    submitBtn.disabled = true;
+                    submitBtn.textContent = '保存中...';
+                    
+                    try {
+                        const success = await this.leaderboardManager.addEntry(name, score, isWin);
+                        overlay.remove();
+                        if (success) {
+                            this.showSuccessMessage(name, score, isWin);
+                        } else {
+                            alert('保存失败，分数未超过现有记录或API不可用');
+                            this.showGameOver(isWin ? '恭喜你赢了！' : '游戏结束！', `最终得分: ${score}`, isWin);
+                        }
+                    } catch (e) {
+                        console.error('保存失败:', e);
+                        overlay.remove();
+                        alert('保存失败，请稍后重试');
                         this.showGameOver(isWin ? '恭喜你赢了！' : '游戏结束！', `最终得分: ${score}`, isWin);
                     }
-                } catch (e) {
-                    console.error('保存失败:', e);
-                    overlay.remove();
-                    alert('保存失败，请稍后重试');
-                    this.showGameOver(isWin ? '恭喜你赢了！' : '游戏结束！', `最终得分: ${score}`, isWin);
                 }
             } else {
                 nameInput.style.borderColor = '#ff0000';
@@ -1059,6 +1055,142 @@ class PacmanGame {
         });
         
         // ESC键取消
+        overlay.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                skipBtn.click();
+            }
+        });
+    }
+    
+    // 显示 Token 输入框（用于保存成绩）
+    showTokenInputForSave(name, score, isWin) {
+        const overlay = document.createElement('div');
+        overlay.className = 'name-input-overlay';
+        overlay.id = 'token-input-overlay';
+        
+        overlay.innerHTML = `
+            <div class="name-input-content">
+                <h3>🔑 输入 GitHub Token</h3>
+                <p style="font-size: 14px; color: #888;">保存成绩需要 GitHub Personal Access Token</p>
+                <p style="font-size: 12px; color: #666;">Token 需要 <strong>gist</strong> 权限</p>
+                <input type="password" id="gist-token-input" placeholder="ghp_xxxxxx" maxlength="50" autofocus>
+                <div class="name-input-buttons">
+                    <button class="name-submit-btn" id="submit-token">确认保存</button>
+                    <button class="name-skip-btn" id="skip-token">取消</button>
+                </div>
+                <a href="https://github.com/settings/tokens/new" target="_blank" style="color: #ffeb3b; font-size: 12px; margin-top: 10px; display: block;">没有 Token？点击创建</a>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        const tokenInput = overlay.querySelector('#gist-token-input');
+        const submitBtn = overlay.querySelector('#submit-token');
+        const skipBtn = overlay.querySelector('#skip-token');
+        
+        // 自动聚焦输入框
+        tokenInput.focus();
+        
+        // 提交按钮
+        submitBtn.addEventListener('click', async () => {
+            const token = tokenInput.value.trim();
+            if (token.length > 0) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = '保存中...';
+                
+                // 设置 Token
+                this.leaderboardManager.setToken(token);
+                
+                try {
+                    const success = await this.leaderboardManager.addEntry(name, score, isWin);
+                    overlay.remove();
+                    if (success) {
+                        this.showSuccessMessage(name, score, isWin);
+                    } else {
+                        alert('保存失败，分数未超过现有记录或Token无效');
+                        this.showGameOver(isWin ? '恭喜你赢了！' : '游戏结束！', `最终得分: ${score}`, isWin);
+                    }
+                } catch (e) {
+                    console.error('保存失败:', e);
+                    overlay.remove();
+                    alert('保存失败，请检查Token是否正确');
+                    this.showGameOver(isWin ? '恭喜你赢了！' : '游戏结束！', `最终得分: ${score}`, isWin);
+                }
+            } else {
+                tokenInput.style.borderColor = '#ff0000';
+                tokenInput.placeholder = '请输入 Token';
+            }
+        });
+        
+        // 取消按钮
+        skipBtn.addEventListener('click', () => {
+            overlay.remove();
+            this.showGameOver(isWin ? '恭喜你赢了！' : '游戏结束！', `最终得分: ${score}`, isWin);
+        });
+        
+        // Enter键提交
+        tokenInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                submitBtn.click();
+            }
+        });
+        
+        // ESC键取消
+        overlay.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                skipBtn.click();
+            }
+        });
+    }
+    
+    // 显示 Token 输入框（用于其他操作）
+    showTokenInputForAction(actionName, callback) {
+        const overlay = document.createElement('div');
+        overlay.className = 'name-input-overlay';
+        overlay.id = 'token-action-overlay';
+        
+        overlay.innerHTML = `
+            <div class="name-input-content">
+                <h3>🔑 输入 GitHub Token</h3>
+                <p style="font-size: 14px; color: #888;">${actionName} 操作需要 GitHub Token</p>
+                <input type="password" id="gist-token-action-input" placeholder="ghp_xxxxxx" maxlength="50" autofocus>
+                <div class="name-input-buttons">
+                    <button class="name-submit-btn" id="submit-action-token">确认</button>
+                    <button class="name-skip-btn" id="skip-action-token">取消</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        const tokenInput = overlay.querySelector('#gist-token-action-input');
+        const submitBtn = overlay.querySelector('#submit-action-token');
+        const skipBtn = overlay.querySelector('#skip-action-token');
+        
+        tokenInput.focus();
+        
+        submitBtn.addEventListener('click', async () => {
+            const token = tokenInput.value.trim();
+            if (token.length > 0) {
+                this.leaderboardManager.setToken(token);
+                overlay.remove();
+                callback();
+            } else {
+                tokenInput.style.borderColor = '#ff0000';
+                tokenInput.placeholder = '请输入 Token';
+            }
+        });
+        
+        skipBtn.addEventListener('click', () => {
+            overlay.remove();
+        });
+        
+        tokenInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                submitBtn.click();
+            }
+        });
+        
         overlay.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 skipBtn.click();
