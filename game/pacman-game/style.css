@@ -63,6 +63,9 @@ body {
 
 .game-area canvas {
     display: block;
+    max-width: 100%;
+    height: auto;
+    touch-action: none;
 }
 
 .controls {
@@ -491,6 +494,7 @@ body {
     color: #888;
     font-size: 12px;
     white-space: nowrap;
+    pointer-events: none;
 }
 
 /* 按钮区域 */
@@ -1134,4 +1138,141 @@ body {
     display: block;
     margin-top: 5px;
     font-size: 0.75em;
+}
+
+/* ============ 移动端适配（窄屏 ≤480px） ============ */
+@media (max-width: 480px) {
+    body {
+        align-items: flex-start;
+    }
+
+    .game-container {
+        padding: 12px;
+        margin: 0;
+        border-radius: 0;
+        box-shadow: none;
+        max-width: 100%;
+    }
+
+    .header {
+        margin-bottom: 12px;
+    }
+
+    .header h1 {
+        font-size: clamp(1.4rem, 6vw, 2rem);
+        margin-bottom: 10px;
+    }
+
+    .score-board {
+        font-size: 0.95em;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 8px 12px;
+    }
+
+    .game-area {
+        margin: 10px 0;
+        min-height: 0;
+        border-width: 2px;
+    }
+
+    .control-area {
+        padding: 10px;
+        gap: 12px;
+    }
+
+    .joystick-container {
+        padding: 6px;
+    }
+
+    .joystick-base {
+        width: 96px;
+        height: 96px;
+    }
+
+    .joystick-stick {
+        width: 38px;
+        height: 38px;
+    }
+
+    .joystick-label {
+        white-space: normal;
+        font-size: 10px;
+        bottom: -18px;
+        width: 120px;
+        text-align: center;
+        line-height: 1.2;
+    }
+
+    .control-tip {
+        font-size: 0.8em;
+    }
+
+    .action-buttons {
+        gap: 6px;
+    }
+
+    .action-btn {
+        min-width: 44px;
+        min-height: 44px;
+        padding: 8px 10px;
+        font-size: 12px;
+    }
+
+    .action-btn .btn-text {
+        font-size: 11px;
+    }
+
+    .settings-container {
+        padding: 10px;
+        gap: 10px;
+    }
+
+    .settings-section {
+        padding: 12px;
+    }
+
+    /* 模态框：占满屏并支持滚动 */
+    .leaderboard-content,
+    .name-input-content {
+        width: calc(100vw - 16px);
+        max-width: none;
+        max-height: calc(100vh - 32px);
+        padding: 16px;
+        overflow-y: auto;
+    }
+
+    .leaderboard-header h2 {
+        font-size: 1.3em;
+    }
+
+    .leaderboard-table {
+        font-size: 0.78em;
+    }
+
+    .leaderboard-table th,
+    .leaderboard-table td {
+        padding: 6px 4px;
+    }
+
+    /* iOS Safari 聚焦时不放大页面（需 ≥16px） */
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    input[type="search"],
+    textarea,
+    select {
+        font-size: 16px;
+    }
+
+    /* 触屏按下反馈（:hover 在移动端不可靠） */
+    .controls button:active,
+    .tab-btn:active,
+    .close-btn:active,
+    .file-label:active,
+    .name-submit-btn:active,
+    .name-skip-btn:active {
+        transform: translateY(0) scale(0.97);
+        filter: brightness(1.1);
+    }
 }

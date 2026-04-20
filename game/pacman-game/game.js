@@ -1702,7 +1702,64 @@ class PacmanGame {
                 }
             });
         }
-        
+
+        // 画布滑动手势（移动端更自然的输入方式，保留摇杆作为备选）
+        const swipeTarget = this.canvas;
+        if (swipeTarget) {
+            const SWIPE_THRESHOLD = 24;
+            let swipeActive = false;
+            let swipeX = 0;
+            let swipeY = 0;
+
+            const applySwipeDirection = (dx, dy) => {
+                if (!this.gameRunning && !this.gameOver) {
+                    this.startGame();
+                }
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    this.pacman.nextDirection = dx > 0 ? 'right' : 'left';
+                } else {
+                    this.pacman.nextDirection = dy > 0 ? 'down' : 'up';
+                }
+            };
+
+            swipeTarget.addEventListener('touchstart', (e) => {
+                if (!e.touches || e.touches.length === 0) return;
+                swipeActive = true;
+                swipeX = e.touches[0].clientX;
+                swipeY = e.touches[0].clientY;
+                e.preventDefault();
+            }, { passive: false });
+
+            swipeTarget.addEventListener('touchmove', (e) => {
+                if (!swipeActive || !e.touches || e.touches.length === 0) return;
+                const dx = e.touches[0].clientX - swipeX;
+                const dy = e.touches[0].clientY - swipeY;
+                if (Math.abs(dx) >= SWIPE_THRESHOLD || Math.abs(dy) >= SWIPE_THRESHOLD) {
+                    applySwipeDirection(dx, dy);
+                    swipeX = e.touches[0].clientX;
+                    swipeY = e.touches[0].clientY;
+                }
+                e.preventDefault();
+            }, { passive: false });
+
+            swipeTarget.addEventListener('touchend', () => {
+                swipeActive = false;
+            });
+
+            swipeTarget.addEventListener('touchcancel', () => {
+                swipeActive = false;
+            });
+        }
+
+        // 视口尺寸变化时重绘一次（canvas 走 CSS 缩放，无需改 backing buffer）
+        const requestRedraw = () => {
+            if (typeof this.render === 'function') {
+                requestAnimationFrame(() => this.render());
+            }
+        };
+        window.addEventListener('resize', requestRedraw);
+        window.addEventListener('orientationchange', requestRedraw);
+
         // 暂停按钮
         if (btnPause) {
             btnPause.addEventListener('touchstart', (e) => {
