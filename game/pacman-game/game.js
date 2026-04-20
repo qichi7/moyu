@@ -1,3 +1,165 @@
+// 排行榜管理类
+class LeaderboardManager {
+    constructor() {
+        this.storageKey = 'pacmanLeaderboard';
+        this.maxEntries = 10;
+    }
+    
+    // 获取排行榜数据
+    getLeaderboard() {
+        try {
+            const data = localStorage.getItem(this.storageKey);
+            return data ? JSON.parse(data) : [];
+        } catch (e) {
+            console.error('读取排行榜失败:', e);
+            return [];
+        }
+    }
+    
+    // 保存排行榜数据
+    saveLeaderboard(data) {
+        try {
+            localStorage.setItem(this.storageKey, JSON.stringify(data));
+        } catch (e) {
+            console.error('保存排行榜失败:', e);
+        }
+    }
+    
+    // 添加新记录
+    addEntry(name, score, isWin) {
+        if (!name || name.length < 3 || name.length > 12) {
+            return false;
+        }
+        
+        const leaderboard = this.getLeaderboard();
+        const timestamp = Date.now();
+        const date = new Date().toLocaleDateString('zh-CN');
+        
+        // 检查相同昵称是否已存在
+        const existingIndex = leaderboard.findIndex(entry => entry.name === name);
+        
+        if (existingIndex !== -1) {
+            // 只保留该玩家的最高分
+            if (score > leaderboard[existingIndex].score) {
+                leaderboard[existingIndex] = {
+                    name,
+                    score,
+                    isWin,
+                    date,
+                    timestamp
+                };
+            } else {
+                return false; // 分数没有提高，不更新
+            }
+        } else {
+            // 新玩家，添加记录
+            leaderboard.push({
+                name,
+                score,
+                isWin,
+                date,
+                timestamp
+            });
+        }
+        
+        // 按分数排序，保留Top 10
+        leaderboard.sort((a, b) => b.score - a.score);
+        const trimmed = leaderboard.slice(0, this.maxEntries);
+        
+        this.saveLeaderboard(trimmed);
+        return true;
+    }
+    
+    // 获取今日榜
+    getTodayLeaderboard() {
+        const today = new Date().toLocaleDateString('zh-CN');
+        return this.getLeaderboard().filter(entry => entry.date === today);
+    }
+    
+    // 获取本周榜
+    getWeekLeaderboard() {
+        const now = Date.now();
+        const weekStart = now - 7 * 24 * 60 * 60 * 1000;
+        return this.getLeaderboard().filter(entry => entry.timestamp >= weekStart);
+    }
+    
+    // 获取总榜
+    getAllLeaderboard() {
+        return this.getLeaderboard();
+    }
+    
+    // 清空排行榜
+    clearLeaderboard() {
+        localStorage.removeItem(this.storageKey);
+    }
+    
+    // 导出排行榜为JSON
+    exportToJSON() {
+        const data = this.getLeaderboard();
+        const jsonStr = JSON.stringify(data, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `pacman_leaderboard_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.json`;
+        a.click();
+        
+        URL.revokeObjectURL(url);
+    }
+    
+    // 导入排行榜JSON
+    importFromJSON(jsonData) {
+        try {
+            const data = JSON.parse(jsonData);
+            if (!Array.isArray(data)) {
+                throw new Error('数据格式错误');
+            }
+            
+            // 验证数据格式
+            for (const entry of data) {
+                if (!entry.name || typeof entry.score !== 'number') {
+                    throw new Error('数据格式错误');
+                }
+            }
+            
+            // 合并数据，保留最高分
+            const currentData = this.getLeaderboard();
+            const merged = [...currentData];
+            
+            for (const entry of data) {
+                const existingIndex = merged.findIndex(e => e.name === entry.name);
+                if (existingIndex !== -1) {
+                    if (entry.score > merged[existingIndex].score) {
+                        merged[existingIndex] = entry;
+                    }
+                } else {
+                    merged.push(entry);
+                }
+            }
+            
+            // 排序并保留Top 10
+            merged.sort((a, b) => b.score - a.score);
+            this.saveLeaderboard(merged.slice(0, this.maxEntries));
+            
+            return true;
+        } catch (e) {
+            console.error('导入失败:', e);
+            return false;
+        }
+    }
+    
+    // 获取排名奖牌
+    getMedal(rank) {
+        switch (rank) {
+            case 1: return '🥇';
+            case 2: return '🥈';
+            case 3: return '🥉';
+            default: return '';
+        }
+    }
+}
+
 class PacmanGame {
     constructor() {
         this.canvas = document.createElement('canvas');
@@ -58,12 +220,17 @@ class PacmanGame {
         this.nextMapCache = null;
         this.isGeneratingMap = false;
         
+        // 排行榜管理器
+        this.leaderboardManager = new LeaderboardManager();
+        this.pendingLeaderboardEntry = null; // 待保存的排行榜记录
+        
         this.initializeMap();
         this.setupEventListeners();
         this.setupImageUpload();
         this.setupAudio();
         this.setupSpeedControl();
         this.setupRefreshMapButton();
+        this.setupLeaderboardUI();
         
         // 预生成下一个地图
         this.pregenerateNextMap();
@@ -624,6 +791,266 @@ class PacmanGame {
                 this.refreshMap();
             });
         }
+    }
+    
+    // 设置排行榜UI
+    setupLeaderboardUI() {
+        // 排行榜按钮
+        const leaderboardBtn = document.getElementById('leaderboard-btn');
+        if (leaderboardBtn) {
+            leaderboardBtn.addEventListener('click', () => {
+                this.showLeaderboard();
+            });
+        }
+        
+        // 关闭排行榜按钮
+        const closeBtn = document.getElementById('close-leaderboard');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                this.hideLeaderboard();
+            });
+        }
+        
+        // 点击overlay关闭
+        const overlay = document.getElementById('leaderboard-overlay');
+        if (overlay) {
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    this.hideLeaderboard();
+                }
+            });
+        }
+        
+        // 标签切换
+        const tabBtns = document.querySelectorAll('.tab-btn');
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                tabBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.updateLeaderboardTable(btn.dataset.tab);
+            });
+        });
+        
+        // 导出按钮
+        const exportBtn = document.getElementById('export-leaderboard');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => {
+                this.leaderboardManager.exportToJSON();
+            });
+        }
+        
+        // 导入按钮
+        const importBtn = document.getElementById('import-leaderboard');
+        const importFile = document.getElementById('import-file');
+        if (importBtn && importFile) {
+            importBtn.addEventListener('click', () => {
+                importFile.click();
+            });
+            
+            importFile.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const success = this.leaderboardManager.importFromJSON(event.target.result);
+                        if (success) {
+                            this.updateLeaderboardTable('all');
+                            alert('导入成功！');
+                        } else {
+                            alert('导入失败，请检查文件格式！');
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+                importFile.value = ''; // 清空以便再次选择同一文件
+            });
+        }
+        
+        // 清空按钮
+        const clearBtn = document.getElementById('clear-leaderboard');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                if (confirm('确定要清空排行榜吗？此操作不可恢复！')) {
+                    this.leaderboardManager.clearLeaderboard();
+                    this.updateLeaderboardTable('all');
+                }
+            });
+        }
+    }
+    
+    // 显示排行榜
+    showLeaderboard() {
+        const overlay = document.getElementById('leaderboard-overlay');
+        if (overlay) {
+            overlay.style.display = 'flex';
+            // 默认显示总榜
+            this.updateLeaderboardTable('all');
+            // 设置总榜标签为active
+            const tabBtns = document.querySelectorAll('.tab-btn');
+            tabBtns.forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === 'all');
+            });
+        }
+    }
+    
+    // 隐藏排行榜
+    hideLeaderboard() {
+        const overlay = document.getElementById('leaderboard-overlay');
+        if (overlay) {
+            overlay.style.display = 'none';
+        }
+    }
+    
+    // 更新排行榜表格
+    updateLeaderboardTable(type) {
+        const tbody = document.getElementById('leaderboard-body');
+        if (!tbody) return;
+        
+        let data;
+        switch (type) {
+            case 'today':
+                data = this.leaderboardManager.getTodayLeaderboard();
+                break;
+            case 'week':
+                data = this.leaderboardManager.getWeekLeaderboard();
+                break;
+            case 'all':
+                data = this.leaderboardManager.getAllLeaderboard();
+                break;
+            default:
+                data = this.leaderboardManager.getAllLeaderboard();
+        }
+        
+        if (data.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="empty-message">暂无记录，快去玩游戏吧！</td></tr>`;
+            return;
+        }
+        
+        tbody.innerHTML = data.map((entry, index) => {
+            const rank = index + 1;
+            const medal = this.leaderboardManager.getMedal(rank);
+            const medalName = medal ? `${medal} ${entry.name}` : entry.name;
+            const status = entry.isWin ? '通关' : '失败';
+            const statusClass = entry.isWin ? 'status-win' : 'status-lose';
+            
+            return `
+                <tr>
+                    <td>${rank}</td>
+                    <td>${medalName}</td>
+                    <td>${entry.score}</td>
+                    <td class="${statusClass}">${status}</td>
+                    <td>${entry.date}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+    
+    // 显示昵称输入框
+    showNameInput(score, isWin) {
+        const overlay = document.createElement('div');
+        overlay.className = 'name-input-overlay';
+        
+        overlay.innerHTML = `
+            <div class="name-input-content">
+                <h3>🎉 游戏结束</h3>
+                <p>你的得分：<strong>${score}</strong></p>
+                <p style="font-size: 14px; color: #888;">输入昵称保存到排行榜（3-12字符）</p>
+                <input type="text" id="player-name" placeholder="输入昵称" maxlength="12" autofocus>
+                <div class="name-input-buttons">
+                    <button class="name-submit-btn" id="submit-name">保存成绩</button>
+                    <button class="name-skip-btn" id="skip-name">跳过</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        const nameInput = overlay.querySelector('#player-name');
+        const submitBtn = overlay.querySelector('#submit-name');
+        const skipBtn = overlay.querySelector('#skip-name');
+        
+        // 自动聚焦输入框
+        nameInput.focus();
+        
+        // 提交按钮
+        submitBtn.addEventListener('click', () => {
+            const name = nameInput.value.trim();
+            if (name.length >= 3 && name.length <= 12) {
+                this.leaderboardManager.addEntry(name, score, isWin);
+                overlay.remove();
+                this.showGameOverResult(score, isWin);
+            } else {
+                nameInput.style.borderColor = '#ff0000';
+                nameInput.placeholder = '昵称需要3-12字符';
+            }
+        });
+        
+        // 跳过按钮
+        skipBtn.addEventListener('click', () => {
+            overlay.remove();
+            this.showGameOverResult(score, isWin);
+        });
+        
+        // Enter键提交
+        nameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                submitBtn.click();
+            }
+        });
+        
+        // ESC键跳过
+        overlay.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                skipBtn.click();
+            }
+        });
+    }
+    
+    // 显示游戏结束结果（排行榜之后）
+    showGameOverResult(score, isWin) {
+        const title = isWin ? '恭喜你赢了！' : '游戏结束！';
+        const message = `最终得分: ${score}`;
+        
+        const overlay = document.createElement('div');
+        overlay.className = 'game-over-overlay';
+        
+        let imageHTML = '';
+        let imageClass = '';
+        
+        if (isWin) {
+            imageClass = 'win-image shake-animation';
+            if (this.useCustomWinImage && this.winImage) {
+                imageHTML = `<img src="${this.winImage.src}" class="${imageClass}" alt="胜利图片">`;
+            }
+        } else {
+            imageClass = 'lose-image';
+            if (this.useCustomLoseImage && this.loseImage) {
+                imageHTML = `<img src="${this.loseImage.src}" class="${imageClass}" alt="失败图片">`;
+            }
+        }
+        
+        overlay.innerHTML = `
+            <div class="game-over-content ${isWin ? 'win-content' : 'lose-content'}">
+                ${imageHTML}
+                <h2>${title}</h2>
+                <p>${message}</p>
+                <button onclick="this.closest('.game-over-overlay').remove(); document.getElementById('restart-btn').click();">再玩一次</button>
+                <button onclick="this.closest('.game-over-overlay').remove(); document.getElementById('leaderboard-btn').click();" style="background: linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%); color: #fff; margin-left: 10px;">查看排行榜</button>
+                <p style="font-size: 14px; color: #888; margin-top: 10px;">按回车键重新开始</p>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        const handleKeyPress = (e) => {
+            if (e.key === 'Enter') {
+                overlay.remove();
+                document.getElementById('restart-btn').click();
+                document.removeEventListener('keydown', handleKeyPress);
+            }
+        };
+        
+        document.addEventListener('keydown', handleKeyPress);
     }
     
     // 预生成下一个地图（异步）
@@ -1770,7 +2197,8 @@ class PacmanGame {
             localStorage.setItem('pacmanHighScore', this.highScore);
             this.updateScore();
         }
-        this.showGameOver('恭喜你赢了！', `最终得分: ${this.score}`, true);
+        // 显示昵称输入框，保存到排行榜
+        this.showNameInput(this.score, true);
     }
 
     loseGame() {
@@ -1782,7 +2210,8 @@ class PacmanGame {
             localStorage.setItem('pacmanHighScore', this.highScore);
             this.updateScore();
         }
-        this.showGameOver('游戏结束！', `最终得分: ${this.score}`, false);
+        // 显示昵称输入框，保存到排行榜
+        this.showNameInput(this.score, false);
     }
 
     showGameOver(title, message, isWin) {

@@ -651,3 +651,319 @@ body {
         display: block;
     }
 }
+/* 排行榜样式 */
+.leaderboard-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 2000;
+}
+
+.leaderboard-content {
+    background: rgba(30, 30, 50, 0.95);
+    border-radius: 20px;
+    padding: 30px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    border: 2px solid #ffeb3b;
+    box-shadow: 0 0 30px rgba(255, 235, 59, 0.3);
+}
+
+.leaderboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.leaderboard-header h2 {
+    color: #ffeb3b;
+    font-size: 2em;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.close-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    color: #fff;
+    font-size: 30px;
+    cursor: pointer;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+}
+
+.close-btn:hover {
+    background: rgba(255, 0, 0, 0.3);
+    transform: scale(1.1);
+}
+
+.leaderboard-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.tab-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-weight: 500;
+}
+
+.tab-btn:hover {
+    background: rgba(255, 235, 59, 0.2);
+    border-color: #ffeb3b;
+}
+
+.tab-btn.active {
+    background: linear-gradient(135deg, #ffeb3b 0%, #ffc107 100%);
+    color: #000;
+    border-color: #ffeb3b;
+    font-weight: bold;
+}
+
+.leaderboard-table-container {
+    overflow-x: auto;
+    margin-bottom: 20px;
+}
+
+.leaderboard-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95em;
+}
+
+.leaderboard-table th {
+    background: rgba(255, 235, 59, 0.2);
+    color: #ffeb3b;
+    padding: 12px 8px;
+    text-align: center;
+    border-bottom: 2px solid #ffeb3b;
+}
+
+.leaderboard-table td {
+    padding: 10px 8px;
+    text-align: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.leaderboard-table tbody tr:hover {
+    background: rgba(255, 235, 59, 0.1);
+}
+
+.leaderboard-table tbody tr:nth-child(1) td:first-child {
+    color: #ffd700;
+    font-size: 1.2em;
+}
+
+.leaderboard-table tbody tr:nth-child(2) td:first-child {
+    color: #c0c0c0;
+    font-size: 1.1em;
+}
+
+.leaderboard-table tbody tr:nth-child(3) td:first-child {
+    color: #cd7f32;
+    font-size: 1.1em;
+}
+
+.status-win {
+    color: #4caf50;
+    font-weight: bold;
+}
+
+.status-lose {
+    color: #f44336;
+}
+
+.leaderboard-actions {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.export-btn {
+    background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+    color: #fff;
+    box-shadow: 0 4px 15px rgba(33, 150, 243, 0.4);
+}
+
+.import-btn {
+    background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+    color: #fff;
+    box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+}
+
+.clear-btn {
+    background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+    color: #fff;
+    box-shadow: 0 4px 15px rgba(244, 67, 54, 0.4);
+}
+
+/* 排行榜按钮样式 */
+.leaderboard-btn {
+    background: linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%);
+    color: #fff;
+    box-shadow: 0 4px 15px rgba(156, 39, 176, 0.4);
+}
+
+.leaderboard-btn:active {
+    background: linear-gradient(135deg, #7b1fa2 0%, #6a1b9a 100%);
+}
+
+/* 昵称输入模态框 */
+.name-input-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 3000;
+}
+
+.name-input-content {
+    background: rgba(30, 30, 50, 0.95);
+    border-radius: 20px;
+    padding: 40px;
+    text-align: center;
+    border: 2px solid #ffeb3b;
+    box-shadow: 0 0 30px rgba(255, 235, 59, 0.3);
+    max-width: 400px;
+    width: 90%;
+}
+
+.name-input-content h3 {
+    color: #ffeb3b;
+    font-size: 1.5em;
+    margin-bottom: 15px;
+}
+
+.name-input-content p {
+    color: #fff;
+    margin-bottom: 20px;
+    font-size: 1.2em;
+}
+
+.name-input-content input {
+    width: 100%;
+    padding: 12px 20px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 2px solid #ffeb3b;
+    border-radius: 10px;
+    color: #fff;
+    font-size: 1.1em;
+    text-align: center;
+    margin-bottom: 20px;
+    outline: none;
+}
+
+.name-input-content input:focus {
+    border-color: #ffc107;
+    box-shadow: 0 0 15px rgba(255, 235, 59, 0.3);
+}
+
+.name-input-content input::placeholder {
+    color: #888;
+}
+
+.name-input-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+}
+
+.name-input-buttons button {
+    padding: 12px 30px;
+    border-radius: 25px;
+    border: none;
+    font-size: 1em;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.name-submit-btn {
+    background: linear-gradient(135deg, #ffeb3b 0%, #ffc107 100%);
+    color: #000;
+}
+
+.name-submit-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(255, 235, 59, 0.4);
+}
+
+.name-skip-btn {
+    background: rgba(255, 255, 255, 0.1);
+    color: #888;
+    border: 1px solid #888;
+}
+
+.name-skip-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+
+/* 空排行榜提示 */
+.empty-message {
+    text-align: center;
+    color: #888;
+    padding: 30px;
+    font-size: 1em;
+}
+
+/* 响应式排行榜 */
+@media (max-width: 600px) {
+    .leaderboard-content {
+        padding: 20px;
+        max-height: 85vh;
+    }
+    
+    .leaderboard-header h2 {
+        font-size: 1.5em;
+    }
+    
+    .leaderboard-table {
+        font-size: 0.85em;
+    }
+    
+    .leaderboard-table th,
+    .leaderboard-table td {
+        padding: 8px 5px;
+    }
+    
+    .tab-btn {
+        padding: 8px 15px;
+        font-size: 0.9em;
+    }
+    
+    .name-input-content {
+        padding: 30px;
+    }
+    
+    .name-input-content h3 {
+        font-size: 1.3em;
+    }
+    
+    .name-input-content input {
+        font-size: 1em;
+    }
+}

@@ -46,6 +46,10 @@
                         <span class="btn-icon">🗺️</span>
                         <span class="btn-text">刷新地图</span>
                     </button>
+                    <button class="action-btn leaderboard-btn" id="leaderboard-btn">
+                        <span class="btn-icon">🏆</span>
+                        <span class="btn-text">排行榜</span>
+                    </button>
                 </div>
             </div>
         </div>
@@ -157,6 +161,52 @@
                 </div>
             </div>
     </div>
+    
+    <!-- 排行榜模态框 -->
+    <div class="leaderboard-overlay" id="leaderboard-overlay" style="display: none;">
+        <div class="leaderboard-content">
+            <div class="leaderboard-header">
+                <h2>🏆 排行榜</h2>
+                <button class="close-btn" id="close-leaderboard">×</button>
+            </div>
+            <div class="leaderboard-tabs">
+                <button class="tab-btn active" data-tab="today">今日榜</button>
+                <button class="tab-btn" data-tab="week">本周榜</button>
+                <button class="tab-btn" data-tab="all">总榜</button>
+            </div>
+            <div class="leaderboard-table-container">
+                <table class="leaderboard-table" id="leaderboard-table">
+                    <thead>
+                        <tr>
+                            <th>排名</th>
+                            <th>昵称</th>
+                            <th>分数</th>
+                            <th>状态</th>
+                            <th>日期</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaderboard-body">
+                    </tbody>
+                </table>
+            </div>
+            <div class="leaderboard-actions">
+                <button class="action-btn export-btn" id="export-leaderboard">
+                    <span class="btn-icon">📤</span>
+                    <span class="btn-text">导出</span>
+                </button>
+                <button class="action-btn import-btn" id="import-leaderboard">
+                    <span class="btn-icon">📥</span>
+                    <span class="btn-text">导入</span>
+                </button>
+                <button class="action-btn clear-btn" id="clear-leaderboard">
+                    <span class="btn-icon">🗑️</span>
+                    <span class="btn-text">清空</span>
+                </button>
+            </div>
+            <input type="file" id="import-file" accept=".json" style="display: none;">
+        </div>
+    </div>
+    
     <script src="game.js"></script>
 </body>
 </html>
