@@ -1078,3 +1078,60 @@ body {
     color: #888;
     background: rgba(255, 255, 255, 0.1);
 }
+
+/* 排行榜模式选择 */
+.leaderboard-toggle {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.leaderboard-toggle label {
+    color: #fff;
+    font-size: 0.9em;
+}
+
+.leaderboard-toggle select {
+    padding: 8px 15px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid #ffeb3b;
+    border-radius: 10px;
+    color: #fff;
+    font-size: 0.9em;
+    cursor: pointer;
+}
+
+.leaderboard-toggle select:focus {
+    outline: none;
+    border-color: #ffc107;
+}
+
+.leaderboard-api-config h4 {
+    color: #ffeb3b;
+    margin-bottom: 15px;
+    font-size: 1em;
+}
+
+.config-item {
+    margin-bottom: 15px;
+}
+
+.config-item label {
+    display: block;
+    color: #fff;
+    font-size: 0.85em;
+    margin-bottom: 5px;
+}
+
+.config-item input:focus {
+    border-color: #ffeb3b;
+    outline: none;
+}
+
+.config-item small {
+    display: block;
+    margin-top: 5px;
+    font-size: 0.75em;
+}

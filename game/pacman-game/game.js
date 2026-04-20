@@ -1,32 +1,61 @@
-// 排行榜管理类（支持本地和全局排行榜）
+// 排行榜管理类（支持本地、GitHub Gist、Cloudflare Workers）
 class LeaderboardManager {
     constructor() {
         this.storageKey = 'pacmanLeaderboard';
         this.maxEntries = 10;
+        
+        // Cloudflare Workers 配置
         this.apiBaseUrl = localStorage.getItem('pacmanApiUrl') || '';
-        this.useGlobal = localStorage.getItem('pacmanUseGlobal') === 'true';
+        
+        // GitHub Gist 配置
+        this.gistId = localStorage.getItem('pacmanGistId') || '';
+        this.gistToken = localStorage.getItem('pacmanGistToken') || '';
+        this.gistFilename = 'leaderboard.json';
+        
+        // 模式：local（本地）、gist（GitHub Gist）、worker（Cloudflare Workers）
+        this.leaderboardMode = localStorage.getItem('pacmanLeaderboardMode') || 'local';
     }
     
-    // 设置API地址
+    // 获取当前模式
+    getMode() {
+        return this.leaderboardMode;
+    }
+    
+    // 设置模式
+    setMode(mode) {
+        this.leaderboardMode = mode;
+        localStorage.setItem('pacmanLeaderboardMode', mode);
+    }
+    
+    // GitHub Gist 配置
+    setGistConfig(gistId, gistToken = null) {
+        this.gistId = gistId;
+        this.gistToken = gistToken || '';
+        localStorage.setItem('pacmanGistId', gistId);
+        localStorage.setItem('pacmanGistToken', gistToken || '');
+    }
+    
+    getGistId() {
+        return this.gistId;
+    }
+    
+    getGistToken() {
+        return this.gistToken;
+    }
+    
+    // Cloudflare Workers 配置
     setApiUrl(url) {
         this.apiBaseUrl = url;
         localStorage.setItem('pacmanApiUrl', url);
     }
     
-    // 获取API地址
     getApiUrl() {
         return this.apiBaseUrl;
     }
     
-    // 设置是否使用全局排行榜
-    setUseGlobal(useGlobal) {
-        this.useGlobal = useGlobal;
-        localStorage.setItem('pacmanUseGlobal', useGlobal);
-    }
-    
     // 是否使用全局排行榜
     isGlobal() {
-        return this.useGlobal && this.apiBaseUrl;
+        return this.leaderboardMode !== 'local';
     }
     
     // 本地：获取排行榜数据
@@ -49,8 +78,98 @@ class LeaderboardManager {
         }
     }
     
-    // 全局：获取排行榜数据
-    async getGlobalLeaderboard(type) {
+    // GitHub Gist：获取排行榜
+    async getGistLeaderboard() {
+        if (!this.gistId) {
+            console.error('Gist ID 未配置');
+            return [];
+        }
+        
+        try {
+            const apiUrl = `https://api.github.com/gists/${this.gistId}`;
+            const response = await fetch(apiUrl);
+            const gist = await response.json();
+            
+            if (gist.files && gist.files[this.gistFilename]) {
+                const content = gist.files[this.gistFilename].content;
+                return JSON.parse(content);
+            }
+            return [];
+        } catch (e) {
+            console.error('获取 Gist 排行榜失败:', e);
+            return [];
+        }
+    }
+    
+    // GitHub Gist：保存排行榜
+    async saveGistLeaderboard(data) {
+        if (!this.gistId) {
+            console.error('Gist ID 未配置');
+            return false;
+        }
+        
+        if (!this.gistToken) {
+            console.error('需要 Gist Token 才能保存数据');
+            return false;
+        }
+        
+        try {
+            const apiUrl = `https://api.github.com/gists/${this.gistId}`;
+            const response = await fetch(apiUrl, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `token ${this.gistToken}`
+                },
+                body: JSON.stringify({
+                    files: {
+                        [this.gistFilename]: {
+                            content: JSON.stringify(data, null, 2)
+                        }
+                    }
+                })
+            });
+            
+            return response.ok;
+        } catch (e) {
+            console.error('保存 Gist 排行榜失败:', e);
+            return false;
+        }
+    }
+    
+    // GitHub Gist：添加记录
+    async addGistEntry(name, score, isWin) {
+        if (!this.gistToken) {
+            console.error('需要 Gist Token 才能保存数据');
+            return false;
+        }
+        
+        const leaderboard = await this.getGistLeaderboard();
+        const timestamp = Date.now();
+        const date = new Date().toLocaleDateString('zh-CN');
+        
+        // 检查相同昵称
+        const existingIndex = leaderboard.findIndex(entry => entry.name === name);
+        
+        if (existingIndex !== -1) {
+            if (score > leaderboard[existingIndex].score) {
+                leaderboard[existingIndex] = { name, score, isWin, date, timestamp };
+            } else {
+                return false;
+            }
+        } else {
+            leaderboard.push({ name, score, isWin, date, timestamp });
+        }
+        
+        // 排序保留 Top 10
+        leaderboard.sort((a, b) => b.score - a.score);
+        const trimmed = leaderboard.slice(0, this.maxEntries);
+        
+        return await this.saveGistLeaderboard(trimmed);
+    }
+    
+    // Cloudflare Workers：获取排行榜数据
+    async getWorkerLeaderboard(type) {
         if (!this.apiBaseUrl) {
             console.error('API地址未配置');
             return [];
@@ -63,17 +182,17 @@ class LeaderboardManager {
             if (result.success) {
                 return result.data;
             } else {
-                console.error('获取全局排行榜失败:', result.error);
+                console.error('获取 Workers 排行榜失败:', result.error);
                 return [];
             }
         } catch (e) {
-            console.error('获取全局排行榜失败:', e);
+            console.error('获取 Workers 排行榜失败:', e);
             return [];
         }
     }
     
-    // 全局：添加记录
-    async addGlobalEntry(name, score, isWin) {
+    // Cloudflare Workers：添加记录
+    async addWorkerEntry(name, score, isWin) {
         if (!this.apiBaseUrl) {
             console.error('API地址未配置');
             return false;
@@ -97,46 +216,26 @@ class LeaderboardManager {
             const result = await response.json();
             return result.success;
         } catch (e) {
-            console.error('添加全局记录失败:', e);
+            console.error('添加 Workers 记录失败:', e);
             return false;
         }
     }
     
-    // 全局：清空排行榜
-    async clearGlobalLeaderboard() {
-        if (!this.apiBaseUrl) {
-            console.error('API地址未配置');
-            return false;
-        }
-        
-        try {
-            const response = await fetch(`${this.apiBaseUrl}/api/leaderboard`, {
-                method: 'DELETE'
-            });
-            
-            const result = await response.json();
-            return result.success;
-        } catch (e) {
-            console.error('清空全局排行榜失败:', e);
-            return false;
-        }
-    }
-    
-    // 添加新记录（自动判断本地或全局）
+    // 添加新记录（自动判断模式）
     async addEntry(name, score, isWin) {
         if (!name || name.length < 3 || name.length > 12) {
             return false;
         }
         
-        if (this.isGlobal()) {
-            // 全局排行榜
-            const success = await this.addGlobalEntry(name, score, isWin);
-            // 同时保存到本地作为备份
-            this.addLocalEntry(name, score, isWin);
-            return success;
+        // 同时保存到本地作为备份
+        this.addLocalEntry(name, score, isWin);
+        
+        if (this.leaderboardMode === 'gist') {
+            return await this.addGistEntry(name, score, isWin);
+        } else if (this.leaderboardMode === 'worker') {
+            return await this.addWorkerEntry(name, score, isWin);
         } else {
-            // 本地排行榜
-            return this.addLocalEntry(name, score, isWin);
+            return true; // 本地模式，已保存
         }
     }
     
@@ -187,38 +286,50 @@ class LeaderboardManager {
     
     // 获取排行榜（异步）
     async getLeaderboard(type = 'all') {
-        if (this.isGlobal()) {
-            return await this.getGlobalLeaderboard(type);
+        if (this.leaderboardMode === 'gist') {
+            return await this.getGistLeaderboard();
+        } else if (this.leaderboardMode === 'worker') {
+            return await this.getWorkerLeaderboard(type);
         } else {
-            return this.getLocalLeaderboard(type);
+            return this.getLocalLeaderboard();
         }
     }
     
     // 获取今日榜
     async getTodayLeaderboard() {
-        if (this.isGlobal()) {
-            return await this.getGlobalLeaderboard('today');
+        const today = new Date().toLocaleDateString('zh-CN');
+        
+        if (this.leaderboardMode === 'gist') {
+            const data = await this.getGistLeaderboard();
+            return data.filter(entry => entry.date === today);
+        } else if (this.leaderboardMode === 'worker') {
+            return await this.getWorkerLeaderboard('today');
         } else {
-            const today = new Date().toLocaleDateString('zh-CN');
             return this.getLocalLeaderboard().filter(entry => entry.date === today);
         }
     }
     
     // 获取本周榜
     async getWeekLeaderboard() {
-        if (this.isGlobal()) {
-            return await this.getGlobalLeaderboard('week');
+        const now = Date.now();
+        const weekStart = now - 7 * 24 * 60 * 60 * 1000;
+        
+        if (this.leaderboardMode === 'gist') {
+            const data = await this.getGistLeaderboard();
+            return data.filter(entry => entry.timestamp >= weekStart);
+        } else if (this.leaderboardMode === 'worker') {
+            return await this.getWorkerLeaderboard('week');
         } else {
-            const now = Date.now();
-            const weekStart = now - 7 * 24 * 60 * 60 * 1000;
             return this.getLocalLeaderboard().filter(entry => entry.timestamp >= weekStart);
         }
     }
     
     // 获取总榜
     async getAllLeaderboard() {
-        if (this.isGlobal()) {
-            return await this.getGlobalLeaderboard('all');
+        if (this.leaderboardMode === 'gist') {
+            return await this.getGistLeaderboard();
+        } else if (this.leaderboardMode === 'worker') {
+            return await this.getWorkerLeaderboard('all');
         } else {
             return this.getLocalLeaderboard();
         }
@@ -226,10 +337,13 @@ class LeaderboardManager {
     
     // 清空排行榜
     async clearLeaderboard() {
-        if (this.isGlobal()) {
-            await this.clearGlobalLeaderboard();
-        }
         localStorage.removeItem(this.storageKey);
+        
+        if (this.leaderboardMode === 'gist' && this.gistToken) {
+            await this.saveGistLeaderboard([]);
+        } else if (this.leaderboardMode === 'worker') {
+            // Workers 清空需要单独实现
+        }
     }
     
     // 导出排行榜为JSON
@@ -970,30 +1084,57 @@ class PacmanGame {
             });
         });
         
-        // 全局排行榜切换
-        const useGlobalCheckbox = document.getElementById('use-global-leaderboard');
-        const apiConfigSection = document.getElementById('api-config-section');
-        const apiUrlInput = document.getElementById('api-url');
-        const saveApiBtn = document.getElementById('save-api-btn');
+        // 排行榜模式选择
+        const modeSelect = document.getElementById('leaderboard-mode-select');
+        const gistConfigSection = document.getElementById('gist-config-section');
+        const workerConfigSection = document.getElementById('worker-config-section');
         
-        if (useGlobalCheckbox) {
+        if (modeSelect) {
             // 初始化状态
-            useGlobalCheckbox.checked = this.leaderboardManager.isGlobal();
-            if (useGlobalCheckbox.checked && apiConfigSection) {
-                apiConfigSection.style.display = 'block';
-            }
-            if (apiUrlInput) {
-                apiUrlInput.value = this.leaderboardManager.getApiUrl();
-            }
+            const currentMode = this.leaderboardManager.getMode();
+            modeSelect.value = currentMode;
+            this.updateConfigSection(currentMode);
             
-            useGlobalCheckbox.addEventListener('change', () => {
-                this.leaderboardManager.setUseGlobal(useGlobalCheckbox.checked);
-                if (apiConfigSection) {
-                    apiConfigSection.style.display = useGlobalCheckbox.checked ? 'block' : 'none';
-                }
+            // 初始化配置值
+            const gistIdInput = document.getElementById('gist-id');
+            const gistTokenInput = document.getElementById('gist-token');
+            const apiUrlInput = document.getElementById('api-url');
+            
+            if (gistIdInput) gistIdInput.value = this.leaderboardManager.getGistId();
+            if (gistTokenInput) gistTokenInput.value = this.leaderboardManager.getGistToken();
+            if (apiUrlInput) apiUrlInput.value = this.leaderboardManager.getApiUrl();
+            
+            modeSelect.addEventListener('change', () => {
+                const mode = modeSelect.value;
+                this.leaderboardManager.setMode(mode);
+                this.updateConfigSection(mode);
                 this.updateLeaderboardTable('all');
             });
         }
+        
+        // Gist 配置保存
+        const saveGistBtn = document.getElementById('save-gist-btn');
+        const gistIdInput = document.getElementById('gist-id');
+        const gistTokenInput = document.getElementById('gist-token');
+        
+        if (saveGistBtn) {
+            saveGistBtn.addEventListener('click', () => {
+                const gistId = gistIdInput ? gistIdInput.value.trim() : '';
+                const gistToken = gistTokenInput ? gistTokenInput.value.trim() : '';
+                
+                if (gistId) {
+                    this.leaderboardManager.setGistConfig(gistId, gistToken);
+                    alert('GitHub Gist 配置已保存！');
+                    this.updateLeaderboardTable('all');
+                } else {
+                    alert('请输入 Gist ID！');
+                }
+            });
+        }
+        
+        // Workers 配置保存
+        const saveApiBtn = document.getElementById('save-api-btn');
+        const apiUrlInput = document.getElementById('api-url');
         
         if (saveApiBtn && apiUrlInput) {
             saveApiBtn.addEventListener('click', () => {
@@ -1052,6 +1193,19 @@ class PacmanGame {
                     this.updateLeaderboardTable('all');
                 }
             });
+        }
+    }
+    
+    // 更新配置界面显示
+    updateConfigSection(mode) {
+        const gistConfigSection = document.getElementById('gist-config-section');
+        const workerConfigSection = document.getElementById('worker-config-section');
+        
+        if (gistConfigSection) {
+            gistConfigSection.style.display = mode === 'gist' ? 'block' : 'none';
+        }
+        if (workerConfigSection) {
+            workerConfigSection.style.display = mode === 'worker' ? 'block' : 'none';
         }
     }
     
