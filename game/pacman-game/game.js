@@ -1,48 +1,34 @@
-// 排行榜管理类（GitHub Gist）
+// 排行榜管理类（GitHub Gist）- 实时刷新，无缓存
 class LeaderboardManager {
     // ========== 硬编码配置（请修改此处）==========
     // 在创建 Gist 后，将 URL 最后一段的哈希字符串填入此处
     // 例如：https://gist.github.com/qichi7/abc123def456 -> ID 是 abc123def456
     static HARDCODED_GIST_ID = '81ae842d7a71d3150bcf18f9578a47b1'; // 硬编码 Gist ID
-    static CACHE_VERSION = 'v2'; // 缓存版本号，修改此值可强制清除旧缓存
     
     constructor() {
         this.maxEntries = 10;
         
         // GitHub Gist 配置 - 硬编码 ID，Token 用 sessionStorage（关闭浏览器即失效）
         this.gistId = LeaderboardManager.HARDCODED_GIST_ID;
-        this.gistToken = sessionStorage.getItem('pacmanGistToken') || ''; // 改用 sessionStorage
+        this.gistToken = sessionStorage.getItem('pacmanGistToken') || '';
         this.gistFilename = 'leaderboard.json';
         
-        // 本地缓存（用于离线读取和备份）
-        this.cacheKey = 'pacmanLeaderboardCache';
-        this.cacheVersionKey = 'pacmanLeaderboardCacheVersion';
-        
-        // 检查缓存版本，版本不匹配时清除旧缓存
-        this.checkAndClearOldCache();
+        // 清除旧的缓存数据（一次性清理）
+        this.clearOldCache();
     }
     
-    // 检查并清除旧缓存
-    checkAndClearOldCache() {
-        const currentVersion = localStorage.getItem(this.cacheVersionKey);
-        const oldGistId = localStorage.getItem('pacmanGistId');
-        
-        // 如果缓存版本不匹配，或有旧的 gistId 配置，清除所有缓存
-        if (currentVersion !== LeaderboardManager.CACHE_VERSION || 
-            (oldGistId && oldGistId !== this.gistId)) {
-            console.log('清除旧缓存，版本:', currentVersion, '->', LeaderboardManager.CACHE_VERSION);
-            localStorage.removeItem('pacmanGistId');
-            localStorage.removeItem('pacmanGistToken'); // 清除旧的localStorage token
-            sessionStorage.removeItem('pacmanGistToken'); // 清除sessionStorage token
-            localStorage.removeItem(this.cacheKey);
-            localStorage.setItem(this.cacheVersionKey, LeaderboardManager.CACHE_VERSION);
-        }
+    // 清除旧的缓存数据（一次性）
+    clearOldCache() {
+        localStorage.removeItem('pacmanGistId');
+        localStorage.removeItem('pacmanGistToken');
+        localStorage.removeItem('pacmanLeaderboardCache');
+        localStorage.removeItem('pacmanLeaderboardCacheVersion');
     }
     
     // 设置 Token（用于保存成绩）- 使用 sessionStorage
     setToken(token) {
         this.gistToken = token;
-        sessionStorage.setItem('pacmanGistToken', token); // 改用 sessionStorage
+        sessionStorage.setItem('pacmanGistToken', token);
     }
     
     // 清除 Token（退出时调用）
@@ -65,31 +51,11 @@ class LeaderboardManager {
         return this.gistId !== '';
     }
     
-    // 获取本地缓存
-    getCache() {
-        try {
-            const data = localStorage.getItem(this.cacheKey);
-            return data ? JSON.parse(data) : [];
-        } catch (e) {
-            console.error('读取缓存失败:', e);
-            return [];
-        }
-    }
-    
-    // 保存本地缓存
-    saveCache(data) {
-        try {
-            localStorage.setItem(this.cacheKey, JSON.stringify(data));
-        } catch (e) {
-            console.error('保存缓存失败:', e);
-        }
-    }
-    
-    // GitHub Gist：获取排行榜
+    // GitHub Gist：获取排行榜（实时刷新，无缓存）
     async getLeaderboard() {
         if (!this.gistId) {
-            console.error('Gist ID 未配置，返回缓存数据');
-            return this.getCache();
+            console.error('Gist ID 未配置');
+            return [];
         }
         
         try {
@@ -99,20 +65,16 @@ class LeaderboardManager {
             
             if (gist.files && gist.files[this.gistFilename]) {
                 const content = gist.files[this.gistFilename].content;
-                const data = JSON.parse(content);
-                // 更新本地缓存
-                this.saveCache(data);
-                return data;
+                return JSON.parse(content);
             }
             return [];
         } catch (e) {
             console.error('获取 Gist 排行榜失败:', e);
-            // 网络失败时返回缓存
-            return this.getCache();
+            return []; // 失败时返回空数组，不使用缓存
         }
     }
     
-    // GitHub Gist：保存排行榜
+    // GitHub Gist：保存排行榜（实时保存，无缓存）
     async saveLeaderboard(data) {
         if (!this.gistId) {
             console.error('Gist ID 未配置');
@@ -121,8 +83,6 @@ class LeaderboardManager {
         
         if (!this.gistToken) {
             console.error('需要 Gist Token 才能保存数据');
-            // 保存到本地缓存
-            this.saveCache(data);
             return false;
         }
         
@@ -143,16 +103,9 @@ class LeaderboardManager {
                 })
             });
             
-            if (response.ok) {
-                // 同时保存到本地缓存
-                this.saveCache(data);
-                return true;
-            }
-            return false;
+            return response.ok;
         } catch (e) {
             console.error('保存 Gist 排行榜失败:', e);
-            // 保存到本地缓存
-            this.saveCache(data);
             return false;
         }
     }
@@ -214,8 +167,6 @@ class LeaderboardManager {
     
     // 清空排行榜
     async clearLeaderboard() {
-        localStorage.removeItem(this.cacheKey);
-        
         if (this.gistId && this.gistToken) {
             await this.saveLeaderboard([]);
         }
