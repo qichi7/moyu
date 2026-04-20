@@ -4,6 +4,7 @@ class LeaderboardManager {
     // 在创建 Gist 后，将 URL 最后一段的哈希字符串填入此处
     // 例如：https://gist.github.com/qichi7/abc123def456 -> ID 是 abc123def456
     static HARDCODED_GIST_ID = '81ae842d7a71d3150bcf18f9578a47b1'; // 硬编码 Gist ID
+    static CACHE_VERSION = 'v2'; // 缓存版本号，修改此值可强制清除旧缓存
     
     constructor() {
         this.maxEntries = 10;
@@ -15,6 +16,26 @@ class LeaderboardManager {
         
         // 本地缓存（用于离线读取和备份）
         this.cacheKey = 'pacmanLeaderboardCache';
+        this.cacheVersionKey = 'pacmanLeaderboardCacheVersion';
+        
+        // 检查缓存版本，版本不匹配时清除旧缓存
+        this.checkAndClearOldCache();
+    }
+    
+    // 检查并清除旧缓存
+    checkAndClearOldCache() {
+        const currentVersion = localStorage.getItem(this.cacheVersionKey);
+        const oldGistId = localStorage.getItem('pacmanGistId');
+        
+        // 如果缓存版本不匹配，或有旧的 gistId 配置，清除所有缓存
+        if (currentVersion !== LeaderboardManager.CACHE_VERSION || 
+            (oldGistId && oldGistId !== this.gistId)) {
+            console.log('清除旧缓存，版本:', currentVersion, '->', LeaderboardManager.CACHE_VERSION);
+            localStorage.removeItem('pacmanGistId');
+            localStorage.removeItem('pacmanGistToken');
+            localStorage.removeItem(this.cacheKey);
+            localStorage.setItem(this.cacheVersionKey, LeaderboardManager.CACHE_VERSION);
+        }
     }
     
     // 设置 Token（用于保存成绩）
