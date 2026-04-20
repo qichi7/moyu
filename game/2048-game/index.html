@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2048 游戏</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="game-wrapper">
+        <div class="game-header">
+            <h1>2048</h1>
+            <div class="score-container">
+                <div class="score-box">
+                    <div class="score-label">分数</div>
+                    <div class="score-value" id="score">0</div>
+                </div>
+                <div class="score-box best">
+                    <div class="score-label">最高分</div>
+                    <div class="score-value" id="best-score">0</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <div class="size-control">
+                <label>网格大小：</label>
+                <select id="grid-size">
+                    <option value="3">3×3</option>
+                    <option value="4" selected>4×4</option>
+                    <option value="5">5×5</option>
+                    <option value="6">6×6</option>
+                </select>
+            </div>
+            <button id="new-game-btn" class="btn">新游戏</button>
+            <button id="leaderboard-btn" class="btn">🏆 排行榜</button>
+        </div>
+        
+        <p class="instructions">使用 <strong>方向键</strong> 移动方块，相同数字合并！</p>
+        
+        <div class="game-container" id="game-container">
+            <div id="game-grid"></div>
+        </div>
+        
+        <!-- 游戏结束覆盖层 -->
+        <div id="game-over-overlay" style="display: none;">
+            <div class="game-over-content">
+                <h2>游戏结束!</h2>
+                <p>最终分数: <strong id="final-score">0</strong></p>
+                <button id="retry-btn" class="btn">再玩一次</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 排行榜覆盖层 -->
+    <div class="leaderboard-overlay" id="leaderboard-overlay" style="display: none;">
+        <div class="leaderboard-content">
+            <div class="leaderboard-header">
+                <h2>🏆 排行榜 (GitHub Gist)</h2>
+                <button class="close-btn" id="close-leaderboard">×</button>
+            </div>
+            <div class="leaderboard-tabs">
+                <button class="tab-btn active" data-tab="all">总榜</button>
+                <button class="tab-btn" data-tab="today">今日榜</button>
+                <button class="tab-btn" data-tab="week">本周榜</button>
+            </div>
+            <div class="leaderboard-table-container">
+                <table class="leaderboard-table" id="leaderboard-table">
+                    <thead>
+                        <tr>
+                            <th>排名</th>
+                            <th>昵称</th>
+                            <th>分数</th>
+                            <th>大小</th>
+                            <th>日期</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaderboard-body">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <script src="game.js"></script>
+</body>
+</html>
