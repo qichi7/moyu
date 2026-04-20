@@ -1,0 +1,17 @@
+name = "pacman-leaderboard"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# KV namespace binding
+# 需要先创建 KV namespace，然后替换下面的 id
+kv_namespaces = [
+  { binding = "LEADERBOARD_KV", id = "YOUR_KV_NAMESPACE_ID" }
+]
+
+# 账号ID（可选，如果已配置 wrangler login 则不需要）
+# account_id = "YOUR_ACCOUNT_ID"
+
+# Workers settings
+workers_dev = true
+route = ""
+zone_id = ""

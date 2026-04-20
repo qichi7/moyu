@@ -1,37 +1,152 @@
-// 排行榜管理类
+// 排行榜管理类（支持本地和全局排行榜）
 class LeaderboardManager {
     constructor() {
         this.storageKey = 'pacmanLeaderboard';
         this.maxEntries = 10;
+        this.apiBaseUrl = localStorage.getItem('pacmanApiUrl') || '';
+        this.useGlobal = localStorage.getItem('pacmanUseGlobal') === 'true';
     }
     
-    // 获取排行榜数据
-    getLeaderboard() {
+    // 设置API地址
+    setApiUrl(url) {
+        this.apiBaseUrl = url;
+        localStorage.setItem('pacmanApiUrl', url);
+    }
+    
+    // 获取API地址
+    getApiUrl() {
+        return this.apiBaseUrl;
+    }
+    
+    // 设置是否使用全局排行榜
+    setUseGlobal(useGlobal) {
+        this.useGlobal = useGlobal;
+        localStorage.setItem('pacmanUseGlobal', useGlobal);
+    }
+    
+    // 是否使用全局排行榜
+    isGlobal() {
+        return this.useGlobal && this.apiBaseUrl;
+    }
+    
+    // 本地：获取排行榜数据
+    getLocalLeaderboard() {
         try {
             const data = localStorage.getItem(this.storageKey);
             return data ? JSON.parse(data) : [];
         } catch (e) {
-            console.error('读取排行榜失败:', e);
+            console.error('读取本地排行榜失败:', e);
             return [];
         }
     }
     
-    // 保存排行榜数据
-    saveLeaderboard(data) {
+    // 本地：保存排行榜数据
+    saveLocalLeaderboard(data) {
         try {
             localStorage.setItem(this.storageKey, JSON.stringify(data));
         } catch (e) {
-            console.error('保存排行榜失败:', e);
+            console.error('保存本地排行榜失败:', e);
         }
     }
     
-    // 添加新记录
-    addEntry(name, score, isWin) {
+    // 全局：获取排行榜数据
+    async getGlobalLeaderboard(type) {
+        if (!this.apiBaseUrl) {
+            console.error('API地址未配置');
+            return [];
+        }
+        
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/api/leaderboard?type=${type}`);
+            const result = await response.json();
+            
+            if (result.success) {
+                return result.data;
+            } else {
+                console.error('获取全局排行榜失败:', result.error);
+                return [];
+            }
+        } catch (e) {
+            console.error('获取全局排行榜失败:', e);
+            return [];
+        }
+    }
+    
+    // 全局：添加记录
+    async addGlobalEntry(name, score, isWin) {
+        if (!this.apiBaseUrl) {
+            console.error('API地址未配置');
+            return false;
+        }
+        
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/api/leaderboard`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name,
+                    score,
+                    isWin,
+                    date: new Date().toLocaleDateString('zh-CN'),
+                    timestamp: Date.now()
+                })
+            });
+            
+            const result = await response.json();
+            return result.success;
+        } catch (e) {
+            console.error('添加全局记录失败:', e);
+            return false;
+        }
+    }
+    
+    // 全局：清空排行榜
+    async clearGlobalLeaderboard() {
+        if (!this.apiBaseUrl) {
+            console.error('API地址未配置');
+            return false;
+        }
+        
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/api/leaderboard`, {
+                method: 'DELETE'
+            });
+            
+            const result = await response.json();
+            return result.success;
+        } catch (e) {
+            console.error('清空全局排行榜失败:', e);
+            return false;
+        }
+    }
+    
+    // 添加新记录（自动判断本地或全局）
+    async addEntry(name, score, isWin) {
         if (!name || name.length < 3 || name.length > 12) {
             return false;
         }
         
-        const leaderboard = this.getLeaderboard();
+        if (this.isGlobal()) {
+            // 全局排行榜
+            const success = await this.addGlobalEntry(name, score, isWin);
+            // 同时保存到本地作为备份
+            this.addLocalEntry(name, score, isWin);
+            return success;
+        } else {
+            // 本地排行榜
+            return this.addLocalEntry(name, score, isWin);
+        }
+    }
+    
+    // 本地：添加记录
+    addLocalEntry(name, score, isWin) {
+        if (!name || name.length < 3 || name.length > 12) {
+            return false;
+        }
+        
+        const leaderboard = this.getLocalLeaderboard();
         const timestamp = Date.now();
         const date = new Date().toLocaleDateString('zh-CN');
         
@@ -66,36 +181,60 @@ class LeaderboardManager {
         leaderboard.sort((a, b) => b.score - a.score);
         const trimmed = leaderboard.slice(0, this.maxEntries);
         
-        this.saveLeaderboard(trimmed);
+        this.saveLocalLeaderboard(trimmed);
         return true;
     }
     
+    // 获取排行榜（异步）
+    async getLeaderboard(type = 'all') {
+        if (this.isGlobal()) {
+            return await this.getGlobalLeaderboard(type);
+        } else {
+            return this.getLocalLeaderboard(type);
+        }
+    }
+    
     // 获取今日榜
-    getTodayLeaderboard() {
-        const today = new Date().toLocaleDateString('zh-CN');
-        return this.getLeaderboard().filter(entry => entry.date === today);
+    async getTodayLeaderboard() {
+        if (this.isGlobal()) {
+            return await this.getGlobalLeaderboard('today');
+        } else {
+            const today = new Date().toLocaleDateString('zh-CN');
+            return this.getLocalLeaderboard().filter(entry => entry.date === today);
+        }
     }
     
     // 获取本周榜
-    getWeekLeaderboard() {
-        const now = Date.now();
-        const weekStart = now - 7 * 24 * 60 * 60 * 1000;
-        return this.getLeaderboard().filter(entry => entry.timestamp >= weekStart);
+    async getWeekLeaderboard() {
+        if (this.isGlobal()) {
+            return await this.getGlobalLeaderboard('week');
+        } else {
+            const now = Date.now();
+            const weekStart = now - 7 * 24 * 60 * 60 * 1000;
+            return this.getLocalLeaderboard().filter(entry => entry.timestamp >= weekStart);
+        }
     }
     
     // 获取总榜
-    getAllLeaderboard() {
-        return this.getLeaderboard();
+    async getAllLeaderboard() {
+        if (this.isGlobal()) {
+            return await this.getGlobalLeaderboard('all');
+        } else {
+            return this.getLocalLeaderboard();
+        }
     }
     
     // 清空排行榜
-    clearLeaderboard() {
+    async clearLeaderboard() {
+        if (this.isGlobal()) {
+            await this.clearGlobalLeaderboard();
+        }
         localStorage.removeItem(this.storageKey);
     }
     
     // 导出排行榜为JSON
     exportToJSON() {
-        const data = this.getLeaderboard();
+        const data = this.getLocalLeaderboard();
         const jsonStr = JSON.stringify(data, null, 2);
         const blob = new Blob([jsonStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -124,7 +263,7 @@ class LeaderboardManager {
             }
             
             // 合并数据，保留最高分
-            const currentData = this.getLeaderboard();
+            const currentData = this.getLocalLeaderboard();
             const merged = [...currentData];
             
             for (const entry of data) {
@@ -140,7 +279,7 @@ class LeaderboardManager {
             
             // 排序并保留Top 10
             merged.sort((a, b) => b.score - a.score);
-            this.saveLeaderboard(merged.slice(0, this.maxEntries));
+            this.saveLocalLeaderboard(merged.slice(0, this.maxEntries));
             
             return true;
         } catch (e) {
@@ -831,6 +970,44 @@ class PacmanGame {
             });
         });
         
+        // 全局排行榜切换
+        const useGlobalCheckbox = document.getElementById('use-global-leaderboard');
+        const apiConfigSection = document.getElementById('api-config-section');
+        const apiUrlInput = document.getElementById('api-url');
+        const saveApiBtn = document.getElementById('save-api-btn');
+        
+        if (useGlobalCheckbox) {
+            // 初始化状态
+            useGlobalCheckbox.checked = this.leaderboardManager.isGlobal();
+            if (useGlobalCheckbox.checked && apiConfigSection) {
+                apiConfigSection.style.display = 'block';
+            }
+            if (apiUrlInput) {
+                apiUrlInput.value = this.leaderboardManager.getApiUrl();
+            }
+            
+            useGlobalCheckbox.addEventListener('change', () => {
+                this.leaderboardManager.setUseGlobal(useGlobalCheckbox.checked);
+                if (apiConfigSection) {
+                    apiConfigSection.style.display = useGlobalCheckbox.checked ? 'block' : 'none';
+                }
+                this.updateLeaderboardTable('all');
+            });
+        }
+        
+        if (saveApiBtn && apiUrlInput) {
+            saveApiBtn.addEventListener('click', () => {
+                const url = apiUrlInput.value.trim();
+                if (url) {
+                    this.leaderboardManager.setApiUrl(url);
+                    alert('API地址已保存！');
+                    this.updateLeaderboardTable('all');
+                } else {
+                    alert('请输入有效的API地址！');
+                }
+            });
+        }
+        
         // 导出按钮
         const exportBtn = document.getElementById('export-leaderboard');
         if (exportBtn) {
@@ -869,9 +1046,9 @@ class PacmanGame {
         // 清空按钮
         const clearBtn = document.getElementById('clear-leaderboard');
         if (clearBtn) {
-            clearBtn.addEventListener('click', () => {
+            clearBtn.addEventListener('click', async () => {
                 if (confirm('确定要清空排行榜吗？此操作不可恢复！')) {
-                    this.leaderboardManager.clearLeaderboard();
+                    await this.leaderboardManager.clearLeaderboard();
                     this.updateLeaderboardTable('all');
                 }
             });
@@ -901,28 +1078,42 @@ class PacmanGame {
         }
     }
     
-    // 更新排行榜表格
-    updateLeaderboardTable(type) {
+    // 更新排行榜表格（异步）
+    async updateLeaderboardTable(type) {
         const tbody = document.getElementById('leaderboard-body');
         if (!tbody) return;
         
+        // 显示加载提示
+        if (this.leaderboardManager.isGlobal()) {
+            tbody.innerHTML = `<tr><td colspan="5" class="loading-message">正在加载全局排行榜</td></tr>`;
+        }
+        
         let data;
-        switch (type) {
-            case 'today':
-                data = this.leaderboardManager.getTodayLeaderboard();
-                break;
-            case 'week':
-                data = this.leaderboardManager.getWeekLeaderboard();
-                break;
-            case 'all':
-                data = this.leaderboardManager.getAllLeaderboard();
-                break;
-            default:
-                data = this.leaderboardManager.getAllLeaderboard();
+        try {
+            switch (type) {
+                case 'today':
+                    data = await this.leaderboardManager.getTodayLeaderboard();
+                    break;
+                case 'week':
+                    data = await this.leaderboardManager.getWeekLeaderboard();
+                    break;
+                case 'all':
+                    data = await this.leaderboardManager.getAllLeaderboard();
+                    break;
+                default:
+                    data = await this.leaderboardManager.getAllLeaderboard();
+            }
+        } catch (e) {
+            console.error('获取排行榜失败:', e);
+            tbody.innerHTML = `<tr><td colspan="5" class="empty-message">加载失败，请检查API配置</td></tr>`;
+            return;
         }
         
         if (data.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5" class="empty-message">暂无记录，快去玩游戏吧！</td></tr>`;
+            const message = this.leaderboardManager.isGlobal() ? 
+                '暂无记录，快去玩游戏吧！' : 
+                '暂无本地记录，快去玩游戏吧！';
+            tbody.innerHTML = `<tr><td colspan="5" class="empty-message">${message}</td></tr>`;
             return;
         }
         
@@ -974,14 +1165,25 @@ class PacmanGame {
         nameInput.focus();
         
         // 提交按钮
-        submitBtn.addEventListener('click', () => {
+        submitBtn.addEventListener('click', async () => {
             const name = nameInput.value.trim();
             if (name.length >= 3 && name.length <= 12) {
-                const success = this.leaderboardManager.addEntry(name, score, isWin);
-                overlay.remove();
-                if (success) {
-                    this.showSuccessMessage(name, score, isWin);
-                } else {
+                // 显示保存提示
+                submitBtn.disabled = true;
+                submitBtn.textContent = '保存中...';
+                
+                try {
+                    const success = await this.leaderboardManager.addEntry(name, score, isWin);
+                    overlay.remove();
+                    if (success) {
+                        this.showSuccessMessage(name, score, isWin);
+                    } else {
+                        alert('保存失败，分数未超过现有记录或API不可用');
+                        this.showGameOver(isWin ? '恭喜你赢了！' : '游戏结束！', `最终得分: ${score}`, isWin);
+                    }
+                } catch (e) {
+                    console.error('保存失败:', e);
+                    overlay.remove();
                     alert('保存失败，请稍后重试');
                     this.showGameOver(isWin ? '恭喜你赢了！' : '游戏结束！', `最终得分: ${score}`, isWin);
                 }
