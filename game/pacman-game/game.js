@@ -1446,11 +1446,19 @@ class PacmanGame {
         return positions;
     }
     
-    getRandomPosition(excludePositions = []) {
+    getRandomPosition(excludePositions = [], minDistanceFromPacman = 0) {
         // 过滤出可用位置（排除已占用的位置）
-        const available = this.availablePositions.filter(pos => {
+        let available = this.availablePositions.filter(pos => {
             return !excludePositions.some(ex => ex.x === pos.x && ex.y === pos.y);
         });
+        
+        // 如果需要与吃豆人保持距离
+        if (minDistanceFromPacman > 0 && this.pacman) {
+            available = available.filter(pos => {
+                const distance = Math.abs(pos.x - this.pacman.gridX) + Math.abs(pos.y - this.pacman.gridY);
+                return distance >= minDistanceFromPacman;
+            });
+        }
         
         if (available.length === 0) return null;
         
@@ -1500,9 +1508,13 @@ class PacmanGame {
     initializeGhostsRandom() {
         const ghostColors = ['#ff0000', '#00ffff', '#ffb8ff', '#ffb852', '#00ff00', '#ff00ff', '#ffffff', '#ffff00', '#0080ff', '#ff8000'];
         
+        // 幽灵与吃豆人的最小距离（曼哈顿距离）
+        const MIN_DISTANCE = 5;
+        
         this.ghosts = [];
         for (let i = 0; i < this.ghostCount; i++) {
-            const pos = this.getRandomPosition(this.occupiedPositions);
+            // 幽灵出生时与吃豆人保持至少 MIN_DISTANCE 格距离
+            const pos = this.getRandomPosition(this.occupiedPositions, MIN_DISTANCE);
             if (pos) {
                 // 选择可行的初始方向
                 const validDirs = this.getValidDirections(pos.x, pos.y);
