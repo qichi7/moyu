@@ -233,6 +233,11 @@ class LeaderboardManager {
 }
 
 class PacmanGame {
+    // localStorage key for persisting last-used player nickname (issue #7)
+    static PLAYER_NAME_KEY = 'pacmanPlayerName';
+    // Probability that ghosts choose a direction biased toward pacman (issue #9)
+    static GHOST_CHASE_CHANCE = 0.35;
+
     constructor() {
         this.canvas = document.createElement('canvas');
         this.ctx = this.canvas.getContext('2d');
@@ -1062,29 +1067,62 @@ class PacmanGame {
         const overlay = document.createElement('div');
         overlay.className = 'name-input-overlay';
         overlay.id = 'name-input-overlay-current';
-        
-        overlay.innerHTML = `
-            <div class="name-input-content">
-                <h3>📝 上榜保存成绩</h3>
-                <p>你的得分：<strong>${score}</strong></p>
-                <p style="font-size: 14px; color: #888;">输入昵称保存到排行榜（3-12字符）</p>
-                <input type="text" id="player-name" placeholder="输入昵称" maxlength="12" autofocus>
-                <div class="name-input-buttons">
-                    <button class="name-submit-btn" id="submit-name">保存成绩</button>
-                    <button class="name-skip-btn" id="skip-name">取消</button>
-                </div>
-            </div>
-        `;
-        
+
+        const content = document.createElement('div');
+        content.className = 'name-input-content';
+
+        const title = document.createElement('h3');
+        title.textContent = '📝 上榜保存成绩';
+
+        const scoreLine = document.createElement('p');
+        scoreLine.appendChild(document.createTextNode('你的得分：'));
+        const scoreStrong = document.createElement('strong');
+        scoreStrong.textContent = String(score);
+        scoreLine.appendChild(scoreStrong);
+
+        const tip = document.createElement('p');
+        tip.style.fontSize = '14px';
+        tip.style.color = '#888';
+        tip.textContent = '输入昵称保存到排行榜（3-12字符）';
+
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.id = 'player-name';
+        nameInput.placeholder = '输入昵称';
+        nameInput.maxLength = 12;
+        nameInput.autofocus = true;
+        // 预填上次使用的昵称（issue #7）
+        try {
+            const saved = localStorage.getItem(PacmanGame.PLAYER_NAME_KEY);
+            if (saved) nameInput.value = saved;
+        } catch (e) { /* ignore */ }
+
+        const btnWrap = document.createElement('div');
+        btnWrap.className = 'name-input-buttons';
+        const submitBtn = document.createElement('button');
+        submitBtn.className = 'name-submit-btn';
+        submitBtn.id = 'submit-name';
+        submitBtn.textContent = '保存成绩';
+        const skipBtn = document.createElement('button');
+        skipBtn.className = 'name-skip-btn';
+        skipBtn.id = 'skip-name';
+        skipBtn.textContent = '取消';
+        btnWrap.appendChild(submitBtn);
+        btnWrap.appendChild(skipBtn);
+
+        content.appendChild(title);
+        content.appendChild(scoreLine);
+        content.appendChild(tip);
+        content.appendChild(nameInput);
+        content.appendChild(btnWrap);
+        overlay.appendChild(content);
+
         document.body.appendChild(overlay);
-        
-        const nameInput = overlay.querySelector('#player-name');
-        const submitBtn = overlay.querySelector('#submit-name');
-        const skipBtn = overlay.querySelector('#skip-name');
-        
+
         // 自动聚焦输入框
         nameInput.focus();
-        
+        if (nameInput.value) nameInput.select();
+
         // 提交按钮 - 检查 Token
         submitBtn.addEventListener('click', async () => {
             const name = nameInput.value.trim();
@@ -1098,11 +1136,13 @@ class PacmanGame {
                     // 有 Token，直接保存
                     submitBtn.disabled = true;
                     submitBtn.textContent = '保存中...';
-                    
+
                     try {
                         const success = await this.leaderboardManager.addEntry(name, score, isWin);
                         overlay.remove();
                         if (success) {
+                            // 保存成功后持久化昵称（issue #7）
+                            try { localStorage.setItem(PacmanGame.PLAYER_NAME_KEY, name); } catch (e) { /* ignore */ }
                             this.showSuccessMessage(name, score, isWin);
                         } else {
                             alert('保存失败，分数未超过现有记录或API不可用');
@@ -1121,20 +1161,20 @@ class PacmanGame {
                 nameInput.value = '';
             }
         });
-        
+
         // 取消按钮 - 重新显示游戏结束界面
         skipBtn.addEventListener('click', () => {
             overlay.remove();
             this.showGameOver(isWin ? '恭喜你赢了！' : '游戏结束！', `最终得分: ${score}`, isWin);
         });
-        
+
         // Enter键提交
         nameInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 submitBtn.click();
             }
         });
-        
+
         // ESC键取消
         overlay.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
@@ -1186,6 +1226,8 @@ class PacmanGame {
                     const success = await this.leaderboardManager.addEntry(name, score, isWin);
                     overlay.remove();
                     if (success) {
+                        // 保存成功后持久化昵称（issue #7）
+                        try { localStorage.setItem(PacmanGame.PLAYER_NAME_KEY, name); } catch (e) { /* ignore */ }
                         this.showSuccessMessage(name, score, isWin);
                     } else {
                         alert('保存失败，分数未超过现有记录或Token无效');
@@ -1229,27 +1271,48 @@ class PacmanGame {
         const overlay = document.createElement('div');
         overlay.className = 'name-input-overlay';
         overlay.id = 'token-action-overlay';
-        
-        overlay.innerHTML = `
-            <div class="name-input-content">
-                <h3>🔑 输入 GitHub Token</h3>
-                <p style="font-size: 14px; color: #888;">${actionName} 操作需要 GitHub Token</p>
-                <input type="password" id="gist-token-action-input" placeholder="ghp_xxxxxx" maxlength="50" autofocus>
-                <div class="name-input-buttons">
-                    <button class="name-submit-btn" id="submit-action-token">确认</button>
-                    <button class="name-skip-btn" id="skip-action-token">取消</button>
-                </div>
-            </div>
-        `;
-        
+
+        const content = document.createElement('div');
+        content.className = 'name-input-content';
+
+        const title = document.createElement('h3');
+        title.textContent = '🔑 输入 GitHub Token';
+
+        const tip = document.createElement('p');
+        tip.style.fontSize = '14px';
+        tip.style.color = '#888';
+        tip.appendChild(document.createTextNode(String(actionName) + ' 操作需要 GitHub Token'));
+
+        const tokenInput = document.createElement('input');
+        tokenInput.type = 'password';
+        tokenInput.id = 'gist-token-action-input';
+        tokenInput.placeholder = 'ghp_xxxxxx';
+        tokenInput.maxLength = 50;
+        tokenInput.autofocus = true;
+
+        const btnWrap = document.createElement('div');
+        btnWrap.className = 'name-input-buttons';
+        const submitBtn = document.createElement('button');
+        submitBtn.className = 'name-submit-btn';
+        submitBtn.id = 'submit-action-token';
+        submitBtn.textContent = '确认';
+        const skipBtn = document.createElement('button');
+        skipBtn.className = 'name-skip-btn';
+        skipBtn.id = 'skip-action-token';
+        skipBtn.textContent = '取消';
+        btnWrap.appendChild(submitBtn);
+        btnWrap.appendChild(skipBtn);
+
+        content.appendChild(title);
+        content.appendChild(tip);
+        content.appendChild(tokenInput);
+        content.appendChild(btnWrap);
+        overlay.appendChild(content);
+
         document.body.appendChild(overlay);
-        
-        const tokenInput = overlay.querySelector('#gist-token-action-input');
-        const submitBtn = overlay.querySelector('#submit-action-token');
-        const skipBtn = overlay.querySelector('#skip-action-token');
-        
+
         tokenInput.focus();
-        
+
         submitBtn.addEventListener('click', async () => {
             const token = tokenInput.value.trim();
             if (token.length > 0) {
@@ -1284,22 +1347,42 @@ class PacmanGame {
         const overlay = document.createElement('div');
         overlay.className = 'name-input-overlay';
         overlay.id = 'success-message-overlay';
-        
-        overlay.innerHTML = `
-            <div class="name-input-content">
-                <h3>✅ 保存成功</h3>
-                <p><strong>${name}</strong> 的成绩 <strong>${score}</strong> 已保存到排行榜！</p>
-                <div class="name-input-buttons">
-                    <button class="name-submit-btn" id="view-leaderboard-btn">查看排行榜</button>
-                    <button class="name-skip-btn" id="close-success-btn">继续游戏</button>
-                </div>
-            </div>
-        `;
-        
+
+        const content = document.createElement('div');
+        content.className = 'name-input-content';
+
+        const h3 = document.createElement('h3');
+        h3.textContent = '✅ 保存成功';
+
+        const line = document.createElement('p');
+        const nameEl = document.createElement('strong');
+        nameEl.textContent = String(name);
+        const scoreEl = document.createElement('strong');
+        scoreEl.textContent = String(score);
+        line.appendChild(nameEl);
+        line.appendChild(document.createTextNode(' 的成绩 '));
+        line.appendChild(scoreEl);
+        line.appendChild(document.createTextNode(' 已保存到排行榜！'));
+
+        const btnWrap = document.createElement('div');
+        btnWrap.className = 'name-input-buttons';
+        const viewLeaderboardBtn = document.createElement('button');
+        viewLeaderboardBtn.className = 'name-submit-btn';
+        viewLeaderboardBtn.id = 'view-leaderboard-btn';
+        viewLeaderboardBtn.textContent = '查看排行榜';
+        const closeSuccessBtn = document.createElement('button');
+        closeSuccessBtn.className = 'name-skip-btn';
+        closeSuccessBtn.id = 'close-success-btn';
+        closeSuccessBtn.textContent = '继续游戏';
+        btnWrap.appendChild(viewLeaderboardBtn);
+        btnWrap.appendChild(closeSuccessBtn);
+
+        content.appendChild(h3);
+        content.appendChild(line);
+        content.appendChild(btnWrap);
+        overlay.appendChild(content);
+
         document.body.appendChild(overlay);
-        
-        const viewLeaderboardBtn = overlay.querySelector('#view-leaderboard-btn');
-        const closeSuccessBtn = overlay.querySelector('#close-success-btn');
         
         // 查看排行榜按钮
         viewLeaderboardBtn.addEventListener('click', () => {
@@ -2292,16 +2375,47 @@ class PacmanGame {
         }
     }
     
+    // 选择幽灵下一步方向：优先避免原路返回，按概率追击吃豆人（issue #9）
+    chooseGhostDirection(ghost) {
+        const allValid = this.getValidDirections(ghost.gridX, ghost.gridY);
+        if (allValid.length === 0) return null;
+
+        // 过滤掉与当前方向相反的方向，避免走廊里反复倒车；死胡同时允许回头
+        let candidates = ghost.direction
+            ? allValid.filter(d => !this.isOppositeDirection(d, ghost.direction))
+            : allValid;
+        if (candidates.length === 0) candidates = allValid;
+
+        if (candidates.length === 1) return candidates[0];
+
+        // 追击偏置：按概率挑选最接近吃豆人的方向，其余时候保持随机
+        const pacmanGX = this.pacman && Number.isFinite(this.pacman.gridX) ? this.pacman.gridX : null;
+        const pacmanGY = this.pacman && Number.isFinite(this.pacman.gridY) ? this.pacman.gridY : null;
+        if (pacmanGX !== null && pacmanGY !== null && Math.random() < PacmanGame.GHOST_CHASE_CHANCE) {
+            let best = candidates[0];
+            let bestDist = Infinity;
+            for (const d of candidates) {
+                const off = this.getDirectionOffset(d);
+                const nx = ghost.gridX + off.dx;
+                const ny = ghost.gridY + off.dy;
+                const dist = Math.abs(nx - pacmanGX) + Math.abs(ny - pacmanGY);
+                if (dist < bestDist) { bestDist = dist; best = d; }
+            }
+            return best;
+        }
+
+        return candidates[Math.floor(Math.random() * candidates.length)];
+    }
+
     // 幽灵移动更新
     updateGhostsMovement(deltaTime) {
         this.ghosts.forEach(ghost => {
             // 如果幽灵不在移动，选择新方向
             if (!ghost.isMoving) {
-                const validDirs = this.getValidDirections(ghost.gridX, ghost.gridY);
-                if (validDirs.length > 0) {
-                    const randomDir = validDirs[Math.floor(Math.random() * validDirs.length)];
-                    ghost.direction = randomDir;
-                    const dir = this.getDirectionOffset(randomDir);
+                const nextDir = this.chooseGhostDirection(ghost);
+                if (nextDir) {
+                    ghost.direction = nextDir;
+                    const dir = this.getDirectionOffset(nextDir);
                     ghost.targetGridX = ghost.gridX + dir.dx;
                     ghost.targetGridY = ghost.gridY + dir.dy;
                     ghost.isMoving = true;
