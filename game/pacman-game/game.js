@@ -8,40 +8,71 @@ class LeaderboardManager {
     
     constructor() {
         this.maxEntries = 10;
-        
-        // GitHub Gist 配置 - 硬编码 ID，Token 临时输入
+
+        // GitHub Gist 配置 - 硬编码 ID，Token 仅保存在内存中
         this.gistId = LeaderboardManager.HARDCODED_GIST_ID;
-        this.gistToken = localStorage.getItem('pacmanGistToken') || '';
+        // Token 不再持久化到 localStorage，避免同源脚本（含 XSS）窃取
+        this.gistToken = '';
         this.gistFilename = 'leaderboard.json';
-        
+
         // 本地缓存（用于离线读取和备份）
         this.cacheKey = 'pacmanLeaderboardCache';
         this.cacheVersionKey = 'pacmanLeaderboardCacheVersion';
-        
-        // 检查缓存版本，版本不匹配时清除旧缓存
+
+        // 检查缓存版本，版本不匹配时清除旧缓存；同时迁移清除历史明文 Token
         this.checkAndClearOldCache();
     }
-    
+
     // 检查并清除旧缓存
     checkAndClearOldCache() {
+        // 无论版本是否匹配，主动清除历史残留的明文 Token
+        try {
+            localStorage.removeItem('pacmanGistToken');
+        } catch (e) { /* 忽略存储访问异常 */ }
+
         const currentVersion = localStorage.getItem(this.cacheVersionKey);
         const oldGistId = localStorage.getItem('pacmanGistId');
-        
+
         // 如果缓存版本不匹配，或有旧的 gistId 配置，清除所有缓存
-        if (currentVersion !== LeaderboardManager.CACHE_VERSION || 
+        if (currentVersion !== LeaderboardManager.CACHE_VERSION ||
             (oldGistId && oldGistId !== this.gistId)) {
             console.log('清除旧缓存，版本:', currentVersion, '->', LeaderboardManager.CACHE_VERSION);
             localStorage.removeItem('pacmanGistId');
-            localStorage.removeItem('pacmanGistToken');
             localStorage.removeItem(this.cacheKey);
             localStorage.setItem(this.cacheVersionKey, LeaderboardManager.CACHE_VERSION);
         }
     }
-    
-    // 设置 Token（用于保存成绩）
+
+    // 设置 Token（仅在当前会话内存中保存，不写入任何持久化存储）
     setToken(token) {
         this.gistToken = token;
-        localStorage.setItem('pacmanGistToken', token);
+    }
+
+    // 清除内存中的 Token
+    clearToken() {
+        this.gistToken = '';
+    }
+
+    // 校验并清洗远端排行榜数据，防止恶意字段触发 XSS/类型错误
+    static sanitizeEntries(raw) {
+        if (!Array.isArray(raw)) return [];
+        const nameRe = /^[\p{L}\p{N}_\-\s]{1,12}$/u;
+        const dateRe = /^[0-9/\-.\s:]{1,20}$/;
+        const cleaned = [];
+        for (const item of raw) {
+            if (!item || typeof item !== 'object') continue;
+            const name = typeof item.name === 'string' ? item.name : '';
+            const score = Number(item.score);
+            const isWin = Boolean(item.isWin);
+            const date = typeof item.date === 'string' ? item.date : '';
+            const timestamp = Number(item.timestamp);
+            if (!nameRe.test(name)) continue;
+            if (!Number.isFinite(score) || score < 0 || score > 1e9) continue;
+            if (!dateRe.test(date)) continue;
+            if (!Number.isFinite(timestamp) || timestamp < 0) continue;
+            cleaned.push({ name, score: Math.floor(score), isWin, date, timestamp });
+        }
+        return cleaned;
     }
     
     // 获取硬编码的 Gist ID
@@ -62,7 +93,8 @@ class LeaderboardManager {
     getCache() {
         try {
             const data = localStorage.getItem(this.cacheKey);
-            return data ? JSON.parse(data) : [];
+            // 缓存同样可能被其他同源脚本污染，读取时再清洗一次
+            return data ? LeaderboardManager.sanitizeEntries(JSON.parse(data)) : [];
         } catch (e) {
             console.error('读取缓存失败:', e);
             return [];
@@ -92,7 +124,9 @@ class LeaderboardManager {
             
             if (gist.files && gist.files[this.gistFilename]) {
                 const content = gist.files[this.gistFilename].content;
-                const data = JSON.parse(content);
+                const parsed = JSON.parse(content);
+                // 远端数据不可信，进入应用前必须清洗
+                const data = LeaderboardManager.sanitizeEntries(parsed);
                 // 更新本地缓存
                 this.saveCache(data);
                 return data;
@@ -945,10 +979,22 @@ class PacmanGame {
     async updateLeaderboardTable(type) {
         const tbody = document.getElementById('leaderboard-body');
         if (!tbody) return;
-        
+
+        // 使用安全的 DOM 构造工具函数，避免将任何远端字段拼入 innerHTML
+        const setPlaceholderRow = (message, cls) => {
+            while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 5;
+            td.className = cls;
+            td.textContent = message;
+            tr.appendChild(td);
+            tbody.appendChild(tr);
+        };
+
         // 显示加载提示
-        tbody.innerHTML = `<tr><td colspan="5" class="loading-message">正在加载排行榜...</td></tr>`;
-        
+        setPlaceholderRow('正在加载排行榜...', 'loading-message');
+
         let data;
         try {
             switch (type) {
@@ -966,35 +1012,46 @@ class PacmanGame {
             }
         } catch (e) {
             console.error('获取排行榜失败:', e);
-            tbody.innerHTML = `<tr><td colspan="5" class="empty-message">加载失败，请检查 Gist 配置</td></tr>`;
+            setPlaceholderRow('加载失败，请检查 Gist 配置', 'empty-message');
             return;
         }
-        
-        if (data.length === 0) {
-            const message = this.leaderboardManager.isConfigured() ? 
-                '暂无记录，快去玩游戏吧！' : 
+
+        if (!Array.isArray(data) || data.length === 0) {
+            const message = this.leaderboardManager.isConfigured() ?
+                '暂无记录，快去玩游戏吧！' :
                 '请先配置 GitHub Gist ID';
-            tbody.innerHTML = `<tr><td colspan="5" class="empty-message">${message}</td></tr>`;
+            setPlaceholderRow(message, 'empty-message');
             return;
         }
-        
-        tbody.innerHTML = data.map((entry, index) => {
+
+        while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+        data.forEach((entry, index) => {
             const rank = index + 1;
             const medal = this.leaderboardManager.getMedal(rank);
-            const medalName = medal ? `${medal} ${entry.name}` : entry.name;
+            const displayName = medal ? `${medal} ${entry.name}` : String(entry.name);
             const status = entry.isWin ? '通关' : '失败';
             const statusClass = entry.isWin ? 'status-win' : 'status-lose';
-            
-            return `
-                <tr>
-                    <td>${rank}</td>
-                    <td>${medalName}</td>
-                    <td>${entry.score}</td>
-                    <td class="${statusClass}">${status}</td>
-                    <td>${entry.date}</td>
-                </tr>
-            `;
-        }).join('');
+
+            const tr = document.createElement('tr');
+            const tdRank = document.createElement('td');
+            tdRank.textContent = String(rank);
+            const tdName = document.createElement('td');
+            tdName.textContent = displayName;
+            const tdScore = document.createElement('td');
+            tdScore.textContent = String(entry.score);
+            const tdStatus = document.createElement('td');
+            tdStatus.className = statusClass;
+            tdStatus.textContent = status;
+            const tdDate = document.createElement('td');
+            tdDate.textContent = String(entry.date);
+
+            tr.appendChild(tdRank);
+            tr.appendChild(tdName);
+            tr.appendChild(tdScore);
+            tr.appendChild(tdStatus);
+            tr.appendChild(tdDate);
+            tbody.appendChild(tr);
+        });
     }
     
     // 显示昵称输入框
@@ -1225,16 +1282,36 @@ class PacmanGame {
         overlay.className = 'name-input-overlay';
         overlay.id = 'success-message-overlay';
         
-        overlay.innerHTML = `
-            <div class="name-input-content">
-                <h3>✅ 保存成功</h3>
-                <p><strong>${name}</strong> 的成绩 <strong>${score}</strong> 已保存到排行榜！</p>
-                <div class="name-input-buttons">
-                    <button class="name-submit-btn" id="view-leaderboard-btn">查看排行榜</button>
-                    <button class="name-skip-btn" id="close-success-btn">继续游戏</button>
-                </div>
-            </div>
-        `;
+        // 使用 DOM API 构造，杜绝把用户输入拼入 innerHTML
+        const content = document.createElement('div');
+        content.className = 'name-input-content';
+        const h3 = document.createElement('h3');
+        h3.textContent = '✅ 保存成功';
+        const p = document.createElement('p');
+        const nameEl = document.createElement('strong');
+        nameEl.textContent = String(name);
+        const scoreEl = document.createElement('strong');
+        scoreEl.textContent = String(score);
+        p.appendChild(nameEl);
+        p.appendChild(document.createTextNode(' 的成绩 '));
+        p.appendChild(scoreEl);
+        p.appendChild(document.createTextNode(' 已保存到排行榜！'));
+        const btnWrap = document.createElement('div');
+        btnWrap.className = 'name-input-buttons';
+        const viewBtn = document.createElement('button');
+        viewBtn.className = 'name-submit-btn';
+        viewBtn.id = 'view-leaderboard-btn';
+        viewBtn.textContent = '查看排行榜';
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'name-skip-btn';
+        closeBtn.id = 'close-success-btn';
+        closeBtn.textContent = '继续游戏';
+        btnWrap.appendChild(viewBtn);
+        btnWrap.appendChild(closeBtn);
+        content.appendChild(h3);
+        content.appendChild(p);
+        content.appendChild(btnWrap);
+        overlay.appendChild(content);
         
         document.body.appendChild(overlay);
         
