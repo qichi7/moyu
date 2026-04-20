@@ -1,30 +1,15 @@
-// 排行榜管理类（支持本地、GitHub Gist、Cloudflare Workers）
+// 排行榜管理类（GitHub Gist）
 class LeaderboardManager {
     constructor() {
-        this.storageKey = 'pacmanLeaderboard';
         this.maxEntries = 10;
-        
-        // Cloudflare Workers 配置
-        this.apiBaseUrl = localStorage.getItem('pacmanApiUrl') || '';
         
         // GitHub Gist 配置
         this.gistId = localStorage.getItem('pacmanGistId') || '';
         this.gistToken = localStorage.getItem('pacmanGistToken') || '';
         this.gistFilename = 'leaderboard.json';
         
-        // 模式：local（本地）、gist（GitHub Gist）、worker（Cloudflare Workers）
-        this.leaderboardMode = localStorage.getItem('pacmanLeaderboardMode') || 'local';
-    }
-    
-    // 获取当前模式
-    getMode() {
-        return this.leaderboardMode;
-    }
-    
-    // 设置模式
-    setMode(mode) {
-        this.leaderboardMode = mode;
-        localStorage.setItem('pacmanLeaderboardMode', mode);
+        // 本地缓存（用于离线读取和备份）
+        this.cacheKey = 'pacmanLeaderboardCache';
     }
     
     // GitHub Gist 配置
@@ -43,46 +28,36 @@ class LeaderboardManager {
         return this.gistToken;
     }
     
-    // Cloudflare Workers 配置
-    setApiUrl(url) {
-        this.apiBaseUrl = url;
-        localStorage.setItem('pacmanApiUrl', url);
+    // 是否已配置 Gist
+    isConfigured() {
+        return this.gistId !== '';
     }
     
-    getApiUrl() {
-        return this.apiBaseUrl;
-    }
-    
-    // 是否使用全局排行榜
-    isGlobal() {
-        return this.leaderboardMode !== 'local';
-    }
-    
-    // 本地：获取排行榜数据
-    getLocalLeaderboard() {
+    // 获取本地缓存
+    getCache() {
         try {
-            const data = localStorage.getItem(this.storageKey);
+            const data = localStorage.getItem(this.cacheKey);
             return data ? JSON.parse(data) : [];
         } catch (e) {
-            console.error('读取本地排行榜失败:', e);
+            console.error('读取缓存失败:', e);
             return [];
         }
     }
     
-    // 本地：保存排行榜数据
-    saveLocalLeaderboard(data) {
+    // 保存本地缓存
+    saveCache(data) {
         try {
-            localStorage.setItem(this.storageKey, JSON.stringify(data));
+            localStorage.setItem(this.cacheKey, JSON.stringify(data));
         } catch (e) {
-            console.error('保存本地排行榜失败:', e);
+            console.error('保存缓存失败:', e);
         }
     }
     
     // GitHub Gist：获取排行榜
-    async getGistLeaderboard() {
+    async getLeaderboard() {
         if (!this.gistId) {
-            console.error('Gist ID 未配置');
-            return [];
+            console.error('Gist ID 未配置，返回缓存数据');
+            return this.getCache();
         }
         
         try {
@@ -92,17 +67,21 @@ class LeaderboardManager {
             
             if (gist.files && gist.files[this.gistFilename]) {
                 const content = gist.files[this.gistFilename].content;
-                return JSON.parse(content);
+                const data = JSON.parse(content);
+                // 更新本地缓存
+                this.saveCache(data);
+                return data;
             }
             return [];
         } catch (e) {
             console.error('获取 Gist 排行榜失败:', e);
-            return [];
+            // 网络失败时返回缓存
+            return this.getCache();
         }
     }
     
     // GitHub Gist：保存排行榜
-    async saveGistLeaderboard(data) {
+    async saveLeaderboard(data) {
         if (!this.gistId) {
             console.error('Gist ID 未配置');
             return false;
@@ -110,6 +89,8 @@ class LeaderboardManager {
         
         if (!this.gistToken) {
             console.error('需要 Gist Token 才能保存数据');
+            // 保存到本地缓存
+            this.saveCache(data);
             return false;
         }
         
@@ -130,21 +111,32 @@ class LeaderboardManager {
                 })
             });
             
-            return response.ok;
+            if (response.ok) {
+                // 同时保存到本地缓存
+                this.saveCache(data);
+                return true;
+            }
+            return false;
         } catch (e) {
             console.error('保存 Gist 排行榜失败:', e);
+            // 保存到本地缓存
+            this.saveCache(data);
             return false;
         }
     }
     
-    // GitHub Gist：添加记录
-    async addGistEntry(name, score, isWin) {
-        if (!this.gistToken) {
-            console.error('需要 Gist Token 才能保存数据');
+    // 添加新记录
+    async addEntry(name, score, isWin) {
+        if (!name || name.length < 3 || name.length > 12) {
             return false;
         }
         
-        const leaderboard = await this.getGistLeaderboard();
+        if (!this.gistId || !this.gistToken) {
+            console.error('Gist 未配置或缺少 Token');
+            return false;
+        }
+        
+        const leaderboard = await this.getLeaderboard();
         const timestamp = Date.now();
         const date = new Date().toLocaleDateString('zh-CN');
         
@@ -165,240 +157,35 @@ class LeaderboardManager {
         leaderboard.sort((a, b) => b.score - a.score);
         const trimmed = leaderboard.slice(0, this.maxEntries);
         
-        return await this.saveGistLeaderboard(trimmed);
-    }
-    
-    // Cloudflare Workers：获取排行榜数据
-    async getWorkerLeaderboard(type) {
-        if (!this.apiBaseUrl) {
-            console.error('API地址未配置');
-            return [];
-        }
-        
-        try {
-            const response = await fetch(`${this.apiBaseUrl}/api/leaderboard?type=${type}`);
-            const result = await response.json();
-            
-            if (result.success) {
-                return result.data;
-            } else {
-                console.error('获取 Workers 排行榜失败:', result.error);
-                return [];
-            }
-        } catch (e) {
-            console.error('获取 Workers 排行榜失败:', e);
-            return [];
-        }
-    }
-    
-    // Cloudflare Workers：添加记录
-    async addWorkerEntry(name, score, isWin) {
-        if (!this.apiBaseUrl) {
-            console.error('API地址未配置');
-            return false;
-        }
-        
-        try {
-            const response = await fetch(`${this.apiBaseUrl}/api/leaderboard`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    name,
-                    score,
-                    isWin,
-                    date: new Date().toLocaleDateString('zh-CN'),
-                    timestamp: Date.now()
-                })
-            });
-            
-            const result = await response.json();
-            return result.success;
-        } catch (e) {
-            console.error('添加 Workers 记录失败:', e);
-            return false;
-        }
-    }
-    
-    // 添加新记录（自动判断模式）
-    async addEntry(name, score, isWin) {
-        if (!name || name.length < 3 || name.length > 12) {
-            return false;
-        }
-        
-        // 同时保存到本地作为备份
-        this.addLocalEntry(name, score, isWin);
-        
-        if (this.leaderboardMode === 'gist') {
-            return await this.addGistEntry(name, score, isWin);
-        } else if (this.leaderboardMode === 'worker') {
-            return await this.addWorkerEntry(name, score, isWin);
-        } else {
-            return true; // 本地模式，已保存
-        }
-    }
-    
-    // 本地：添加记录
-    addLocalEntry(name, score, isWin) {
-        if (!name || name.length < 3 || name.length > 12) {
-            return false;
-        }
-        
-        const leaderboard = this.getLocalLeaderboard();
-        const timestamp = Date.now();
-        const date = new Date().toLocaleDateString('zh-CN');
-        
-        // 检查相同昵称是否已存在
-        const existingIndex = leaderboard.findIndex(entry => entry.name === name);
-        
-        if (existingIndex !== -1) {
-            // 只保留该玩家的最高分
-            if (score > leaderboard[existingIndex].score) {
-                leaderboard[existingIndex] = {
-                    name,
-                    score,
-                    isWin,
-                    date,
-                    timestamp
-                };
-            } else {
-                return false; // 分数没有提高，不更新
-            }
-        } else {
-            // 新玩家，添加记录
-            leaderboard.push({
-                name,
-                score,
-                isWin,
-                date,
-                timestamp
-            });
-        }
-        
-        // 按分数排序，保留Top 10
-        leaderboard.sort((a, b) => b.score - a.score);
-        const trimmed = leaderboard.slice(0, this.maxEntries);
-        
-        this.saveLocalLeaderboard(trimmed);
-        return true;
-    }
-    
-    // 获取排行榜（异步）
-    async getLeaderboard(type = 'all') {
-        if (this.leaderboardMode === 'gist') {
-            return await this.getGistLeaderboard();
-        } else if (this.leaderboardMode === 'worker') {
-            return await this.getWorkerLeaderboard(type);
-        } else {
-            return this.getLocalLeaderboard();
-        }
+        return await this.saveLeaderboard(trimmed);
     }
     
     // 获取今日榜
     async getTodayLeaderboard() {
         const today = new Date().toLocaleDateString('zh-CN');
-        
-        if (this.leaderboardMode === 'gist') {
-            const data = await this.getGistLeaderboard();
-            return data.filter(entry => entry.date === today);
-        } else if (this.leaderboardMode === 'worker') {
-            return await this.getWorkerLeaderboard('today');
-        } else {
-            return this.getLocalLeaderboard().filter(entry => entry.date === today);
-        }
+        const data = await this.getLeaderboard();
+        return data.filter(entry => entry.date === today);
     }
     
     // 获取本周榜
     async getWeekLeaderboard() {
         const now = Date.now();
         const weekStart = now - 7 * 24 * 60 * 60 * 1000;
-        
-        if (this.leaderboardMode === 'gist') {
-            const data = await this.getGistLeaderboard();
-            return data.filter(entry => entry.timestamp >= weekStart);
-        } else if (this.leaderboardMode === 'worker') {
-            return await this.getWorkerLeaderboard('week');
-        } else {
-            return this.getLocalLeaderboard().filter(entry => entry.timestamp >= weekStart);
-        }
+        const data = await this.getLeaderboard();
+        return data.filter(entry => entry.timestamp >= weekStart);
     }
     
     // 获取总榜
     async getAllLeaderboard() {
-        if (this.leaderboardMode === 'gist') {
-            return await this.getGistLeaderboard();
-        } else if (this.leaderboardMode === 'worker') {
-            return await this.getWorkerLeaderboard('all');
-        } else {
-            return this.getLocalLeaderboard();
-        }
+        return await this.getLeaderboard();
     }
     
     // 清空排行榜
     async clearLeaderboard() {
-        localStorage.removeItem(this.storageKey);
+        localStorage.removeItem(this.cacheKey);
         
-        if (this.leaderboardMode === 'gist' && this.gistToken) {
-            await this.saveGistLeaderboard([]);
-        } else if (this.leaderboardMode === 'worker') {
-            // Workers 清空需要单独实现
-        }
-    }
-    
-    // 导出排行榜为JSON
-    exportToJSON() {
-        const data = this.getLocalLeaderboard();
-        const jsonStr = JSON.stringify(data, null, 2);
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `pacman_leaderboard_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.json`;
-        a.click();
-        
-        URL.revokeObjectURL(url);
-    }
-    
-    // 导入排行榜JSON
-    importFromJSON(jsonData) {
-        try {
-            const data = JSON.parse(jsonData);
-            if (!Array.isArray(data)) {
-                throw new Error('数据格式错误');
-            }
-            
-            // 验证数据格式
-            for (const entry of data) {
-                if (!entry.name || typeof entry.score !== 'number') {
-                    throw new Error('数据格式错误');
-                }
-            }
-            
-            // 合并数据，保留最高分
-            const currentData = this.getLocalLeaderboard();
-            const merged = [...currentData];
-            
-            for (const entry of data) {
-                const existingIndex = merged.findIndex(e => e.name === entry.name);
-                if (existingIndex !== -1) {
-                    if (entry.score > merged[existingIndex].score) {
-                        merged[existingIndex] = entry;
-                    }
-                } else {
-                    merged.push(entry);
-                }
-            }
-            
-            // 排序并保留Top 10
-            merged.sort((a, b) => b.score - a.score);
-            this.saveLocalLeaderboard(merged.slice(0, this.maxEntries));
-            
-            return true;
-        } catch (e) {
-            console.error('导入失败:', e);
-            return false;
+        if (this.gistId && this.gistToken) {
+            await this.saveLeaderboard([]);
         }
     }
     
@@ -1084,38 +871,15 @@ class PacmanGame {
             });
         });
         
-        // 排行榜模式选择
-        const modeSelect = document.getElementById('leaderboard-mode-select');
-        const gistConfigSection = document.getElementById('gist-config-section');
-        const workerConfigSection = document.getElementById('worker-config-section');
+        // Gist 配置初始化
+        const gistIdInput = document.getElementById('gist-id');
+        const gistTokenInput = document.getElementById('gist-token');
         
-        if (modeSelect) {
-            // 初始化状态
-            const currentMode = this.leaderboardManager.getMode();
-            modeSelect.value = currentMode;
-            this.updateConfigSection(currentMode);
-            
-            // 初始化配置值
-            const gistIdInput = document.getElementById('gist-id');
-            const gistTokenInput = document.getElementById('gist-token');
-            const apiUrlInput = document.getElementById('api-url');
-            
-            if (gistIdInput) gistIdInput.value = this.leaderboardManager.getGistId();
-            if (gistTokenInput) gistTokenInput.value = this.leaderboardManager.getGistToken();
-            if (apiUrlInput) apiUrlInput.value = this.leaderboardManager.getApiUrl();
-            
-            modeSelect.addEventListener('change', () => {
-                const mode = modeSelect.value;
-                this.leaderboardManager.setMode(mode);
-                this.updateConfigSection(mode);
-                this.updateLeaderboardTable('all');
-            });
-        }
+        if (gistIdInput) gistIdInput.value = this.leaderboardManager.getGistId();
+        if (gistTokenInput) gistTokenInput.value = this.leaderboardManager.getGistToken();
         
         // Gist 配置保存
         const saveGistBtn = document.getElementById('save-gist-btn');
-        const gistIdInput = document.getElementById('gist-id');
-        const gistTokenInput = document.getElementById('gist-token');
         
         if (saveGistBtn) {
             saveGistBtn.addEventListener('click', () => {
@@ -1132,58 +896,6 @@ class PacmanGame {
             });
         }
         
-        // Workers 配置保存
-        const saveApiBtn = document.getElementById('save-api-btn');
-        const apiUrlInput = document.getElementById('api-url');
-        
-        if (saveApiBtn && apiUrlInput) {
-            saveApiBtn.addEventListener('click', () => {
-                const url = apiUrlInput.value.trim();
-                if (url) {
-                    this.leaderboardManager.setApiUrl(url);
-                    alert('API地址已保存！');
-                    this.updateLeaderboardTable('all');
-                } else {
-                    alert('请输入有效的API地址！');
-                }
-            });
-        }
-        
-        // 导出按钮
-        const exportBtn = document.getElementById('export-leaderboard');
-        if (exportBtn) {
-            exportBtn.addEventListener('click', () => {
-                this.leaderboardManager.exportToJSON();
-            });
-        }
-        
-        // 导入按钮
-        const importBtn = document.getElementById('import-leaderboard');
-        const importFile = document.getElementById('import-file');
-        if (importBtn && importFile) {
-            importBtn.addEventListener('click', () => {
-                importFile.click();
-            });
-            
-            importFile.addEventListener('change', (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                        const success = this.leaderboardManager.importFromJSON(event.target.result);
-                        if (success) {
-                            this.updateLeaderboardTable('all');
-                            alert('导入成功！');
-                        } else {
-                            alert('导入失败，请检查文件格式！');
-                        }
-                    };
-                    reader.readAsText(file);
-                }
-                importFile.value = ''; // 清空以便再次选择同一文件
-            });
-        }
-        
         // 清空按钮
         const clearBtn = document.getElementById('clear-leaderboard');
         if (clearBtn) {
@@ -1193,19 +905,6 @@ class PacmanGame {
                     this.updateLeaderboardTable('all');
                 }
             });
-        }
-    }
-    
-    // 更新配置界面显示
-    updateConfigSection(mode) {
-        const gistConfigSection = document.getElementById('gist-config-section');
-        const workerConfigSection = document.getElementById('worker-config-section');
-        
-        if (gistConfigSection) {
-            gistConfigSection.style.display = mode === 'gist' ? 'block' : 'none';
-        }
-        if (workerConfigSection) {
-            workerConfigSection.style.display = mode === 'worker' ? 'block' : 'none';
         }
     }
     
@@ -1238,9 +937,7 @@ class PacmanGame {
         if (!tbody) return;
         
         // 显示加载提示
-        if (this.leaderboardManager.isGlobal()) {
-            tbody.innerHTML = `<tr><td colspan="5" class="loading-message">正在加载全局排行榜</td></tr>`;
-        }
+        tbody.innerHTML = `<tr><td colspan="5" class="loading-message">正在加载排行榜...</td></tr>`;
         
         let data;
         try {
@@ -1259,14 +956,14 @@ class PacmanGame {
             }
         } catch (e) {
             console.error('获取排行榜失败:', e);
-            tbody.innerHTML = `<tr><td colspan="5" class="empty-message">加载失败，请检查API配置</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" class="empty-message">加载失败，请检查 Gist 配置</td></tr>`;
             return;
         }
         
         if (data.length === 0) {
-            const message = this.leaderboardManager.isGlobal() ? 
+            const message = this.leaderboardManager.isConfigured() ? 
                 '暂无记录，快去玩游戏吧！' : 
-                '暂无本地记录，快去玩游戏吧！';
+                '请先配置 GitHub Gist ID';
             tbody.innerHTML = `<tr><td colspan="5" class="empty-message">${message}</td></tr>`;
             return;
         }
