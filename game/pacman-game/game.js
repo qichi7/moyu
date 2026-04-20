@@ -1996,13 +1996,19 @@ class PacmanGame {
 
     startGame() {
         if (this.gameRunning) return;
+        
+        // 如果游戏已结束或分数不为0，需要重置游戏状态
+        if (this.gameOver || this.score !== 0) {
+            this.resetGameState();
+        }
+        
         this.gameRunning = true;
         this.paused = false;
         this.lastTime = 0;
         requestAnimationFrame((ts) => this.gameLoop(ts));
     }
 
-    restartGame() {
+    resetGameState() {
         this.gameRunning = false;
         this.gameOver = false;
         this.paused = false;
@@ -2014,6 +2020,15 @@ class PacmanGame {
         this.initializeMap();
         this.updateMoveSpeed();
         this.render();
+    }
+
+    restartGame() {
+        this.resetGameState();
+        // 重开后自动开始游戏
+        this.gameRunning = true;
+        this.paused = false;
+        this.lastTime = 0;
+        requestAnimationFrame((ts) => this.gameLoop(ts));
     }
     
     togglePause() {
@@ -2256,7 +2271,15 @@ class PacmanGame {
         }
         
         if (validTurns.length > 0) {
-            entity.direction = validTurns[Math.floor(Math.random() * validTurns.length)];
+            const newDir = validTurns[Math.floor(Math.random() * validTurns.length)];
+            
+            // 安全检查：对于吃豆人，确保新方向不是回头方向
+            if (entity.nextDirection && this.isOppositeDirection(currentDir, newDir)) {
+                // 吃豆人不能回头，保持停止
+                return;
+            }
+            
+            entity.direction = newDir;
             const dir = this.getDirectionOffset(entity.direction);
             entity.targetGridX = entity.gridX + dir.dx;
             entity.targetGridY = entity.gridY + dir.dy;
