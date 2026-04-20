@@ -949,6 +949,7 @@ class PacmanGame {
     showNameInput(score, isWin) {
         const overlay = document.createElement('div');
         overlay.className = 'name-input-overlay';
+        overlay.id = 'name-input-overlay-current';
         
         overlay.innerHTML = `
             <div class="name-input-content">
@@ -979,9 +980,10 @@ class PacmanGame {
                 const success = this.leaderboardManager.addEntry(name, score, isWin);
                 overlay.remove();
                 if (success) {
-                    this.showSuccessMessage(name, score);
+                    this.showSuccessMessage(name, score, isWin);
                 } else {
                     alert('保存失败，请稍后重试');
+                    this.showGameOver(isWin ? '恭喜你赢了！' : '游戏结束！', `最终得分: ${score}`, isWin);
                 }
             } else {
                 nameInput.style.borderColor = '#ff0000';
@@ -990,9 +992,10 @@ class PacmanGame {
             }
         });
         
-        // 取消按钮
+        // 取消按钮 - 重新显示游戏结束界面
         skipBtn.addEventListener('click', () => {
             overlay.remove();
+            this.showGameOver(isWin ? '恭喜你赢了！' : '游戏结束！', `最终得分: ${score}`, isWin);
         });
         
         // Enter键提交
@@ -1011,29 +1014,45 @@ class PacmanGame {
     }
     
     // 显示保存成功提示
-    showSuccessMessage(name, score) {
+    showSuccessMessage(name, score, isWin) {
         const overlay = document.createElement('div');
         overlay.className = 'name-input-overlay';
+        overlay.id = 'success-message-overlay';
         
         overlay.innerHTML = `
             <div class="name-input-content">
                 <h3>✅ 保存成功</h3>
                 <p><strong>${name}</strong> 的成绩 <strong>${score}</strong> 已保存到排行榜！</p>
                 <div class="name-input-buttons">
-                    <button class="name-submit-btn" onclick="this.closest('.name-input-overlay').remove(); document.getElementById('leaderboard-btn').click();">查看排行榜</button>
-                    <button class="name-skip-btn" onclick="this.closest('.name-input-overlay').remove();">关闭</button>
+                    <button class="name-submit-btn" id="view-leaderboard-btn">查看排行榜</button>
+                    <button class="name-skip-btn" id="close-success-btn">继续游戏</button>
                 </div>
             </div>
         `;
         
         document.body.appendChild(overlay);
         
-        // 3秒后自动关闭
-        setTimeout(() => {
-            if (overlay.parentElement) {
-                overlay.remove();
+        const viewLeaderboardBtn = overlay.querySelector('#view-leaderboard-btn');
+        const closeSuccessBtn = overlay.querySelector('#close-success-btn');
+        
+        // 查看排行榜按钮
+        viewLeaderboardBtn.addEventListener('click', () => {
+            overlay.remove();
+            document.getElementById('leaderboard-btn').click();
+        });
+        
+        // 继续游戏按钮 - 重新显示游戏结束界面
+        closeSuccessBtn.addEventListener('click', () => {
+            overlay.remove();
+            this.showGameOver(isWin ? '恭喜你赢了！' : '游戏结束！', `最终得分: ${score}`, isWin);
+        });
+        
+        // ESC键关闭
+        overlay.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeSuccessBtn.click();
             }
-        }, 3000);
+        });
     }
     
     // 预生成下一个地图（异步）
