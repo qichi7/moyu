@@ -2248,8 +2248,12 @@ class PacmanGame {
     
     // 吃豆人移动更新
     updatePacmanMovement(deltaTime) {
-        // 优先响应用户输入：如果有新方向，尝试转向
-        if (this.pacman.nextDirection !== this.pacman.direction) {
+        // 检查是否在格子中心（允许转向的前提条件）
+        const atGridCenter = Math.abs(this.pacman.x - this.pacman.gridX) < 0.1 &&
+                             Math.abs(this.pacman.y - this.pacman.gridY) < 0.1;
+        
+        // 优先响应用户输入：如果有新方向且在格子中心，尝试转向
+        if (this.pacman.nextDirection !== this.pacman.direction && atGridCenter) {
             const nextDir = this.getDirectionOffset(this.pacman.nextDirection);
             const nextGridX = this.pacman.gridX + nextDir.dx;
             const nextGridY = this.pacman.gridY + nextDir.dy;
@@ -2259,7 +2263,7 @@ class PacmanGame {
                 // 不允许回头，忽略这个输入
                 this.pacman.nextDirection = this.pacman.direction;
             } else if (this.isValidMove(nextGridX, nextGridY)) {
-                // 目标方向可行，立即转向
+                // 目标方向可行，转向
                 this.pacman.lastDirection = this.pacman.direction;
                 this.pacman.direction = this.pacman.nextDirection;
                 this.pacman.targetGridX = nextGridX;
@@ -2271,8 +2275,8 @@ class PacmanGame {
             }
         }
         
-        // 继续当前方向移动
-        if (!this.pacman.isMoving && this.pacman.direction) {
+        // 继续当前方向移动（只有在格子中心且停止时才尝试新移动）
+        if (!this.pacman.isMoving && this.pacman.direction && atGridCenter) {
             const dir = this.getDirectionOffset(this.pacman.direction);
             const nextGridX = this.pacman.gridX + dir.dx;
             const nextGridY = this.pacman.gridY + dir.dy;
@@ -2301,7 +2305,7 @@ class PacmanGame {
                 this.pacman.gridY = this.pacman.targetGridY;
                 this.pacman.isMoving = false;
                 
-                // 检查当前方向是否可继续
+                // 到达格子中心后，检查当前方向是否可继续
                 const nextDir = this.getDirectionOffset(this.pacman.direction);
                 const nextGridX = this.pacman.gridX + nextDir.dx;
                 const nextGridY = this.pacman.gridY + nextDir.dy;
