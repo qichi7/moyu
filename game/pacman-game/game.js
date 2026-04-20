@@ -9,9 +9,9 @@ class LeaderboardManager {
     constructor() {
         this.maxEntries = 10;
         
-        // GitHub Gist 配置 - 硬编码 ID，Token 临时输入
+        // GitHub Gist 配置 - 硬编码 ID，Token 用 sessionStorage（关闭浏览器即失效）
         this.gistId = LeaderboardManager.HARDCODED_GIST_ID;
-        this.gistToken = localStorage.getItem('pacmanGistToken') || '';
+        this.gistToken = sessionStorage.getItem('pacmanGistToken') || ''; // 改用 sessionStorage
         this.gistFilename = 'leaderboard.json';
         
         // 本地缓存（用于离线读取和备份）
@@ -32,16 +32,23 @@ class LeaderboardManager {
             (oldGistId && oldGistId !== this.gistId)) {
             console.log('清除旧缓存，版本:', currentVersion, '->', LeaderboardManager.CACHE_VERSION);
             localStorage.removeItem('pacmanGistId');
-            localStorage.removeItem('pacmanGistToken');
+            localStorage.removeItem('pacmanGistToken'); // 清除旧的localStorage token
+            sessionStorage.removeItem('pacmanGistToken'); // 清除sessionStorage token
             localStorage.removeItem(this.cacheKey);
             localStorage.setItem(this.cacheVersionKey, LeaderboardManager.CACHE_VERSION);
         }
     }
     
-    // 设置 Token（用于保存成绩）
+    // 设置 Token（用于保存成绩）- 使用 sessionStorage
     setToken(token) {
         this.gistToken = token;
-        localStorage.setItem('pacmanGistToken', token);
+        sessionStorage.setItem('pacmanGistToken', token); // 改用 sessionStorage
+    }
+    
+    // 清除 Token（退出时调用）
+    clearToken() {
+        this.gistToken = '';
+        sessionStorage.removeItem('pacmanGistToken');
     }
     
     // 获取硬编码的 Gist ID
@@ -941,7 +948,42 @@ class PacmanGame {
         }
     }
     
-    // 更新排行榜表格（异步）
+    // 安全转义HTML函数
+    escapeHtml(str) {
+        if (typeof str !== 'string') return str;
+        const escapeMap = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        };
+        return str.replace(/[&<>"']/g, char => escapeMap[char]);
+    }
+    
+    // 验证排行榜数据格式（防止恶意数据）
+    validateLeaderboardEntry(entry) {
+        // name: 3-12字符，只允许中文、字母、数字、下划线
+        if (!entry.name || typeof entry.name !== 'string') return false;
+        if (!/^[\w\u4e00-\u9fa5]{3,12}$/.test(entry.name)) return false;
+        
+        // score: 必须是正整数
+        if (typeof entry.score !== 'number' || entry.score < 0 || !Number.isInteger(entry.score)) return false;
+        
+        // isWin: 必须是布尔值
+        if (typeof entry.isWin !== 'boolean') return false;
+        
+        // date: 必须是日期格式
+        if (!entry.date || typeof entry.date !== 'string') return false;
+        if (!/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(entry.date)) return false;
+        
+        // timestamp: 必须是数字
+        if (typeof entry.timestamp !== 'number') return false;
+        
+        return true;
+    }
+    
+    // 更新排行榜表格（异步）- 安全渲染版本
     async updateLeaderboardTable(type) {
         const tbody = document.getElementById('leaderboard-body');
         if (!tbody) return;
@@ -970,6 +1012,9 @@ class PacmanGame {
             return;
         }
         
+        // 过滤掉无效数据（防止恶意注入）
+        data = data.filter(entry => this.validateLeaderboardEntry(entry));
+        
         if (data.length === 0) {
             const message = this.leaderboardManager.isConfigured() ? 
                 '暂无记录，快去玩游戏吧！' : 
@@ -978,23 +1023,38 @@ class PacmanGame {
             return;
         }
         
-        tbody.innerHTML = data.map((entry, index) => {
+        // 使用 createElement 安全渲染（防止XSS）
+        tbody.innerHTML = '';
+        data.forEach((entry, index) => {
             const rank = index + 1;
             const medal = this.leaderboardManager.getMedal(rank);
-            const medalName = medal ? `${medal} ${entry.name}` : entry.name;
-            const status = entry.isWin ? '通关' : '失败';
-            const statusClass = entry.isWin ? 'status-win' : 'status-lose';
             
-            return `
-                <tr>
-                    <td>${rank}</td>
-                    <td>${medalName}</td>
-                    <td>${entry.score}</td>
-                    <td class="${statusClass}">${status}</td>
-                    <td>${entry.date}</td>
-                </tr>
-            `;
-        }).join('');
+            const tr = document.createElement('tr');
+            
+            // 使用 textContent 安全设置文本内容
+            const tdRank = document.createElement('td');
+            tdRank.textContent = rank;
+            tr.appendChild(tdRank);
+            
+            const tdName = document.createElement('td');
+            tdName.textContent = medal ? `${medal} ${entry.name}` : entry.name;
+            tr.appendChild(tdName);
+            
+            const tdScore = document.createElement('td');
+            tdScore.textContent = entry.score;
+            tr.appendChild(tdScore);
+            
+            const tdStatus = document.createElement('td');
+            tdStatus.textContent = entry.isWin ? '通关' : '失败';
+            tdStatus.className = entry.isWin ? 'status-win' : 'status-lose';
+            tr.appendChild(tdStatus);
+            
+            const tdDate = document.createElement('td');
+            tdDate.textContent = entry.date;
+            tr.appendChild(tdDate);
+            
+            tbody.appendChild(tr);
+        });
     }
     
     // 显示昵称输入框
@@ -1996,13 +2056,19 @@ class PacmanGame {
 
     startGame() {
         if (this.gameRunning) return;
+        
+        // 如果游戏已结束或分数不为0，需要重置游戏状态
+        if (this.gameOver || this.score !== 0) {
+            this.resetGameState();
+        }
+        
         this.gameRunning = true;
         this.paused = false;
         this.lastTime = 0;
         requestAnimationFrame((ts) => this.gameLoop(ts));
     }
 
-    restartGame() {
+    resetGameState() {
         this.gameRunning = false;
         this.gameOver = false;
         this.paused = false;
@@ -2014,6 +2080,15 @@ class PacmanGame {
         this.initializeMap();
         this.updateMoveSpeed();
         this.render();
+    }
+
+    restartGame() {
+        this.resetGameState();
+        // 重开后自动开始游戏
+        this.gameRunning = true;
+        this.paused = false;
+        this.lastTime = 0;
+        requestAnimationFrame((ts) => this.gameLoop(ts));
     }
     
     togglePause() {
@@ -2256,7 +2331,15 @@ class PacmanGame {
         }
         
         if (validTurns.length > 0) {
-            entity.direction = validTurns[Math.floor(Math.random() * validTurns.length)];
+            const newDir = validTurns[Math.floor(Math.random() * validTurns.length)];
+            
+            // 安全检查：对于吃豆人，确保新方向不是回头方向
+            if (entity.nextDirection && this.isOppositeDirection(currentDir, newDir)) {
+                // 吃豆人不能回头，保持停止
+                return;
+            }
+            
+            entity.direction = newDir;
             const dir = this.getDirectionOffset(entity.direction);
             entity.targetGridX = entity.gridX + dir.dx;
             entity.targetGridY = entity.gridY + dir.dy;
