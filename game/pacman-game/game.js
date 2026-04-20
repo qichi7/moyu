@@ -165,13 +165,6 @@ class LeaderboardManager {
         return await this.getLeaderboard();
     }
     
-    // 清空排行榜
-    async clearLeaderboard() {
-        if (this.gistId && this.gistToken) {
-            await this.saveLeaderboard([]);
-        }
-    }
-    
     // 获取排名奖牌
     getMedal(rank) {
         switch (rank) {
@@ -858,27 +851,6 @@ class PacmanGame {
                 this.updateLeaderboardTable(btn.dataset.tab);
             });
         });
-        
-        // 清空按钮（需要 Token）
-        const clearBtn = document.getElementById('clear-leaderboard');
-        if (clearBtn) {
-            clearBtn.addEventListener('click', async () => {
-                // 检查是否有 Token
-                if (!this.leaderboardManager.getGistToken()) {
-                    this.showTokenInputForAction('clear', () => {
-                        if (confirm('确定要清空排行榜吗？此操作不可恢复！')) {
-                            this.leaderboardManager.clearLeaderboard();
-                            this.updateLeaderboardTable('all');
-                        }
-                    });
-                } else {
-                    if (confirm('确定要清空排行榜吗？此操作不可恢复！')) {
-                        await this.leaderboardManager.clearLeaderboard();
-                        this.updateLeaderboardTable('all');
-                    }
-                }
-            });
-        }
     }
     
     // 显示排行榜
@@ -986,6 +958,12 @@ class PacmanGame {
             const medal = this.leaderboardManager.getMedal(rank);
             
             const tr = document.createElement('tr');
+            
+            // 第一名特殊样式：字体放大20%
+            if (rank === 1) {
+                tr.style.fontSize = '1.2em';
+                tr.style.fontWeight = 'bold';
+            }
             
             // 使用 textContent 安全设置文本内容
             const tdRank = document.createElement('td');
