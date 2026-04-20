@@ -59,10 +59,21 @@
                 <h2>🏆 排行榜 (GitHub Gist)</h2>
                 <button class="close-btn" id="close-leaderboard">×</button>
             </div>
-            <div class="leaderboard-tabs">
-                <button class="tab-btn active" data-tab="all">总榜</button>
-                <button class="tab-btn" data-tab="today">今日榜</button>
-                <button class="tab-btn" data-tab="week">本周榜</button>
+            <div class="leaderboard-controls">
+                <div class="leaderboard-tabs">
+                    <button class="tab-btn active" data-tab="all">总榜</button>
+                    <button class="tab-btn" data-tab="today">今日榜</button>
+                    <button class="tab-btn" data-tab="week">本周榜</button>
+                </div>
+                <div class="size-filter">
+                    <label>网格：</label>
+                    <select id="leaderboard-size">
+                        <option value="3">3×3</option>
+                        <option value="4" selected>4×4</option>
+                        <option value="5">5×5</option>
+                        <option value="6">6×6</option>
+                    </select>
+                </div>
             </div>
             <div class="leaderboard-table-container">
                 <table class="leaderboard-table" id="leaderboard-table">

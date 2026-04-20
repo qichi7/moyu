@@ -501,8 +501,16 @@ class Game2048 {
             btn.addEventListener('click', () => {
                 document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
-                this.updateLeaderboardTable(btn.dataset.tab, btn.dataset.size);
+                const size = document.getElementById('leaderboard-size')?.value || '4';
+                this.updateLeaderboardTable(btn.dataset.tab, size);
             });
+        });
+        
+        // 网格大小筛选
+        document.getElementById('leaderboard-size')?.addEventListener('change', (e) => {
+            const activeTab = document.querySelector('.tab-btn.active');
+            const type = activeTab?.dataset.tab || 'all';
+            this.updateLeaderboardTable(type, e.target.value);
         });
     }
     
@@ -511,8 +519,13 @@ class Game2048 {
         const overlay = document.getElementById('leaderboard-overlay');
         if (overlay) {
             overlay.style.display = 'flex';
-            // 默认显示总榜 4x4
-            this.updateLeaderboardTable('all', '4');
+            // 使用当前游戏的网格大小
+            const sizeSelect = document.getElementById('leaderboard-size');
+            if (sizeSelect) {
+                sizeSelect.value = String(this.gridSize);
+            }
+            const size = sizeSelect?.value || String(this.gridSize);
+            this.updateLeaderboardTable('all', size);
         }
     }
     
