@@ -952,13 +952,13 @@ class PacmanGame {
         
         overlay.innerHTML = `
             <div class="name-input-content">
-                <h3>🎉 游戏结束</h3>
+                <h3>📝 上榜保存成绩</h3>
                 <p>你的得分：<strong>${score}</strong></p>
                 <p style="font-size: 14px; color: #888;">输入昵称保存到排行榜（3-12字符）</p>
                 <input type="text" id="player-name" placeholder="输入昵称" maxlength="12" autofocus>
                 <div class="name-input-buttons">
                     <button class="name-submit-btn" id="submit-name">保存成绩</button>
-                    <button class="name-skip-btn" id="skip-name">跳过</button>
+                    <button class="name-skip-btn" id="skip-name">取消</button>
                 </div>
             </div>
         `;
@@ -976,19 +976,23 @@ class PacmanGame {
         submitBtn.addEventListener('click', () => {
             const name = nameInput.value.trim();
             if (name.length >= 3 && name.length <= 12) {
-                this.leaderboardManager.addEntry(name, score, isWin);
+                const success = this.leaderboardManager.addEntry(name, score, isWin);
                 overlay.remove();
-                this.showGameOverResult(score, isWin);
+                if (success) {
+                    this.showSuccessMessage(name, score);
+                } else {
+                    alert('保存失败，请稍后重试');
+                }
             } else {
                 nameInput.style.borderColor = '#ff0000';
                 nameInput.placeholder = '昵称需要3-12字符';
+                nameInput.value = '';
             }
         });
         
-        // 跳过按钮
+        // 取消按钮
         skipBtn.addEventListener('click', () => {
             overlay.remove();
-            this.showGameOverResult(score, isWin);
         });
         
         // Enter键提交
@@ -998,7 +1002,7 @@ class PacmanGame {
             }
         });
         
-        // ESC键跳过
+        // ESC键取消
         overlay.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 skipBtn.click();
@@ -1006,51 +1010,30 @@ class PacmanGame {
         });
     }
     
-    // 显示游戏结束结果（排行榜之后）
-    showGameOverResult(score, isWin) {
-        const title = isWin ? '恭喜你赢了！' : '游戏结束！';
-        const message = `最终得分: ${score}`;
-        
+    // 显示保存成功提示
+    showSuccessMessage(name, score) {
         const overlay = document.createElement('div');
-        overlay.className = 'game-over-overlay';
-        
-        let imageHTML = '';
-        let imageClass = '';
-        
-        if (isWin) {
-            imageClass = 'win-image shake-animation';
-            if (this.useCustomWinImage && this.winImage) {
-                imageHTML = `<img src="${this.winImage.src}" class="${imageClass}" alt="胜利图片">`;
-            }
-        } else {
-            imageClass = 'lose-image';
-            if (this.useCustomLoseImage && this.loseImage) {
-                imageHTML = `<img src="${this.loseImage.src}" class="${imageClass}" alt="失败图片">`;
-            }
-        }
+        overlay.className = 'name-input-overlay';
         
         overlay.innerHTML = `
-            <div class="game-over-content ${isWin ? 'win-content' : 'lose-content'}">
-                ${imageHTML}
-                <h2>${title}</h2>
-                <p>${message}</p>
-                <button onclick="this.closest('.game-over-overlay').remove(); document.getElementById('restart-btn').click();">再玩一次</button>
-                <button onclick="this.closest('.game-over-overlay').remove(); document.getElementById('leaderboard-btn').click();" style="background: linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%); color: #fff; margin-left: 10px;">查看排行榜</button>
-                <p style="font-size: 14px; color: #888; margin-top: 10px;">按回车键重新开始</p>
+            <div class="name-input-content">
+                <h3>✅ 保存成功</h3>
+                <p><strong>${name}</strong> 的成绩 <strong>${score}</strong> 已保存到排行榜！</p>
+                <div class="name-input-buttons">
+                    <button class="name-submit-btn" onclick="this.closest('.name-input-overlay').remove(); document.getElementById('leaderboard-btn').click();">查看排行榜</button>
+                    <button class="name-skip-btn" onclick="this.closest('.name-input-overlay').remove();">关闭</button>
+                </div>
             </div>
         `;
         
         document.body.appendChild(overlay);
         
-        const handleKeyPress = (e) => {
-            if (e.key === 'Enter') {
+        // 3秒后自动关闭
+        setTimeout(() => {
+            if (overlay.parentElement) {
                 overlay.remove();
-                document.getElementById('restart-btn').click();
-                document.removeEventListener('keydown', handleKeyPress);
             }
-        };
-        
-        document.addEventListener('keydown', handleKeyPress);
+        }, 3000);
     }
     
     // 预生成下一个地图（异步）
@@ -2197,8 +2180,7 @@ class PacmanGame {
             localStorage.setItem('pacmanHighScore', this.highScore);
             this.updateScore();
         }
-        // 显示昵称输入框，保存到排行榜
-        this.showNameInput(this.score, true);
+        this.showGameOver('恭喜你赢了！', `最终得分: ${this.score}`, true);
     }
 
     loseGame() {
@@ -2210,13 +2192,13 @@ class PacmanGame {
             localStorage.setItem('pacmanHighScore', this.highScore);
             this.updateScore();
         }
-        // 显示昵称输入框，保存到排行榜
-        this.showNameInput(this.score, false);
+        this.showGameOver('游戏结束！', `最终得分: ${this.score}`, false);
     }
 
     showGameOver(title, message, isWin) {
         const overlay = document.createElement('div');
         overlay.className = 'game-over-overlay';
+        overlay.id = 'game-over-overlay-current';
         
         let imageHTML = '';
         let imageClass = '';
@@ -2238,11 +2220,24 @@ class PacmanGame {
                 ${imageHTML}
                 <h2>${title}</h2>
                 <p>${message}</p>
-                <button onclick="this.closest('.game-over-overlay').remove(); document.getElementById('restart-btn').click();">再玩一次</button>
+                <div class="game-over-buttons">
+                    <button onclick="this.closest('.game-over-overlay').remove(); document.getElementById('restart-btn').click();">再玩一次</button>
+                    <button onclick="document.getElementById('leaderboard-btn').click();" style="background: linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%); color: #fff; margin-left: 10px;">🏆 排行榜</button>
+                    <button id="submit-to-leaderboard-btn" style="background: linear-gradient(135deg, #4caf50 0%, #45a049 100%); color: #fff; margin-left: 10px;">📝 上榜</button>
+                </div>
                 <p style="font-size: 14px; color: #888; margin-top: 10px;">按回车键重新开始</p>
             </div>
         `;
         document.body.appendChild(overlay);
+        
+        // 上榜按钮点击事件
+        const submitBtn = overlay.querySelector('#submit-to-leaderboard-btn');
+        if (submitBtn) {
+            submitBtn.addEventListener('click', () => {
+                overlay.remove();
+                this.showNameInput(this.score, isWin);
+            });
+        }
         
         const handleKeyPress = (e) => {
             if (e.key === 'Enter') {

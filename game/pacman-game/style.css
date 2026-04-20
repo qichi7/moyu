@@ -967,3 +967,32 @@ body {
         font-size: 1em;
     }
 }
+
+/* 游戏结束按钮组 */
+.game-over-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+}
+
+.game-over-buttons button {
+    padding: 12px 24px;
+    border-radius: 25px;
+    border: none;
+    font-size: 1em;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.game-over-buttons button:first-child {
+    background: linear-gradient(135deg, #ffeb3b 0%, #ffc107 100%);
+    color: #000;
+}
+
+.game-over-buttons button:first-child:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(255, 235, 59, 0.4);
+}
