@@ -959,9 +959,9 @@ class PacmanGame {
             
             const tr = document.createElement('tr');
             
-            // 第一名特殊样式：字体放大200%
+            // 第一名特殊样式：字体放大150%
             if (rank === 1) {
-                tr.style.fontSize = '2em';
+                tr.style.fontSize = '1.5em';
                 tr.style.fontWeight = 'bold';
             }
             
@@ -2254,33 +2254,25 @@ class PacmanGame {
             const nextGridX = this.pacman.gridX + nextDir.dx;
             const nextGridY = this.pacman.gridY + nextDir.dy;
             
-            // 检查是否在格子中心（允许更宽松的判定）
-            const atGridCenter = Math.abs(this.pacman.x - this.pacman.gridX) < 0.15 &&
-                                 Math.abs(this.pacman.y - this.pacman.gridY) < 0.15;
-            
             // 禁止回头
             if (this.isOppositeDirection(this.pacman.direction, this.pacman.nextDirection)) {
-                // 不允许回头，但保持 nextDirection 不变，等待用户输入其他方向
-                // 清除当前方向，停止移动
-                if (!this.pacman.isMoving) {
-                    this.pacman.direction = '';
-                }
+                // 不允许回头，忽略这个输入
+                this.pacman.nextDirection = this.pacman.direction;
             } else if (this.isValidMove(nextGridX, nextGridY)) {
-                // 目标方向可行，立即转向（无论是否在格子中心）
+                // 目标方向可行，立即转向
                 this.pacman.lastDirection = this.pacman.direction;
                 this.pacman.direction = this.pacman.nextDirection;
                 this.pacman.targetGridX = nextGridX;
                 this.pacman.targetGridY = nextGridY;
                 this.pacman.isMoving = true;
-            } else if (atGridCenter) {
-                // 在格子中心但目标方向不可行（撞墙），停止等待其他输入
-                this.pacman.isMoving = false;
+            } else {
+                // 目标方向有墙，忽略这个输入，保持当前方向
+                this.pacman.nextDirection = this.pacman.direction;
             }
         }
         
-        // 继续当前方向移动（只在用户没有新输入时）
-        if (!this.pacman.isMoving && this.pacman.direction && 
-            this.pacman.nextDirection === this.pacman.direction) {
+        // 继续当前方向移动
+        if (!this.pacman.isMoving && this.pacman.direction) {
             const dir = this.getDirectionOffset(this.pacman.direction);
             const nextGridX = this.pacman.gridX + dir.dx;
             const nextGridY = this.pacman.gridY + dir.dy;
@@ -2289,8 +2281,10 @@ class PacmanGame {
                 this.pacman.targetGridX = nextGridX;
                 this.pacman.targetGridY = nextGridY;
                 this.pacman.isMoving = true;
+            } else {
+                // 撞墙，尝试左转或右转
+                this.tryLeftOrRightTurn(this.pacman);
             }
-            // 撞墙时不自动转向，停止等待用户输入
         }
         
         // 更新位置
@@ -2307,22 +2301,55 @@ class PacmanGame {
                 this.pacman.gridY = this.pacman.targetGridY;
                 this.pacman.isMoving = false;
                 
-                // 到达后检查用户是否有新方向输入
-                if (this.pacman.nextDirection !== this.pacman.direction) {
-                    // 有新输入，下一帧会处理
-                    return;
-                }
-                
                 // 检查当前方向是否可继续
                 const nextDir = this.getDirectionOffset(this.pacman.direction);
                 const nextGridX = this.pacman.gridX + nextDir.dx;
                 const nextGridY = this.pacman.gridY + nextDir.dy;
                 
                 if (!this.isValidMove(nextGridX, nextGridY)) {
-                    // 撞墙，停止等待用户输入，不自动转向
-                    this.pacman.isMoving = false;
+                    // 撞墙，尝试左转或右转
+                    this.tryLeftOrRightTurn(this.pacman);
                 }
             }
+        }
+    }
+    
+    // 撞墙时尝试左转或右转（不回头）
+    tryLeftOrRightTurn(entity) {
+        const leftTurns = { 'up': 'left', 'down': 'right', 'left': 'down', 'right': 'up' };
+        const rightTurns = { 'up': 'right', 'down': 'left', 'left': 'up', 'right': 'down' };
+        
+        const validTurns = [];
+        const currentDir = entity.direction;
+        
+        const leftDir = leftTurns[currentDir];
+        const rightDir = rightTurns[currentDir];
+        
+        const leftOffset = this.getDirectionOffset(leftDir);
+        const rightOffset = this.getDirectionOffset(rightDir);
+        
+        // 检查左转是否可行
+        if (this.isValidMove(entity.gridX + leftOffset.dx, entity.gridY + leftOffset.dy)) {
+            validTurns.push(leftDir);
+        }
+        
+        // 检查右转是否可行
+        if (this.isValidMove(entity.gridX + rightOffset.dx, entity.gridY + rightOffset.dy)) {
+            validTurns.push(rightDir);
+        }
+        
+        if (validTurns.length > 0) {
+            // 随机选择一个可行方向
+            const newDir = validTurns[Math.floor(Math.random() * validTurns.length)];
+            entity.direction = newDir;
+            entity.nextDirection = newDir;
+            const dir = this.getDirectionOffset(newDir);
+            entity.targetGridX = entity.gridX + dir.dx;
+            entity.targetGridY = entity.gridY + dir.dy;
+            entity.isMoving = true;
+        } else {
+            // 左右都不行，保持停止等待用户输入
+            entity.isMoving = false;
         }
     }
     
@@ -2412,61 +2439,6 @@ class PacmanGame {
             const offset = this.getDirectionOffset(dir);
             return this.isValidMove(gridX + offset.dx, gridY + offset.dy);
         });
-    }
-    
-    // 尝试随机转向（吃豆人碰墙只能左拐或右拐，不能回头）
-    tryRandomTurn(entity) {
-        const leftTurns = { 'up': 'left', 'down': 'right', 'left': 'down', 'right': 'up' };
-        const rightTurns = { 'up': 'right', 'down': 'left', 'left': 'up', 'right': 'down' };
-        
-        const validTurns = [];
-        const currentDir = entity.direction;
-        
-        const leftDir = leftTurns[currentDir];
-        const rightDir = rightTurns[currentDir];
-        
-        const leftOffset = this.getDirectionOffset(leftDir);
-        const rightOffset = this.getDirectionOffset(rightDir);
-        
-        // 只检查左转和右转是否可行（左转和右转本身就不是回头方向）
-        if (this.isValidMove(entity.gridX + leftOffset.dx, entity.gridY + leftOffset.dy)) {
-            validTurns.push(leftDir);
-        }
-        
-        if (this.isValidMove(entity.gridX + rightOffset.dx, entity.gridY + rightOffset.dy)) {
-            validTurns.push(rightDir);
-        }
-        
-        // 吃豆人不能回头，如果没有其他选择就停止不动
-        // 幽灵可以回头（如果左右都不能走，尝试回头方向）
-        if (validTurns.length === 0) {
-            // 判断是否是吃豆人：吃豆人有 nextDirection 属性
-            if (!entity.nextDirection) {
-                // 幽灵可以回头
-                const oppositeDir = this.getOppositeDirection(currentDir);
-                const oppositeOffset = this.getDirectionOffset(oppositeDir);
-                if (this.isValidMove(entity.gridX + oppositeOffset.dx, entity.gridY + oppositeOffset.dy)) {
-                    validTurns.push(oppositeDir);
-                }
-            }
-            // 吃豆人没有 validTurns，保持 isMoving = false，停止不动
-        }
-        
-        if (validTurns.length > 0) {
-            const newDir = validTurns[Math.floor(Math.random() * validTurns.length)];
-            
-            // 安全检查：对于吃豆人，确保新方向不是回头方向
-            if (entity.nextDirection && this.isOppositeDirection(currentDir, newDir)) {
-                // 吃豆人不能回头，保持停止
-                return;
-            }
-            
-            entity.direction = newDir;
-            const dir = this.getDirectionOffset(entity.direction);
-            entity.targetGridX = entity.gridX + dir.dx;
-            entity.targetGridY = entity.gridY + dir.dy;
-            entity.isMoving = true;
-        }
     }
     
     // 获取相反方向
