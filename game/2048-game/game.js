@@ -671,8 +671,9 @@ class LeaderboardManager2048 {
     async getLeaderboardBySize(type, size) {
         const data = await this.getLeaderboard();
         
-        // 按大小过滤
-        let filtered = data.filter(entry => entry.gridSize === size);
+        // 按大小过滤 - 确保类型匹配（转换为整数）
+        const sizeNum = parseInt(size);
+        let filtered = data.filter(entry => entry.gridSize === sizeNum);
         
         // 按类型过滤
         if (type === 'today') {
