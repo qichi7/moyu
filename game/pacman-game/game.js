@@ -959,9 +959,9 @@ class PacmanGame {
             
             const tr = document.createElement('tr');
             
-            // 第一名特殊样式：字体放大20%
+            // 第一名特殊样式：字体放大200%
             if (rank === 1) {
-                tr.style.fontSize = '1.2em';
+                tr.style.fontSize = '2em';
                 tr.style.fontWeight = 'bold';
             }
             
@@ -2236,33 +2236,39 @@ class PacmanGame {
     
     // 吃豆人移动更新
     updatePacmanMovement(deltaTime) {
-        // 如果有新方向，尝试转向
+        // 优先响应用户输入：如果有新方向，尝试转向
         if (this.pacman.nextDirection !== this.pacman.direction) {
             const nextDir = this.getDirectionOffset(this.pacman.nextDirection);
             const nextGridX = this.pacman.gridX + nextDir.dx;
             const nextGridY = this.pacman.gridY + nextDir.dy;
             
-            // 只有在格子中心时才能转向
-            const atGridCenter = Math.abs(this.pacman.x - this.pacman.gridX) < 0.1 &&
-                                 Math.abs(this.pacman.y - this.pacman.gridY) < 0.1;
+            // 检查是否在格子中心（允许更宽松的判定）
+            const atGridCenter = Math.abs(this.pacman.x - this.pacman.gridX) < 0.15 &&
+                                 Math.abs(this.pacman.y - this.pacman.gridY) < 0.15;
             
-            if (atGridCenter && this.isValidMove(nextGridX, nextGridY)) {
-                // 禁止回头（无论是否正在移动）
-                if (this.isOppositeDirection(this.pacman.direction, this.pacman.nextDirection)) {
-                    // 不允许回头，忽略这个方向输入
-                } else {
-                    // 允许转向
-                    this.pacman.lastDirection = this.pacman.direction;
-                    this.pacman.direction = this.pacman.nextDirection;
-                    this.pacman.targetGridX = nextGridX;
-                    this.pacman.targetGridY = nextGridY;
-                    this.pacman.isMoving = true;
+            // 禁止回头
+            if (this.isOppositeDirection(this.pacman.direction, this.pacman.nextDirection)) {
+                // 不允许回头，但保持 nextDirection 不变，等待用户输入其他方向
+                // 清除当前方向，停止移动
+                if (!this.pacman.isMoving) {
+                    this.pacman.direction = '';
                 }
+            } else if (this.isValidMove(nextGridX, nextGridY)) {
+                // 目标方向可行，立即转向（无论是否在格子中心）
+                this.pacman.lastDirection = this.pacman.direction;
+                this.pacman.direction = this.pacman.nextDirection;
+                this.pacman.targetGridX = nextGridX;
+                this.pacman.targetGridY = nextGridY;
+                this.pacman.isMoving = true;
+            } else if (atGridCenter) {
+                // 在格子中心但目标方向不可行（撞墙），停止等待其他输入
+                this.pacman.isMoving = false;
             }
         }
         
-        // 继续当前方向移动
-        if (!this.pacman.isMoving && this.pacman.direction) {
+        // 继续当前方向移动（只在用户没有新输入时）
+        if (!this.pacman.isMoving && this.pacman.direction && 
+            this.pacman.nextDirection === this.pacman.direction) {
             const dir = this.getDirectionOffset(this.pacman.direction);
             const nextGridX = this.pacman.gridX + dir.dx;
             const nextGridY = this.pacman.gridY + dir.dy;
@@ -2271,10 +2277,8 @@ class PacmanGame {
                 this.pacman.targetGridX = nextGridX;
                 this.pacman.targetGridY = nextGridY;
                 this.pacman.isMoving = true;
-            } else {
-                // 前方碰墙，尝试随机转向
-                this.tryRandomTurn(this.pacman);
             }
+            // 撞墙时不自动转向，停止等待用户输入
         }
         
         // 更新位置
@@ -2291,14 +2295,20 @@ class PacmanGame {
                 this.pacman.gridY = this.pacman.targetGridY;
                 this.pacman.isMoving = false;
                 
-                // 检查下一个格子是否可通行
+                // 到达后检查用户是否有新方向输入
+                if (this.pacman.nextDirection !== this.pacman.direction) {
+                    // 有新输入，下一帧会处理
+                    return;
+                }
+                
+                // 检查当前方向是否可继续
                 const nextDir = this.getDirectionOffset(this.pacman.direction);
                 const nextGridX = this.pacman.gridX + nextDir.dx;
                 const nextGridY = this.pacman.gridY + nextDir.dy;
                 
                 if (!this.isValidMove(nextGridX, nextGridY)) {
-                    // 尝试随机转向
-                    this.tryRandomTurn(this.pacman);
+                    // 撞墙，停止等待用户输入，不自动转向
+                    this.pacman.isMoving = false;
                 }
             }
         }
