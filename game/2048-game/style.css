@@ -226,6 +226,36 @@ body {
     margin-bottom: 20px;
 }
 
+.header-buttons {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+}
+
+.refresh-btn {
+    font-size: 20px;
+    background: none;
+    border: none;
+    color: #fff;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    transition: transform 0.2s;
+}
+
+.refresh-btn:hover {
+    transform: scale(1.2);
+}
+
+.refresh-btn.spinning {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
 .leaderboard-header h2 {
     font-size: 24px;
 }

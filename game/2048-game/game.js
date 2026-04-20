@@ -490,6 +490,15 @@ class Game2048 {
             this.hideLeaderboard();
         });
         
+        document.getElementById('refresh-leaderboard')?.addEventListener('click', async () => {
+            const btn = document.getElementById('refresh-leaderboard');
+            btn.classList.add('spinning');
+            this.leaderboardManager.cache = null;
+            this.leaderboardManager.cacheTime = 0;
+            await this.updateLeaderboardTable('all', this.gridSize);
+            btn.classList.remove('spinning');
+        });
+        
         document.getElementById('leaderboard-overlay')?.addEventListener('click', (e) => {
             if (e.target.id === 'leaderboard-overlay') {
                 this.hideLeaderboard();
@@ -613,6 +622,9 @@ class LeaderboardManager2048 {
         this.gistToken = sessionStorage.getItem('2048GistToken') || '';
         this.gistFilename = 'leaderboard.json';
         this.maxEntries = 20;
+        this.cache = null;
+        this.cacheTime = 0;
+        this.cacheExpire = 30 * 1000; // 30秒缓存
     }
     
     setToken(token) {
@@ -627,18 +639,27 @@ class LeaderboardManager2048 {
     async getLeaderboard() {
         if (!this.gistId) return [];
         
+        // 检查缓存
+        const now = Date.now();
+        if (this.cache && (now - this.cacheTime) < this.cacheExpire) {
+            return this.cache;
+        }
+        
         try {
             const apiUrl = `https://api.github.com/gists/${this.gistId}`;
             const response = await fetch(apiUrl);
             const gist = await response.json();
             
             if (gist.files && gist.files[this.gistFilename]) {
-                return JSON.parse(gist.files[this.gistFilename].content);
+                const data = JSON.parse(gist.files[this.gistFilename].content);
+                this.cache = data;
+                this.cacheTime = now;
+                return data;
             }
             return [];
         } catch (e) {
             console.error('获取排行榜失败:', e);
-            return [];
+            return this.cache || [];
         }
     }
     
@@ -684,6 +705,10 @@ class LeaderboardManager2048 {
                 })
             });
             
+            if (response.ok) {
+                this.cache = null;
+                this.cacheTime = 0;
+            }
             return response.ok;
         } catch (e) {
             console.error('保存排行榜失败:', e);
