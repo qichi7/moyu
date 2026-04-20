@@ -493,9 +493,14 @@ class Game2048 {
         document.getElementById('refresh-leaderboard')?.addEventListener('click', async () => {
             const btn = document.getElementById('refresh-leaderboard');
             btn.classList.add('spinning');
+            // 清除缓存，强制从线上拉取最新数据
             this.leaderboardManager.cache = null;
             this.leaderboardManager.cacheTime = 0;
-            await this.updateLeaderboardTable('all', this.gridSize);
+            // 保持当前选择的标签和网格大小
+            const activeTab = document.querySelector('.tab-btn.active');
+            const type = activeTab?.dataset.tab || 'all';
+            const size = document.getElementById('leaderboard-size')?.value || String(this.gridSize);
+            await this.updateLeaderboardTable(type, size);
             btn.classList.remove('spinning');
         });
         
