@@ -177,72 +177,112 @@ body {
 }
 
 #game-grid {
-    display: grid;
-    gap: 8px;
+    position: relative;
     padding: 8px;
 }
 
-.grid-cell {
-    width: 80px;
-    height: 80px;
+/* 背景格子（空格子） */
+.grid-bg-cell {
+    position: absolute;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.1);
+}
+
+/* 实际方块 */
+.tile {
+    position: absolute;
     display: flex;
     justify-content: center;
     align-items: center;
     font-size: 24px;
     font-weight: bold;
     border-radius: 8px;
-    background: rgba(255,255,255,0.1);
-    transition: transform 0.12s ease-out;
+    z-index: 10;
+    /* 默认无动画，滑动时添加 */
+    transition: none;
 }
 
-/* 新方块出现动画 */
-.grid-cell.tile-new {
-    animation: appear 0.2s ease-out;
+/* 滑动动画 */
+.tile.sliding {
+    transition: transform 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
-@keyframes appear {
+/* 新方块出现动画 - 弹性效果 */
+.tile.tile-new {
+    animation: appearBounce 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes appearBounce {
     0% {
-        transform: scale(0);
+        transform: scale(0) translateZ(0);
         opacity: 0;
     }
     50% {
-        transform: scale(1.1);
+        transform: scale(1.15) translateZ(0);
+    }
+    70% {
+        transform: scale(0.95) translateZ(0);
     }
     100% {
-        transform: scale(1);
+        transform: scale(1) translateZ(0);
         opacity: 1;
     }
 }
 
-/* 合并动画 */
-.grid-cell.tile-merged {
-    animation: merge 0.2s ease-out;
+/* 合并动画 - 脉冲效果 */
+.tile.tile-merged {
+    animation: mergePulse 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    z-index: 20;
 }
 
-@keyframes merge {
+@keyframes mergePulse {
     0% {
-        transform: scale(1);
+        transform: scale(1) translateZ(0);
     }
-    50% {
-        transform: scale(1.2);
+    30% {
+        transform: scale(1.25) translateZ(0);
+    }
+    60% {
+        transform: scale(0.95) translateZ(0);
     }
     100% {
-        transform: scale(1);
+        transform: scale(1) translateZ(0);
     }
 }
 
-.grid-cell.tile-2 { background: #eee4da; color: #776e65; }
-.grid-cell.tile-4 { background: #ede0c8; color: #776e65; }
-.grid-cell.tile-8 { background: #f2b179; color: #fff; }
-.grid-cell.tile-16 { background: #f59563; color: #fff; }
-.grid-cell.tile-32 { background: #f67c5f; color: #fff; }
-.grid-cell.tile-64 { background: #f65e3b; color: #fff; }
-.grid-cell.tile-128 { background: #edcf72; color: #fff; font-size: 20px; }
-.grid-cell.tile-256 { background: #edcc61; color: #fff; font-size: 20px; }
-.grid-cell.tile-512 { background: #edc850; color: #fff; font-size: 20px; }
-.grid-cell.tile-1024 { background: #edc53f; color: #fff; font-size: 16px; }
-.grid-cell.tile-2048 { background: #edc22e; color: #fff; font-size: 16px; }
-.grid-cell.tile-super { background: #3c3a32; color: #f9f6f2; font-size: 14px; }
+/* 方块颜色样式 */
+.tile.tile-2 { background: #eee4da; color: #776e65; }
+.tile.tile-4 { background: #ede0c8; color: #776e65; }
+.tile.tile-8 { background: #f2b179; color: #fff; }
+.tile.tile-16 { background: #f59563; color: #fff; }
+.tile.tile-32 { background: #f67c5f; color: #fff; }
+.tile.tile-64 { background: #f65e3b; color: #fff; }
+.tile.tile-128 { background: #edcf72; color: #fff; font-size: 20px; }
+.tile.tile-256 { background: #edcc61; color: #fff; font-size: 20px; }
+.tile.tile-512 { background: #edc850; color: #fff; font-size: 20px; }
+.tile.tile-1024 { background: #edc53f; color: #fff; font-size: 16px; }
+.tile.tile-2048 { background: #edc22e; color: #fff; font-size: 16px; animation: winner2048 0.8s ease-in-out infinite; }
+.tile.tile-super { background: #3c3a32; color: #f9f6f2; font-size: 14px; }
+
+/* 2048方块特殊动画 - 金光闪烁 */
+@keyframes winner2048 {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(237, 194, 46, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 20px 10px rgba(237, 194, 46, 0.6);
+    }
+}
+
+/* 超大方块彩虹动画 */
+.tile.tile-super {
+    animation: superTileRainbow 3s linear infinite;
+}
+
+@keyframes superTileRainbow {
+    0% { filter: hue-rotate(0deg); }
+    100% { filter: hue-rotate(360deg); }
+}
 
 /* 游戏结束覆盖层 */
 #game-over-overlay {
@@ -563,26 +603,26 @@ body {
     }
     
     #game-grid {
-        gap: 4px;
         padding: 4px;
     }
     
-    .grid-cell {
+    .grid-bg-cell,
+    .tile {
         font-size: 18px;
     }
     
-    .grid-cell.tile-128,
-    .grid-cell.tile-256,
-    .grid-cell.tile-512 {
+    .tile.tile-128,
+    .tile.tile-256,
+    .tile.tile-512 {
         font-size: 16px;
     }
     
-    .grid-cell.tile-1024,
-    .grid-cell.tile-2048 {
+    .tile.tile-1024,
+    .tile.tile-2048 {
         font-size: 14px;
     }
     
-    .grid-cell.tile-super {
+    .tile.tile-super {
         font-size: 12px;
     }
 }

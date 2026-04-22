@@ -1,16 +1,20 @@
-// 2048 游戏 - 支持自定义大小、撤销、动画和排行榜
+// 2048 游戏 - 支持自定义大小、撤销、滑动动画和排行榜
 class Game2048 {
     constructor() {
         this.gridSize = 4;
         this.grid = [];
+        this.tileIdGrid = []; // 方块ID网格
+        this.nextTileId = 1;
+        this.prevGrid = null; // 上一步的网格（用于动画）
         this.score = 0;
         this.bestScore = parseInt(localStorage.getItem('2048BestScore_' + this.gridSize)) || 0;
         this.gameOver = false;
         this.won = false;
         this.continuePlaying = false;
         this.isAnimating = false;
-        this.history = []; // 撤销历史
-        this.maxHistory = 10; // 最大撤销次数
+        this.history = [];
+        this.maxHistory = 10;
+        this.animationDuration = 150; // 滑动动画时长
         
         // 排行榜管理
         this.leaderboardManager = new LeaderboardManager2048();
@@ -33,25 +37,40 @@ class Game2048 {
                 const state = JSON.parse(savedState);
                 if (state.grid && state.grid.length === this.gridSize) {
                     this.grid = state.grid;
+                    this.tileIdGrid = state.tileIdGrid || this.createEmptyIdGrid();
+                    this.nextTileId = state.nextTileId || 1;
                     this.score = state.score || 0;
                     this.gameOver = state.gameOver || false;
                     this.won = state.won || false;
                     this.continuePlaying = state.continuePlaying || false;
                     this.history = state.history || [];
-                    return; // 已恢复，不需要初始化
+                    return;
                 }
             } catch (e) {
                 console.error('恢复游戏状态失败:', e);
             }
         }
-        // 没有保存的状态，需要初始化新游戏
         this.grid = null;
+    }
+    
+    // 创建空的ID网格
+    createEmptyIdGrid() {
+        const idGrid = [];
+        for (let i = 0; i < this.gridSize; i++) {
+            idGrid[i] = [];
+            for (let j = 0; j < this.gridSize; j++) {
+                idGrid[i][j] = 0;
+            }
+        }
+        return idGrid;
     }
     
     // 保存游戏状态
     saveGameState() {
         const state = {
             grid: this.grid,
+            tileIdGrid: this.tileIdGrid,
+            nextTileId: this.nextTileId,
             score: this.score,
             gameOver: this.gameOver,
             won: this.won,
@@ -63,7 +82,6 @@ class Game2048 {
     
     // 初始化游戏
     init() {
-        // 如果已有恢复的游戏状态，直接渲染
         if (this.grid && this.grid.length === this.gridSize) {
             this.updateDisplay();
             this.renderGrid();
@@ -77,6 +95,8 @@ class Game2048 {
         
         // 初始化新游戏
         this.grid = [];
+        this.tileIdGrid = this.createEmptyIdGrid();
+        this.nextTileId = 1;
         for (let i = 0; i < this.gridSize; i++) {
             this.grid[i] = [];
             for (let j = 0; j < this.gridSize; j++) {
@@ -88,8 +108,8 @@ class Game2048 {
         this.won = false;
         this.continuePlaying = false;
         this.history = [];
+        this.prevGrid = null;
         
-        // 添加两个初始数字
         this.addRandomTile(true);
         this.addRandomTile(true);
         
@@ -99,10 +119,12 @@ class Game2048 {
         this.updateUndoButton();
     }
     
-    // 保存当前状态到历史（用于撤销）
+    // 保存当前状态到历史
     saveToHistory() {
         const state = {
             grid: this.grid.map(row => [...row]),
+            tileIdGrid: this.tileIdGrid.map(row => [...row]),
+            nextTileId: this.nextTileId,
             score: this.score
         };
         this.history.push(state);
@@ -117,7 +139,10 @@ class Game2048 {
         if (this.history.length === 0 || this.gameOver) return;
         
         const prevState = this.history.pop();
+        this.prevGrid = this.grid.map(row => [...row]); // 保存当前用于动画
         this.grid = prevState.grid;
+        this.tileIdGrid = prevState.tileIdGrid;
+        this.nextTileId = prevState.nextTileId;
         this.score = prevState.score;
         this.updateDisplay();
         this.renderGrid();
@@ -133,7 +158,7 @@ class Game2048 {
         }
     }
     
-    // 添加随机数字（90%概率是2，10%概率是4）
+    // 添加随机数字
     addRandomTile(isNewGame = false) {
         const emptyCells = [];
         for (let i = 0; i < this.gridSize; i++) {
@@ -148,13 +173,16 @@ class Game2048 {
         
         const randomCell = emptyCells[Math.floor(Math.random() * emptyCells.length)];
         const value = Math.random() < 0.9 ? 2 : 4;
-        this.grid[randomCell.row][randomCell.col] = value;
+        const tileId = this.nextTileId++;
         
-        return { row: randomCell.row, col: randomCell.col, value, isNewGame };
+        this.grid[randomCell.row][randomCell.col] = value;
+        this.tileIdGrid[randomCell.row][randomCell.col] = tileId;
+        
+        return { row: randomCell.row, col: randomCell.col, value, tileId, isNewGame };
     }
     
-    // 渲染网格
-    renderGrid(newTileInfo = null, mergedPositions = []) {
+    // 渲染网格 - 使用绝对定位实现滑动动画
+    renderGrid(newTileInfo = null, mergedPositions = [], slideAnimations = null) {
         const gridElement = document.getElementById('game-grid');
         if (!gridElement) return;
         
@@ -162,38 +190,91 @@ class Game2048 {
         
         const cellSize = Math.min(80, 320 / this.gridSize);
         const gapSize = 8;
-        gridElement.style.display = 'grid';
-        gridElement.style.gridTemplateColumns = `repeat(${this.gridSize}, ${cellSize}px)`;
-        gridElement.style.gap = `${gapSize}px`;
-        gridElement.style.padding = `${gapSize}px`;
+        const containerSize = cellSize * this.gridSize + gapSize * (this.gridSize + 1);
         
+        gridElement.style.width = containerSize + 'px';
+        gridElement.style.height = containerSize + 'px';
+        
+        // 先渲染背景格子
         for (let i = 0; i < this.gridSize; i++) {
             for (let j = 0; j < this.gridSize; j++) {
-                const cell = document.createElement('div');
-                cell.className = 'grid-cell';
-                const value = this.grid[i][j];
-                
-                if (value !== 0) {
-                    cell.textContent = value;
-                    cell.classList.add(`tile-${value}`);
-                    if (value > 2048) {
-                        cell.classList.add('tile-super');
-                    }
-                    
-                    // 新方块动画
-                    if (newTileInfo && newTileInfo.row === i && newTileInfo.col === j) {
-                        cell.classList.add('tile-new');
-                    }
-                    
-                    // 合并动画
-                    if (mergedPositions.some(pos => pos.row === i && pos.col === j)) {
-                        cell.classList.add('tile-merged');
-                    }
-                }
-                
-                gridElement.appendChild(cell);
+                const bgCell = document.createElement('div');
+                bgCell.className = 'grid-bg-cell';
+                bgCell.style.width = cellSize + 'px';
+                bgCell.style.height = cellSize + 'px';
+                bgCell.style.left = (gapSize + j * (cellSize + gapSize)) + 'px';
+                bgCell.style.top = (gapSize + i * (cellSize + gapSize)) + 'px';
+                gridElement.appendChild(bgCell);
             }
         }
+        
+        // 收集所有方块信息
+        const tiles = [];
+        for (let i = 0; i < this.gridSize; i++) {
+            for (let j = 0; j < this.gridSize; j++) {
+                if (this.grid[i][j] !== 0) {
+                    tiles.push({
+                        id: this.tileIdGrid[i][j],
+                        row: i,
+                        col: j,
+                        value: this.grid[i][j]
+                    });
+                }
+            }
+        }
+        
+        // 渲染方块（使用绝对定位）
+        tiles.forEach(tile => {
+            const tileElement = document.createElement('div');
+            tileElement.className = 'tile';
+            tileElement.classList.add(`tile-${tile.value}`);
+            if (tile.value > 2048) {
+                tileElement.classList.add('tile-super');
+            }
+            tileElement.textContent = tile.value;
+            tileElement.dataset.id = tile.id;
+            
+            const targetLeft = gapSize + tile.col * (cellSize + gapSize);
+            const targetTop = gapSize + tile.row * (cellSize + gapSize);
+            
+            tileElement.style.width = cellSize + 'px';
+            tileElement.style.height = cellSize + 'px';
+            
+            // 检查是否有滑动动画
+            if (slideAnimations && slideAnimations[tile.id]) {
+                const anim = slideAnimations[tile.id];
+                const startLeft = gapSize + anim.fromCol * (cellSize + gapSize);
+                const startTop = gapSize + anim.fromRow * (cellSize + gapSize);
+                
+                // 先设置起始位置
+                tileElement.style.left = startLeft + 'px';
+                tileElement.style.top = startTop + 'px';
+                
+                // 添加滑动动画类
+                tileElement.classList.add('sliding');
+                
+                // 使用requestAnimationFrame确保动画触发
+                requestAnimationFrame(() => {
+                    tileElement.style.left = targetLeft + 'px';
+                    tileElement.style.top = targetTop + 'px';
+                });
+            } else {
+                tileElement.style.left = targetLeft + 'px';
+                tileElement.style.top = targetTop + 'px';
+            }
+            
+            // 检查是否是新方块
+            if (newTileInfo && newTileInfo.tileId === tile.id) {
+                tileElement.classList.add('tile-new');
+            }
+            
+            // 检查是否是合并方块
+            if (mergedPositions.some(pos => pos.row === tile.row && pos.col === tile.col)) {
+                tileElement.classList.add('tile-merged');
+            }
+            
+            gridElement.appendChild(tileElement);
+        });
     }
     
     // 更新显示
@@ -204,12 +285,9 @@ class Game2048 {
         scoreEl.textContent = this.score;
         bestScoreEl.textContent = this.bestScore;
         
-        // 分数增加动画
         if (scoreAdded > 0) {
             scoreEl.classList.add('score-pop');
             setTimeout(() => scoreEl.classList.remove('score-pop'), 300);
-            
-            // 显示分数增加提示
             this.showScorePopup(scoreAdded);
         }
     }
@@ -232,11 +310,15 @@ class Game2048 {
         setTimeout(() => popup.remove(), 800);
     }
     
-    // 移动逻辑
+    // 移动逻辑 - 增强版，追踪滑动动画
     move(direction) {
         if (this.gameOver || this.isAnimating) return;
         
-        // 保存当前状态到历史
+        // 保存移动前的网格状态
+        this.prevGrid = this.grid.map(row => [...row]);
+        const prevIdGrid = this.tileIdGrid.map(row => [...row]);
+        
+        // 保存到历史
         this.saveToHistory();
         
         let moved = false;
@@ -244,63 +326,117 @@ class Game2048 {
         let mergedPositions = [];
         let reached2048 = false;
         
+        // 收集滑动动画信息
+        const slideAnimations = {};
+        
         if (direction === 'left') {
             for (let i = 0; i < this.gridSize; i++) {
-                const result = this.slideRow(this.grid[i], i);
+                const result = this.slideRowWithAnimation(
+                    this.grid[i], prevIdGrid[i], i, 'left'
+                );
                 if (result.moved) moved = true;
                 mergedScore += result.score;
                 mergedPositions = mergedPositions.concat(result.mergedPositions);
                 if (result.reached2048) reached2048 = true;
+                
+                // 收集动画
+                Object.assign(slideAnimations, result.animations);
+                
                 this.grid[i] = result.row;
+                this.tileIdGrid[i] = result.idRow;
             }
         } else if (direction === 'right') {
             for (let i = 0; i < this.gridSize; i++) {
                 const reversed = [...this.grid[i]].reverse();
-                const result = this.slideRow(reversed, i);
+                const reversedIds = [...prevIdGrid[i]].reverse();
+                const result = this.slideRowWithAnimation(reversed, reversedIds, i, 'right');
                 if (result.moved) moved = true;
                 mergedScore += result.score;
-                // 转换合并位置（因为反向）
+                
+                // 转换位置
                 const transformedPositions = result.mergedPositions.map(pos => ({
                     row: pos.row,
                     col: this.gridSize - 1 - pos.col
                 }));
                 mergedPositions = mergedPositions.concat(transformedPositions);
                 if (result.reached2048) reached2048 = true;
+                
+                // 转换动画位置
+                for (const id in result.animations) {
+                    const anim = result.animations[id];
+                    slideAnimations[id] = {
+                        fromRow: anim.fromRow,
+                        fromCol: this.gridSize - 1 - anim.fromCol,
+                        toRow: anim.toRow,
+                        toCol: this.gridSize - 1 - anim.toCol
+                    };
+                }
+                
                 this.grid[i] = result.row.reverse();
+                this.tileIdGrid[i] = result.idRow.reverse();
             }
         } else if (direction === 'up') {
             for (let j = 0; j < this.gridSize; j++) {
                 const col = this.grid.map(row => row[j]);
-                const result = this.slideRow(col, -1, j);
+                const colIds = prevIdGrid.map(row => row[j]);
+                const result = this.slideRowWithAnimation(col, colIds, j, 'up');
                 if (result.moved) moved = true;
                 mergedScore += result.score;
-                // 转换合并位置
+                
                 const transformedPositions = result.mergedPositions.map(pos => ({
                     row: pos.row,
                     col: j
                 }));
                 mergedPositions = mergedPositions.concat(transformedPositions);
                 if (result.reached2048) reached2048 = true;
+                
+                // 转换动画
+                for (const id in result.animations) {
+                    const anim = result.animations[id];
+                    slideAnimations[id] = {
+                        fromRow: anim.fromCol, // 注意：在up/down中，fromCol存储的是行索引
+                        fromCol: j,
+                        toRow: anim.toCol,
+                        toCol: j
+                    };
+                }
+                
                 for (let i = 0; i < this.gridSize; i++) {
                     this.grid[i][j] = result.row[i];
+                    this.tileIdGrid[i][j] = result.idRow[i];
                 }
             }
         } else if (direction === 'down') {
             for (let j = 0; j < this.gridSize; j++) {
                 const col = this.grid.map(row => row[j]).reverse();
-                const result = this.slideRow(col, -1, j);
+                const colIds = prevIdGrid.map(row => row[j]).reverse();
+                const result = this.slideRowWithAnimation(col, colIds, j, 'down');
                 if (result.moved) moved = true;
                 mergedScore += result.score;
-                const newCol = result.row.reverse();
-                // 转换合并位置
+                
                 const transformedPositions = result.mergedPositions.map(pos => ({
                     row: this.gridSize - 1 - pos.row,
                     col: j
                 }));
                 mergedPositions = mergedPositions.concat(transformedPositions);
                 if (result.reached2048) reached2048 = true;
+                
+                // 转换动画
+                for (const id in result.animations) {
+                    const anim = result.animations[id];
+                    slideAnimations[id] = {
+                        fromRow: this.gridSize - 1 - anim.fromCol,
+                        fromCol: j,
+                        toRow: this.gridSize - 1 - anim.toCol,
+                        toCol: j
+                    };
+                }
+                
+                const newCol = result.row.reverse();
+                const newColIds = result.idRow.reverse();
                 for (let i = 0; i < this.gridSize; i++) {
                     this.grid[i][j] = newCol[i];
+                    this.tileIdGrid[i][j] = newColIds[i];
                 }
             }
         }
@@ -315,66 +451,105 @@ class Game2048 {
             const newTile = this.addRandomTile();
             this.updateDisplay(mergedScore);
             
-            // 设置动画状态
             this.isAnimating = true;
-            this.renderGrid(newTile, mergedPositions);
+            this.renderGrid(newTile, mergedPositions, slideAnimations);
             
             setTimeout(() => {
                 this.isAnimating = false;
-            }, 200);
+            }, this.animationDuration + 50);
             
-            // 检查是否达成2048
             if (reached2048 && !this.won && !this.continuePlaying) {
                 this.won = true;
-                setTimeout(() => this.showWin(), 300);
+                setTimeout(() => this.showWin(), this.animationDuration + 100);
             }
             
-            // 检查游戏是否结束
             if (!this.canMove()) {
                 this.gameOver = true;
-                setTimeout(() => this.showGameOver(), 500);
+                setTimeout(() => this.showGameOver(), this.animationDuration + 300);
             }
             
             this.saveGameState();
             this.updateUndoButton();
         } else {
-            // 没有移动，移除刚保存的历史
             this.history.pop();
             this.updateUndoButton();
         }
     }
     
-    // 滑动一行/列
-    slideRow(row, rowIndex = -1, colIndex = -1) {
-        let newRow = row.filter(val => val !== 0);
+    // 滑动一行/列 - 增强版，返回动画信息
+    slideRowWithAnimation(row, idRow, index, direction) {
+        // 提取非空元素及其位置
+        const tiles = [];
+        for (let i = 0; i < row.length; i++) {
+            if (row[i] !== 0) {
+                tiles.push({
+                    value: row[i],
+                    id: idRow[i],
+                    originalPos: i
+                });
+            }
+        }
+        
+        let newRow = [];
+        let newIdRow = [];
         let score = 0;
         let moved = false;
         let mergedPositions = [];
         let reached2048 = false;
+        const animations = {};
         
         // 合并相同数字
-        for (let i = 0; i < newRow.length - 1; i++) {
-            if (newRow[i] === newRow[i + 1]) {
-                newRow[i] *= 2;
-                score += newRow[i];
+        let i = 0;
+        while (i < tiles.length) {
+            if (i + 1 < tiles.length && tiles[i].value === tiles[i + 1].value) {
+                // 合并
+                const mergedValue = tiles[i].value * 2;
+                score += mergedValue;
+                if (mergedValue === 2048) reached2048 = true;
                 
-                // 检查是否达成2048
-                if (newRow[i] === 2048) reached2048 = true;
-                
-                newRow.splice(i + 1, 1);
+                newRow.push(mergedValue);
+                // 使用第一个方块的ID作为合并后的ID
+                newIdRow.push(tiles[i].id);
                 
                 // 记录合并位置
-                if (rowIndex >= 0) {
-                    mergedPositions.push({ row: rowIndex, col: i });
-                } else if (colIndex >= 0) {
-                    mergedPositions.push({ row: i, col: colIndex });
+                const mergePos = newRow.length - 1;
+                if (direction === 'left' || direction === 'right') {
+                    mergedPositions.push({ row: index, col: mergePos });
+                } else {
+                    mergedPositions.push({ row: mergePos, col: index });
                 }
+                
+                // 记录两个方块的动画
+                // 第一个方块滑动到合并位置
+                animations[tiles[i].id] = {
+                    fromRow: direction === 'left' || direction === 'right' ? index : tiles[i].originalPos,
+                    fromCol: direction === 'left' || direction === 'right' ? tiles[i].originalPos : index,
+                    toRow: direction === 'left' || direction === 'right' ? index : mergePos,
+                    toCol: direction === 'left' || direction === 'right' ? mergePos : index
+                };
+                
+                i += 2;
+            } else {
+                // 不合并，直接移动
+                newRow.push(tiles[i].value);
+                newIdRow.push(tiles[i].id);
+                
+                const newPos = newRow.length - 1;
+                animations[tiles[i].id] = {
+                    fromRow: direction === 'left' || direction === 'right' ? index : tiles[i].originalPos,
+                    fromCol: direction === 'left' || direction === 'right' ? tiles[i].originalPos : index,
+                    toRow: direction === 'left' || direction === 'right' ? index : newPos,
+                    toCol: direction === 'left' || direction === 'right' ? newPos : index
+                };
+                
+                i++;
             }
         }
         
         // 补齐空格
         while (newRow.length < this.gridSize) {
             newRow.push(0);
+            newIdRow.push(0);
         }
         
         // 检查是否移动了
@@ -385,25 +560,29 @@ class Game2048 {
             }
         }
         
-        return { row: newRow, score, moved, mergedPositions, reached2048 };
+        return {
+            row: newRow,
+            idRow: newIdRow,
+            score,
+            moved,
+            mergedPositions,
+            reached2048,
+            animations
+        };
     }
     
     // 检查是否还能移动
     canMove() {
-        // 检查是否有空格
         for (let i = 0; i < this.gridSize; i++) {
             for (let j = 0; j < this.gridSize; j++) {
                 if (this.grid[i][j] === 0) return true;
             }
         }
         
-        // 检查是否有相邻相同数字
         for (let i = 0; i < this.gridSize; i++) {
             for (let j = 0; j < this.gridSize; j++) {
                 const current = this.grid[i][j];
-                // 检查右边
                 if (j < this.gridSize - 1 && current === this.grid[i][j + 1]) return true;
-                // 检查下边
                 if (i < this.gridSize - 1 && current === this.grid[i + 1][j]) return true;
             }
         }
@@ -428,7 +607,6 @@ class Game2048 {
             document.getElementById('final-score').textContent = this.score;
         }
         
-        // 显示保存成绩选项
         if (this.score > 0) {
             this.showNameInput(this.score, this.gridSize);
         }
@@ -436,9 +614,7 @@ class Game2048 {
     
     // 设置事件监听
     setupEventListeners() {
-        // 键盘控制
         document.addEventListener('keydown', (e) => {
-            // 防止在输入框中触发
             if (e.target.tagName === 'INPUT') return;
             
             switch(e.key) {
@@ -467,34 +643,32 @@ class Game2048 {
             }
         });
         
-        // 新游戏按钮
         document.getElementById('new-game-btn')?.addEventListener('click', () => {
-            this.grid = null; // 强制重新初始化
+            this.grid = null;
+            this.tileIdGrid = null;
             this.init();
         });
         
-        // 重玩按钮
         document.getElementById('retry-btn')?.addEventListener('click', () => {
             document.getElementById('game-over-overlay').style.display = 'none';
             this.grid = null;
+            this.tileIdGrid = null;
             this.init();
         });
         
-        // 继续挑战按钮
         document.getElementById('continue-btn')?.addEventListener('click', () => {
             document.getElementById('game-win-overlay').style.display = 'none';
             this.continuePlaying = true;
             this.saveGameState();
         });
         
-        // 胜利后新游戏按钮
         document.getElementById('new-game-win-btn')?.addEventListener('click', () => {
             document.getElementById('game-win-overlay').style.display = 'none';
             this.grid = null;
+            this.tileIdGrid = null;
             this.init();
         });
         
-        // 触摸控制
         this.setupTouchControl();
     }
     
@@ -516,7 +690,7 @@ class Game2048 {
         let startX, startY;
         let startTime;
         const minSwipeDistance = 30;
-        const maxSwipeTime = 500; // 最大滑动时间
+        const maxSwipeTime = 500;
         
         gameContainer.addEventListener('touchstart', (e) => {
             startX = e.touches[0].clientX;
@@ -567,7 +741,8 @@ class Game2048 {
                 if (newSize >= 3 && newSize <= 6) {
                     this.gridSize = newSize;
                     this.bestScore = parseInt(localStorage.getItem('2048BestScore_' + this.gridSize)) || 0;
-                    this.grid = null; // 强制重新初始化
+                    this.grid = null;
+                    this.tileIdGrid = null;
                     this.init();
                 }
             });
@@ -599,7 +774,6 @@ class Game2048 {
         const submitBtn = overlay.querySelector('#submit-name');
         const skipBtn = overlay.querySelector('#skip-name');
         
-        // 预填上次昵称
         const lastName = localStorage.getItem('2048PlayerName');
         if (lastName) nameInput.value = lastName;
         
@@ -753,7 +927,6 @@ class Game2048 {
             }
         });
         
-        // 标签切换
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -763,7 +936,6 @@ class Game2048 {
             });
         });
         
-        // 网格大小筛选
         document.getElementById('leaderboard-size')?.addEventListener('change', (e) => {
             const activeTab = document.querySelector('.tab-btn.active');
             const type = activeTab?.dataset.tab || 'all';
