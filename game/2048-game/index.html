@@ -32,6 +32,7 @@
                     <option value="6">6×6</option>
                 </select>
             </div>
+            <button id="undo-btn" class="btn undo-btn" disabled>↩️ 撤销</button>
             <button id="new-game-btn" class="btn">新游戏</button>
             <button id="leaderboard-btn" class="btn">🏆 排行榜</button>
         </div>
@@ -48,6 +49,18 @@
                 <h2>游戏结束!</h2>
                 <p>最终分数: <strong id="final-score">0</strong></p>
                 <button id="retry-btn" class="btn">再玩一次</button>
+            </div>
+        </div>
+        
+        <!-- 游戏胜利覆盖层 -->
+        <div id="game-win-overlay" style="display: none;">
+            <div class="game-win-content">
+                <h2>🎉 恭喜达成2048！</h2>
+                <p>当前分数: <strong id="win-score">0</strong></p>
+                <div style="display: flex; gap: 10px; justify-content: center;">
+                    <button id="continue-btn" class="btn">继续挑战</button>
+                    <button id="new-game-win-btn" class="btn">新游戏</button>
+                </div>
             </div>
         </div>
     </div>

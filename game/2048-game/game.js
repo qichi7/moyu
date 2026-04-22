@@ -1,24 +1,81 @@
-// 2048 游戏 - 支持自定义大小和排行榜
+// 2048 游戏 - 支持自定义大小、撤销、动画和排行榜
 class Game2048 {
     constructor() {
-        this.gridSize = 4; // 默认4x4
+        this.gridSize = 4;
         this.grid = [];
         this.score = 0;
         this.bestScore = parseInt(localStorage.getItem('2048BestScore_' + this.gridSize)) || 0;
         this.gameOver = false;
+        this.won = false;
+        this.continuePlaying = false;
         this.isAnimating = false;
+        this.history = []; // 撤销历史
+        this.maxHistory = 10; // 最大撤销次数
         
         // 排行榜管理
         this.leaderboardManager = new LeaderboardManager2048();
+        
+        // 从本地存储恢复游戏状态
+        this.restoreGameState();
         
         this.init();
         this.setupEventListeners();
         this.setupSizeControl();
         this.setupLeaderboardUI();
+        this.setupUndoButton();
+    }
+    
+    // 恢复游戏状态
+    restoreGameState() {
+        const savedState = localStorage.getItem('2048GameState_' + this.gridSize);
+        if (savedState) {
+            try {
+                const state = JSON.parse(savedState);
+                if (state.grid && state.grid.length === this.gridSize) {
+                    this.grid = state.grid;
+                    this.score = state.score || 0;
+                    this.gameOver = state.gameOver || false;
+                    this.won = state.won || false;
+                    this.continuePlaying = state.continuePlaying || false;
+                    this.history = state.history || [];
+                    return; // 已恢复，不需要初始化
+                }
+            } catch (e) {
+                console.error('恢复游戏状态失败:', e);
+            }
+        }
+        // 没有保存的状态，需要初始化新游戏
+        this.grid = null;
+    }
+    
+    // 保存游戏状态
+    saveGameState() {
+        const state = {
+            grid: this.grid,
+            score: this.score,
+            gameOver: this.gameOver,
+            won: this.won,
+            continuePlaying: this.continuePlaying,
+            history: this.history.slice(-this.maxHistory)
+        };
+        localStorage.setItem('2048GameState_' + this.gridSize, JSON.stringify(state));
     }
     
     // 初始化游戏
     init() {
+        // 如果已有恢复的游戏状态，直接渲染
+        if (this.grid && this.grid.length === this.gridSize) {
+            this.updateDisplay();
+            this.renderGrid();
+            if (this.gameOver) {
+                this.showGameOver();
+            } else if (this.won && !this.continuePlaying) {
+                this.showWin();
+            }
+            return;
+        }
+        
+        // 初始化新游戏
         this.grid = [];
         for (let i = 0; i < this.gridSize; i++) {
             this.grid[i] = [];
@@ -28,17 +85,56 @@ class Game2048 {
         }
         this.score = 0;
         this.gameOver = false;
+        this.won = false;
+        this.continuePlaying = false;
+        this.history = [];
         
         // 添加两个初始数字
-        this.addRandomTile();
-        this.addRandomTile();
+        this.addRandomTile(true);
+        this.addRandomTile(true);
         
         this.updateDisplay();
         this.renderGrid();
+        this.saveGameState();
+        this.updateUndoButton();
+    }
+    
+    // 保存当前状态到历史（用于撤销）
+    saveToHistory() {
+        const state = {
+            grid: this.grid.map(row => [...row]),
+            score: this.score
+        };
+        this.history.push(state);
+        if (this.history.length > this.maxHistory) {
+            this.history.shift();
+        }
+        this.updateUndoButton();
+    }
+    
+    // 撤销
+    undo() {
+        if (this.history.length === 0 || this.gameOver) return;
+        
+        const prevState = this.history.pop();
+        this.grid = prevState.grid;
+        this.score = prevState.score;
+        this.updateDisplay();
+        this.renderGrid();
+        this.saveGameState();
+        this.updateUndoButton();
+    }
+    
+    // 更新撤销按钮状态
+    updateUndoButton() {
+        const undoBtn = document.getElementById('undo-btn');
+        if (undoBtn) {
+            undoBtn.disabled = this.history.length === 0 || this.gameOver;
+        }
     }
     
     // 添加随机数字（90%概率是2，10%概率是4）
-    addRandomTile() {
+    addRandomTile(isNewGame = false) {
         const emptyCells = [];
         for (let i = 0; i < this.gridSize; i++) {
             for (let j = 0; j < this.gridSize; j++) {
@@ -48,24 +144,22 @@ class Game2048 {
             }
         }
         
-        if (emptyCells.length === 0) return false;
+        if (emptyCells.length === 0) return null;
         
         const randomCell = emptyCells[Math.floor(Math.random() * emptyCells.length)];
         const value = Math.random() < 0.9 ? 2 : 4;
         this.grid[randomCell.row][randomCell.col] = value;
         
-        return true;
+        return { row: randomCell.row, col: randomCell.col, value, isNewGame };
     }
     
     // 渲染网格
-    renderGrid() {
+    renderGrid(newTileInfo = null, mergedPositions = []) {
         const gridElement = document.getElementById('game-grid');
         if (!gridElement) return;
         
-        // 清空网格
         gridElement.innerHTML = '';
         
-        // 动态计算格子大小
         const cellSize = Math.min(80, 320 / this.gridSize);
         const gapSize = 8;
         gridElement.style.display = 'grid';
@@ -85,6 +179,16 @@ class Game2048 {
                     if (value > 2048) {
                         cell.classList.add('tile-super');
                     }
+                    
+                    // 新方块动画
+                    if (newTileInfo && newTileInfo.row === i && newTileInfo.col === j) {
+                        cell.classList.add('tile-new');
+                    }
+                    
+                    // 合并动画
+                    if (mergedPositions.some(pos => pos.row === i && pos.col === j)) {
+                        cell.classList.add('tile-merged');
+                    }
                 }
                 
                 gridElement.appendChild(cell);
@@ -93,40 +197,90 @@ class Game2048 {
     }
     
     // 更新显示
-    updateDisplay() {
-        document.getElementById('score').textContent = this.score;
-        document.getElementById('best-score').textContent = this.bestScore;
+    updateDisplay(scoreAdded = 0) {
+        const scoreEl = document.getElementById('score');
+        const bestScoreEl = document.getElementById('best-score');
+        
+        scoreEl.textContent = this.score;
+        bestScoreEl.textContent = this.bestScore;
+        
+        // 分数增加动画
+        if (scoreAdded > 0) {
+            scoreEl.classList.add('score-pop');
+            setTimeout(() => scoreEl.classList.remove('score-pop'), 300);
+            
+            // 显示分数增加提示
+            this.showScorePopup(scoreAdded);
+        }
+    }
+    
+    // 显示分数增加提示
+    showScorePopup(scoreAdded) {
+        const scoreBox = document.querySelector('.score-box');
+        if (!scoreBox) return;
+        
+        const popup = document.createElement('div');
+        popup.className = 'score-add';
+        popup.textContent = '+' + scoreAdded;
+        popup.style.position = 'absolute';
+        
+        const rect = scoreBox.getBoundingClientRect();
+        popup.style.left = rect.left + rect.width / 2 - 20 + 'px';
+        popup.style.top = rect.top + 'px';
+        
+        document.body.appendChild(popup);
+        setTimeout(() => popup.remove(), 800);
     }
     
     // 移动逻辑
     move(direction) {
         if (this.gameOver || this.isAnimating) return;
         
+        // 保存当前状态到历史
+        this.saveToHistory();
+        
         let moved = false;
         let mergedScore = 0;
+        let mergedPositions = [];
+        let reached2048 = false;
         
-        // 根据方向处理
         if (direction === 'left') {
             for (let i = 0; i < this.gridSize; i++) {
-                const result = this.slideRow(this.grid[i]);
+                const result = this.slideRow(this.grid[i], i);
                 if (result.moved) moved = true;
                 mergedScore += result.score;
+                mergedPositions = mergedPositions.concat(result.mergedPositions);
+                if (result.reached2048) reached2048 = true;
                 this.grid[i] = result.row;
             }
         } else if (direction === 'right') {
             for (let i = 0; i < this.gridSize; i++) {
                 const reversed = [...this.grid[i]].reverse();
-                const result = this.slideRow(reversed);
+                const result = this.slideRow(reversed, i);
                 if (result.moved) moved = true;
                 mergedScore += result.score;
+                // 转换合并位置（因为反向）
+                const transformedPositions = result.mergedPositions.map(pos => ({
+                    row: pos.row,
+                    col: this.gridSize - 1 - pos.col
+                }));
+                mergedPositions = mergedPositions.concat(transformedPositions);
+                if (result.reached2048) reached2048 = true;
                 this.grid[i] = result.row.reverse();
             }
         } else if (direction === 'up') {
             for (let j = 0; j < this.gridSize; j++) {
                 const col = this.grid.map(row => row[j]);
-                const result = this.slideRow(col);
+                const result = this.slideRow(col, -1, j);
                 if (result.moved) moved = true;
                 mergedScore += result.score;
+                // 转换合并位置
+                const transformedPositions = result.mergedPositions.map(pos => ({
+                    row: pos.row,
+                    col: j
+                }));
+                mergedPositions = mergedPositions.concat(transformedPositions);
+                if (result.reached2048) reached2048 = true;
                 for (let i = 0; i < this.gridSize; i++) {
                     this.grid[i][j] = result.row[i];
                 }
@@ -134,10 +288,17 @@ class Game2048 {
         } else if (direction === 'down') {
             for (let j = 0; j < this.gridSize; j++) {
                 const col = this.grid.map(row => row[j]).reverse();
-                const result = this.slideRow(col);
+                const result = this.slideRow(col, -1, j);
                 if (result.moved) moved = true;
                 mergedScore += result.score;
                 const newCol = result.row.reverse();
+                // 转换合并位置
+                const transformedPositions = result.mergedPositions.map(pos => ({
+                    row: this.gridSize - 1 - pos.row,
+                    col: j
+                }));
+                mergedPositions = mergedPositions.concat(transformedPositions);
+                if (result.reached2048) reached2048 = true;
                 for (let i = 0; i < this.gridSize; i++) {
                     this.grid[i][j] = newCol[i];
                 }
@@ -151,31 +312,63 @@ class Game2048 {
                 localStorage.setItem('2048BestScore_' + this.gridSize, this.bestScore);
             }
             
-            this.addRandomTile();
-            this.updateDisplay();
-            this.renderGrid();
+            const newTile = this.addRandomTile();
+            this.updateDisplay(mergedScore);
+            
+            // 设置动画状态
+            this.isAnimating = true;
+            this.renderGrid(newTile, mergedPositions);
+            
+            setTimeout(() => {
+                this.isAnimating = false;
+            }, 200);
+            
+            // 检查是否达成2048
+            if (reached2048 && !this.won && !this.continuePlaying) {
+                this.won = true;
+                setTimeout(() => this.showWin(), 300);
+            }
             
             // 检查游戏是否结束
             if (!this.canMove()) {
                 this.gameOver = true;
-                this.showGameOver();
+                setTimeout(() => this.showGameOver(), 500);
             }
+            
+            this.saveGameState();
+            this.updateUndoButton();
+        } else {
+            // 没有移动，移除刚保存的历史
+            this.history.pop();
+            this.updateUndoButton();
         }
     }
     
     // 滑动一行/列
-    slideRow(row) {
-        // 移除空格
+    slideRow(row, rowIndex = -1, colIndex = -1) {
         let newRow = row.filter(val => val !== 0);
         let score = 0;
         let moved = false;
+        let mergedPositions = [];
+        let reached2048 = false;
         
         // 合并相同数字
         for (let i = 0; i < newRow.length - 1; i++) {
             if (newRow[i] === newRow[i + 1]) {
                 newRow[i] *= 2;
                 score += newRow[i];
+                
+                // 检查是否达成2048
+                if (newRow[i] === 2048) reached2048 = true;
+                
                 newRow.splice(i + 1, 1);
+                
+                // 记录合并位置
+                if (rowIndex >= 0) {
+                    mergedPositions.push({ row: rowIndex, col: i });
+                } else if (colIndex >= 0) {
+                    mergedPositions.push({ row: i, col: colIndex });
+                }
             }
         }
         
@@ -192,7 +385,7 @@ class Game2048 {
             }
         }
         
-        return { row: newRow, score, moved };
+        return { row: newRow, score, moved, mergedPositions, reached2048 };
     }
     
     // 检查是否还能移动
@@ -218,6 +411,15 @@ class Game2048 {
         return false;
     }
     
+    // 显示游戏胜利
+    showWin() {
+        const overlay = document.getElementById('game-win-overlay');
+        if (overlay) {
+            overlay.style.display = 'flex';
+            document.getElementById('win-score').textContent = this.score;
+        }
+    }
+    
     // 显示游戏结束
     showGameOver() {
         const overlay = document.getElementById('game-over-overlay');
@@ -236,6 +438,9 @@ class Game2048 {
     setupEventListeners() {
         // 键盘控制
         document.addEventListener('keydown', (e) => {
+            // 防止在输入框中触发
+            if (e.target.tagName === 'INPUT') return;
+            
             switch(e.key) {
                 case 'ArrowUp':
                     e.preventDefault();
@@ -253,22 +458,54 @@ class Game2048 {
                     e.preventDefault();
                     this.move('right');
                     break;
+                case 'z':
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        this.undo();
+                    }
+                    break;
             }
         });
         
         // 新游戏按钮
         document.getElementById('new-game-btn')?.addEventListener('click', () => {
+            this.grid = null; // 强制重新初始化
             this.init();
         });
         
         // 重玩按钮
         document.getElementById('retry-btn')?.addEventListener('click', () => {
             document.getElementById('game-over-overlay').style.display = 'none';
+            this.grid = null;
+            this.init();
+        });
+        
+        // 继续挑战按钮
+        document.getElementById('continue-btn')?.addEventListener('click', () => {
+            document.getElementById('game-win-overlay').style.display = 'none';
+            this.continuePlaying = true;
+            this.saveGameState();
+        });
+        
+        // 胜利后新游戏按钮
+        document.getElementById('new-game-win-btn')?.addEventListener('click', () => {
+            document.getElementById('game-win-overlay').style.display = 'none';
+            this.grid = null;
             this.init();
         });
         
         // 触摸控制
         this.setupTouchControl();
+    }
+    
+    // 设置撤销按钮
+    setupUndoButton() {
+        const undoBtn = document.getElementById('undo-btn');
+        if (undoBtn) {
+            undoBtn.addEventListener('click', () => {
+                this.undo();
+            });
+        }
     }
     
     // 触摸控制
@@ -277,15 +514,25 @@ class Game2048 {
         if (!gameContainer) return;
         
         let startX, startY;
+        let startTime;
         const minSwipeDistance = 30;
+        const maxSwipeTime = 500; // 最大滑动时间
         
         gameContainer.addEventListener('touchstart', (e) => {
             startX = e.touches[0].clientX;
             startY = e.touches[0].clientY;
-        });
+            startTime = Date.now();
+        }, { passive: true });
         
         gameContainer.addEventListener('touchend', (e) => {
-            if (!startX || !startY) return;
+            if (!startX || !startY || !startTime) return;
+            
+            const endTime = Date.now();
+            if (endTime - startTime > maxSwipeTime) {
+                startX = null;
+                startY = null;
+                return;
+            }
             
             const endX = e.changedTouches[0].clientX;
             const endY = e.changedTouches[0].clientY;
@@ -298,17 +545,16 @@ class Game2048 {
             
             if (Math.max(absDx, absDy) > minSwipeDistance) {
                 if (absDx > absDy) {
-                    // 水平滑动
                     this.move(dx > 0 ? 'right' : 'left');
                 } else {
-                    // 垂直滑动
                     this.move(dy > 0 ? 'down' : 'up');
                 }
             }
             
             startX = null;
             startY = null;
-        });
+            startTime = null;
+        }, { passive: true });
     }
     
     // 设置大小控制
@@ -321,6 +567,7 @@ class Game2048 {
                 if (newSize >= 3 && newSize <= 6) {
                     this.gridSize = newSize;
                     this.bestScore = parseInt(localStorage.getItem('2048BestScore_' + this.gridSize)) || 0;
+                    this.grid = null; // 强制重新初始化
                     this.init();
                 }
             });
@@ -364,7 +611,6 @@ class Game2048 {
                 submitBtn.disabled = true;
                 submitBtn.textContent = '保存中...';
                 
-                // 检查是否有Token
                 if (!this.leaderboardManager.getGistToken()) {
                     overlay.remove();
                     this.showTokenInputForSave(name, score, gridSize);
@@ -417,7 +663,6 @@ class Game2048 {
             if (token.length > 0) {
                 this.leaderboardManager.setToken(token);
                 overlay.remove();
-                // 创建新的overlay来显示保存进度
                 const savingOverlay = document.createElement('div');
                 savingOverlay.className = 'name-input-overlay';
                 savingOverlay.innerHTML = `<div class="name-input-content"><p>保存中...</p></div>`;
@@ -493,10 +738,8 @@ class Game2048 {
         document.getElementById('refresh-leaderboard')?.addEventListener('click', async () => {
             const btn = document.getElementById('refresh-leaderboard');
             btn.classList.add('spinning');
-            // 清除缓存，强制从线上拉取最新数据
             this.leaderboardManager.cache = null;
             this.leaderboardManager.cacheTime = 0;
-            // 保持当前选择的标签和网格大小
             const activeTab = document.querySelector('.tab-btn.active');
             const type = activeTab?.dataset.tab || 'all';
             const size = document.getElementById('leaderboard-size')?.value || String(this.gridSize);
@@ -533,7 +776,6 @@ class Game2048 {
         const overlay = document.getElementById('leaderboard-overlay');
         if (overlay) {
             overlay.style.display = 'flex';
-            // 使用当前游戏的网格大小
             const sizeSelect = document.getElementById('leaderboard-size');
             if (sizeSelect) {
                 sizeSelect.value = String(this.gridSize);
@@ -569,7 +811,6 @@ class Game2048 {
             return;
         }
         
-        // 过滤并验证数据
         data = data.filter(entry => this.validateEntry(entry));
         
         tbody.innerHTML = '';
@@ -577,7 +818,6 @@ class Game2048 {
             const rank = index + 1;
             
             const tr = document.createElement('tr');
-            // 第一名放大150%
             if (rank === 1) {
                 tr.style.fontSize = '1.5em';
                 tr.style.fontWeight = 'bold';
@@ -629,7 +869,7 @@ class LeaderboardManager2048 {
         this.maxEntries = 20;
         this.cache = null;
         this.cacheTime = 0;
-        this.cacheExpire = 30 * 1000; // 30秒缓存
+        this.cacheExpire = 30 * 1000;
     }
     
     setToken(token) {
@@ -644,7 +884,6 @@ class LeaderboardManager2048 {
     async getLeaderboard() {
         if (!this.gistId) return [];
         
-        // 检查缓存
         const now = Date.now();
         if (this.cache && (now - this.cacheTime) < this.cacheExpire) {
             return this.cache;
@@ -671,11 +910,9 @@ class LeaderboardManager2048 {
     async getLeaderboardBySize(type, size) {
         const data = await this.getLeaderboard();
         
-        // 按大小过滤 - 确保类型匹配（转换为整数）
         const sizeNum = parseInt(size);
         let filtered = data.filter(entry => entry.gridSize === sizeNum);
         
-        // 按类型过滤
         if (type === 'today') {
             const today = new Date().toLocaleDateString('zh-CN');
             filtered = filtered.filter(entry => entry.date === today);
@@ -685,7 +922,6 @@ class LeaderboardManager2048 {
             filtered = filtered.filter(entry => entry.timestamp >= weekStart);
         }
         
-        // 按分数排序
         filtered.sort((a, b) => b.score - a.score);
         
         return filtered.slice(0, this.maxEntries);
@@ -730,7 +966,6 @@ class LeaderboardManager2048 {
         const timestamp = Date.now();
         const date = new Date().toLocaleDateString('zh-CN');
         
-        // 检查相同昵称和大小
         const existingIndex = leaderboard.findIndex(
             entry => entry.name === name && entry.gridSize === gridSize
         );
@@ -745,13 +980,11 @@ class LeaderboardManager2048 {
             leaderboard.push({ name, score, gridSize, date, timestamp });
         }
         
-        // 按大小和分数排序
         leaderboard.sort((a, b) => {
             if (a.gridSize !== b.gridSize) return b.gridSize - a.gridSize;
             return b.score - a.score;
         });
         
-        // 保留每个大小的前20名
         const result = [];
         const sizeCounts = {};
         for (const entry of leaderboard) {
