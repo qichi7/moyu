@@ -188,18 +188,31 @@ class Game2048 {
         
         gridElement.innerHTML = '';
         
-        // 动态计算格子大小 - 根据屏幕宽度自适应
-        const wrapperWidth = Math.min(window.innerWidth - 40, 500); // 最大500px，两边留20px
-        const maxContainerWidth = wrapperWidth - 20; // game-container padding约15-30px
-        const gapSize = Math.max(4, Math.min(8, Math.floor(maxContainerWidth / (this.gridSize * 15)))); // 间距也动态调整
+        // 获取game-container的实际可用宽度
+        const gameContainer = document.getElementById('game-container');
+        const containerPadding = gameContainer ? 
+            parseInt(gameContainer.style.padding || '15') : 15;
         
-        // 计算格子大小：容器宽度 - 所有间距 / 格子数量
-        const cellSize = Math.floor((maxContainerWidth - gapSize * (this.gridSize + 1)) / this.gridSize);
+        // 动态计算格子大小 - 根据屏幕宽度自适应
+        // 考虑body padding(10-20px) + container padding(15px)
+        const viewportWidth = window.innerWidth;
+        const bodyPadding = viewportWidth <= 480 ? 10 : 20;
+        const availableWidth = viewportWidth - bodyPadding * 2 - containerPadding * 2;
+        const maxGridWidth = Math.min(availableWidth, 460); // 最大网格宽度
+        
+        // 间距动态调整
+        const gapSize = Math.max(4, Math.min(8, Math.floor(maxGridWidth / (this.gridSize * 12))));
+        
+        // 计算格子大小
+        const cellSize = Math.floor((maxGridWidth - gapSize * (this.gridSize + 1)) / this.gridSize);
         
         const containerSize = cellSize * this.gridSize + gapSize * (this.gridSize + 1);
         
+        // 设置网格大小（居中需要固定宽度）
         gridElement.style.width = containerSize + 'px';
         gridElement.style.height = containerSize + 'px';
+        gridElement.style.margin = '0 auto'; // 确保居中
+        gridElement.style.position = 'relative'; // 确保position
         
         // 存储当前计算的大小，供其他地方使用
         this.currentCellSize = cellSize;
@@ -467,14 +480,14 @@ class Game2048 {
                 mergedPositions = mergedPositions.concat(transformedPositions);
                 if (result.reached2048) reached2048 = true;
                 
-                // 转换动画
+                // 转换动画 - up方向
                 for (const id in result.animations) {
                     const anim = result.animations[id];
                     slideAnimations[id] = {
-                        fromRow: anim.fromCol, // 注意：在up/down中，fromCol存储的是行索引
-                        fromCol: j,
-                        toRow: anim.toCol,
-                        toCol: j
+                        fromRow: anim.fromRow, // anim.fromRow就是原始行位置
+                        fromCol: anim.fromCol, // anim.fromCol就是列索引j
+                        toRow: anim.toRow,     // anim.toRow就是目标行位置
+                        toCol: anim.toCol      // anim.toCol就是列索引j
                     };
                 }
                 
@@ -498,13 +511,13 @@ class Game2048 {
                 mergedPositions = mergedPositions.concat(transformedPositions);
                 if (result.reached2048) reached2048 = true;
                 
-                // 转换动画
+                // 转换动画 - down方向（列被反转了，所以行位置需要反转）
                 for (const id in result.animations) {
                     const anim = result.animations[id];
                     slideAnimations[id] = {
-                        fromRow: this.gridSize - 1 - anim.fromCol,
+                        fromRow: this.gridSize - 1 - anim.fromRow, // 反转行位置
                         fromCol: j,
-                        toRow: this.gridSize - 1 - anim.toCol,
+                        toRow: this.gridSize - 1 - anim.toRow,     // 反转行位置
                         toCol: j
                     };
                 }

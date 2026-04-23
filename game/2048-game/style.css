@@ -178,11 +178,15 @@ body {
     padding: 15px;
     box-shadow: 0 10px 30px rgba(0,0,0,0.3);
     display: inline-block;
+    /* 居中显示 */
+    margin: 0 auto;
 }
 
 #game-grid {
     position: relative;
     padding: 8px;
+    /* 确保网格容器居中 */
+    margin: 0 auto;
 }
 
 /* 背景格子（空格子） */
@@ -698,12 +702,14 @@ body {
         max-width: calc(100vw - 20px);
         padding: 10px;
         border-radius: 10px;
+        margin: 0 auto;
+        display: block;
     }
     
     #game-grid {
         padding: 6px;
-        width: 100%;
-        /* 网格大小由JavaScript动态计算 */
+        margin: 0 auto;
+        /* 网格大小由JavaScript动态计算，确保居中 */
     }
     
     /* 方块字体大小动态调整 - 使用JavaScript计算，这里只是备用 */
