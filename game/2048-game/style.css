@@ -13,6 +13,10 @@ body {
     font-family: 'Arial', 'Microsoft YaHei', sans-serif;
     color: #fff;
     padding: 20px;
+    /* 防止iOS Safari下拉刷新 */
+    overflow: hidden;
+    touch-action: none;
+    -webkit-overflow-scrolling: touch;
 }
 
 .game-wrapper {
@@ -624,51 +628,243 @@ body {
     color: #fff;
 }
 
-/* 移动端适配 */
+/* 移动端适配 - 多级响应式设计 */
 @media (max-width: 480px) {
+    body {
+        padding: 10px;
+        align-items: flex-start;
+        padding-top: 15px;
+    }
+    
+    .game-wrapper {
+        width: 100%;
+        padding: 0;
+    }
+    
+    .game-header {
+        flex-direction: row;
+        margin-bottom: 15px;
+        gap: 10px;
+    }
+    
     .game-header h1 {
-        font-size: 40px;
+        font-size: 36px;
+        flex-shrink: 0;
+    }
+    
+    .score-container {
+        gap: 8px;
+        flex-shrink: 1;
     }
     
     .score-box {
-        min-width: 60px;
-        padding: 8px 12px;
+        min-width: 55px;
+        padding: 6px 10px;
+    }
+    
+    .score-label {
+        font-size: 11px;
     }
     
     .score-value {
-        font-size: 18px;
+        font-size: 16px;
     }
     
     .controls {
-        flex-direction: column;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: center;
+        margin-bottom: 15px;
+    }
+    
+    .size-control {
+        order: -1;
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .btn {
+        padding: 8px 16px;
+        font-size: 13px;
+    }
+    
+    .instructions {
+        font-size: 12px;
+        margin-bottom: 12px;
     }
     
     .game-container {
         width: 100%;
-        max-width: 320px;
+        max-width: calc(100vw - 20px);
+        padding: 10px;
+        border-radius: 10px;
     }
     
     #game-grid {
-        padding: 4px;
+        padding: 6px;
+        width: 100%;
+        /* 网格大小由JavaScript动态计算 */
     }
     
-    .grid-bg-cell,
+    /* 方块字体大小动态调整 - 使用JavaScript计算，这里只是备用 */
     .tile {
-        font-size: 18px;
+        font-size: 18px !important;
     }
     
     .tile.tile-128,
     .tile.tile-256,
     .tile.tile-512 {
-        font-size: 16px;
+        font-size: 16px !important;
     }
     
     .tile.tile-1024,
     .tile.tile-2048 {
-        font-size: 14px;
+        font-size: 14px !important;
     }
     
     .tile.tile-super {
+        font-size: 12px !important;
+    }
+    
+    .grid-bg-cell {
+        border-radius: 6px;
+    }
+    
+    /* 游戏结束/胜利弹窗 */
+    .game-over-content,
+    .game-win-content {
+        padding: 25px;
+        width: 90%;
+        max-width: 300px;
+    }
+    
+    .game-over-content h2,
+    .game-win-content h2 {
+        font-size: 28px;
+    }
+    
+    .game-over-content p,
+    .game-win-content p {
+        font-size: 18px;
+    }
+    
+    /* 排行榜适配 */
+    .leaderboard-content {
+        width: 95%;
+        padding: 20px;
+        max-height: 85vh;
+    }
+    
+    .leaderboard-header h2 {
+        font-size: 18px;
+    }
+    
+    .leaderboard-controls {
+        flex-direction: column;
+        gap: 12px;
+    }
+    
+    .leaderboard-tabs {
+        width: 100%;
+        justify-content: space-around;
+    }
+    
+    .tab-btn {
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+    
+    .size-filter {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .leaderboard-table th,
+    .leaderboard-table td {
+        padding: 8px 4px;
         font-size: 12px;
+    }
+    
+    /* 输入框适配 */
+    .name-input-content {
+        width: 90%;
+        padding: 20px;
+    }
+    
+    .name-input-content h3 {
+        font-size: 20px;
+    }
+    
+    .name-input-content input {
+        font-size: 16px;
+        padding: 10px;
+    }
+    
+    .name-submit-btn,
+    .name-skip-btn {
+        padding: 10px 20px;
+        font-size: 14px;
+    }
+}
+
+/* 超小屏幕适配 */
+@media (max-width: 360px) {
+    body {
+        padding: 8px;
+        padding-top: 10px;
+    }
+    
+    .game-header h1 {
+        font-size: 28px;
+    }
+    
+    .score-box {
+        min-width: 50px;
+        padding: 5px 8px;
+    }
+    
+    .score-value {
+        font-size: 14px;
+    }
+    
+    .btn {
+        padding: 6px 12px;
+        font-size: 12px;
+    }
+    
+    .instructions {
+        font-size: 11px;
+    }
+    
+    .game-container {
+        padding: 8px;
+    }
+    
+    #game-grid {
+        padding: 4px;
+    }
+}
+
+/* 平板适配 */
+@media (min-width: 481px) and (max-width: 768px) {
+    .game-wrapper {
+        max-width: 450px;
+    }
+    
+    .game-header h1 {
+        font-size: 50px;
+    }
+    
+    .score-box {
+        min-width: 70px;
+    }
+}
+
+/* 防止iOS Safari滚动 */
+@supports (-webkit-touch-callout: none) {
+    body {
+        position: fixed;
+        width: 100%;
+        height: 100%;
     }
 }

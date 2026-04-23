@@ -188,12 +188,27 @@ class Game2048 {
         
         gridElement.innerHTML = '';
         
-        const cellSize = Math.min(80, 320 / this.gridSize);
-        const gapSize = 8;
+        // 动态计算格子大小 - 根据屏幕宽度自适应
+        const wrapperWidth = Math.min(window.innerWidth - 40, 500); // 最大500px，两边留20px
+        const maxContainerWidth = wrapperWidth - 20; // game-container padding约15-30px
+        const gapSize = Math.max(4, Math.min(8, Math.floor(maxContainerWidth / (this.gridSize * 15)))); // 间距也动态调整
+        
+        // 计算格子大小：容器宽度 - 所有间距 / 格子数量
+        const cellSize = Math.floor((maxContainerWidth - gapSize * (this.gridSize + 1)) / this.gridSize);
+        
         const containerSize = cellSize * this.gridSize + gapSize * (this.gridSize + 1);
         
         gridElement.style.width = containerSize + 'px';
         gridElement.style.height = containerSize + 'px';
+        
+        // 存储当前计算的大小，供其他地方使用
+        this.currentCellSize = cellSize;
+        this.currentGapSize = gapSize;
+        
+        // 动态计算字体大小（基于格子大小）
+        let fontSize = Math.max(12, Math.min(24, cellSize * 0.3));
+        if (cellSize < 50) fontSize = Math.max(10, cellSize * 0.25);
+        if (cellSize < 40) fontSize = Math.max(8, cellSize * 0.2);
         
         // 先渲染背景格子
         for (let i = 0; i < this.gridSize; i++) {
@@ -204,6 +219,7 @@ class Game2048 {
                 bgCell.style.height = cellSize + 'px';
                 bgCell.style.left = (gapSize + j * (cellSize + gapSize)) + 'px';
                 bgCell.style.top = (gapSize + i * (cellSize + gapSize)) + 'px';
+                bgCell.style.borderRadius = Math.max(4, Math.min(8, cellSize * 0.1)) + 'px';
                 gridElement.appendChild(bgCell);
             }
         }
@@ -276,6 +292,18 @@ class Game2048 {
             
             tileElement.style.width = cellSize + 'px';
             tileElement.style.height = cellSize + 'px';
+            tileElement.style.borderRadius = Math.max(4, Math.min(8, cellSize * 0.1)) + 'px';
+            
+            // 动态调整字体大小
+            let tileFontSize = fontSize;
+            if (tile.value >= 128 && tile.value < 1024) {
+                tileFontSize = fontSize * 0.85;
+            } else if (tile.value >= 1024 && tile.value <= 2048) {
+                tileFontSize = fontSize * 0.7;
+            } else if (tile.value > 2048) {
+                tileFontSize = fontSize * 0.6;
+            }
+            tileElement.style.fontSize = tileFontSize + 'px';
             
             // 检查是否有滑动动画
             if (slideAnimations && slideAnimations[tile.id]) {
@@ -732,29 +760,53 @@ class Game2048 {
         }
     }
     
-    // 触摸控制
+    // 触摸控制 - 扩大到整个屏幕
     setupTouchControl() {
-        const gameContainer = document.getElementById('game-container');
-        if (!gameContainer) return;
-        
         let startX, startY;
         let startTime;
+        let isSwiping = false;
         const minSwipeDistance = 30;
-        const maxSwipeTime = 500;
+        const maxSwipeTime = 800; // 增加滑动时间限制
         
-        gameContainer.addEventListener('touchstart', (e) => {
-            startX = e.touches[0].clientX;
-            startY = e.touches[0].clientY;
-            startTime = Date.now();
+        // 监听整个文档的触摸事件
+        document.addEventListener('touchstart', (e) => {
+            // 排除输入框、按钮等元素
+            if (e.target.tagName === 'INPUT' || 
+                e.target.tagName === 'BUTTON' || 
+                e.target.tagName === 'SELECT' ||
+                e.target.closest('.name-input-overlay') ||
+                e.target.closest('.leaderboard-overlay') ||
+                e.target.closest('.game-over-content') ||
+                e.target.closest('.game-win-content')) {
+                return;
+            }
+            
+            // 只处理单指触摸
+            if (e.touches.length === 1) {
+                startX = e.touches[0].clientX;
+                startY = e.touches[0].clientY;
+                startTime = Date.now();
+                isSwiping = true;
+            }
         }, { passive: true });
         
-        gameContainer.addEventListener('touchend', (e) => {
-            if (!startX || !startY || !startTime) return;
+        document.addEventListener('touchmove', (e) => {
+            // 可以在这里添加一些视觉效果，比如阻止页面滚动
+            if (isSwiping && e.touches.length === 1) {
+                // 可选：阻止页面滚动（但可能影响用户体验）
+                // e.preventDefault();
+            }
+        }, { passive: true });
+        
+        document.addEventListener('touchend', (e) => {
+            if (!isSwiping || !startX || !startY || !startTime) return;
             
             const endTime = Date.now();
             if (endTime - startTime > maxSwipeTime) {
                 startX = null;
                 startY = null;
+                startTime = null;
+                isSwiping = false;
                 return;
             }
             
@@ -767,7 +819,11 @@ class Game2048 {
             const absDx = Math.abs(dx);
             const absDy = Math.abs(dy);
             
+            // 提高最小滑动距离，避免误触发
             if (Math.max(absDx, absDy) > minSwipeDistance) {
+                // 阻止其他事件（如点击）
+                e.preventDefault();
+                
                 if (absDx > absDy) {
                     this.move(dx > 0 ? 'right' : 'left');
                 } else {
@@ -778,7 +834,33 @@ class Game2048 {
             startX = null;
             startY = null;
             startTime = null;
-        }, { passive: true });
+            isSwiping = false;
+        }, { passive: false }); // passive: false 以便能调用preventDefault
+        
+        // 添加窗口resize事件监听 - 使用防抖优化
+        let resizeTimeout = null;
+        window.addEventListener('resize', () => {
+            // 清除之前的定时器
+            if (resizeTimeout) {
+                clearTimeout(resizeTimeout);
+            }
+            // 100ms后重新渲染
+            resizeTimeout = setTimeout(() => {
+                if (!this.gameOver && !this.isAnimating) {
+                    this.renderGrid();
+                }
+                resizeTimeout = null;
+            }, 100);
+        });
+        
+        // 添加orientationchange事件监听（针对移动设备）
+        window.addEventListener('orientationchange', () => {
+            setTimeout(() => {
+                if (!this.gameOver && !this.isAnimating) {
+                    this.renderGrid();
+                }
+            }, 200); // 等待orientation change完成
+        });
     }
     
     // 设置大小控制
