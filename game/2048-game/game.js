@@ -14,7 +14,7 @@ class Game2048 {
         this.isAnimating = false;
         this.history = [];
         this.maxHistory = 10;
-        this.animationDuration = 150; // 滑动动画时长
+        this.animationDuration = 180; // 滑动动画时长（毫秒）
         
         // 排行榜管理
         this.leaderboardManager = new LeaderboardManager2048();
@@ -208,6 +208,43 @@ class Game2048 {
             }
         }
         
+        // 渲染移动轨迹（在方块之前）
+        if (slideAnimations) {
+            Object.values(slideAnimations).forEach(anim => {
+                // 计算轨迹路径
+                const fromLeft = gapSize + anim.fromCol * (cellSize + gapSize);
+                const fromTop = gapSize + anim.fromRow * (cellSize + gapSize);
+                const toLeft = gapSize + anim.toCol * (cellSize + gapSize);
+                const toTop = gapSize + anim.toRow * (cellSize + gapSize);
+                
+                // 创建轨迹元素
+                const trail = document.createElement('div');
+                trail.className = 'move-trail';
+                
+                // 计算轨迹大小和位置（覆盖移动路径）
+                const minLeft = Math.min(fromLeft, toLeft);
+                const minTop = Math.min(fromTop, toTop);
+                const maxLeft = Math.max(fromLeft, toLeft);
+                const maxTop = Math.max(fromTop, toTop);
+                
+                // 如果是直线移动（水平或垂直）
+                if (anim.fromRow === anim.toRow || anim.fromCol === anim.toCol) {
+                    trail.style.width = (maxLeft - minLeft + cellSize) + 'px';
+                    trail.style.height = (maxTop - minTop + cellSize) + 'px';
+                    trail.style.left = minLeft + 'px';
+                    trail.style.top = minTop + 'px';
+                } else {
+                    // 拐弯移动（很少见，但需要处理）
+                    trail.style.width = cellSize + 'px';
+                    trail.style.height = cellSize + 'px';
+                    trail.style.left = minLeft + 'px';
+                    trail.style.top = minTop + 'px';
+                }
+                
+                gridElement.appendChild(trail);
+            });
+        }
+        
         // 收集所有方块信息
         const tiles = [];
         for (let i = 0; i < this.gridSize; i++) {
@@ -246,18 +283,30 @@ class Game2048 {
                 const startLeft = gapSize + anim.fromCol * (cellSize + gapSize);
                 const startTop = gapSize + anim.fromRow * (cellSize + gapSize);
                 
-                // 先设置起始位置
+                // 先设置起始位置（不添加sliding类）
                 tileElement.style.left = startLeft + 'px';
                 tileElement.style.top = startTop + 'px';
                 
-                // 添加滑动动画类
-                tileElement.classList.add('sliding');
-                
-                // 使用requestAnimationFrame确保动画触发
-                requestAnimationFrame(() => {
+                // 使用setTimeout确保初始位置已渲染
+                setTimeout(() => {
+                    // 添加滑动动画类
+                    tileElement.classList.add('sliding');
+                    
+                    // 设置目标位置
                     tileElement.style.left = targetLeft + 'px';
                     tileElement.style.top = targetTop + 'px';
-                });
+                    
+                    // 动画结束后恢复状态
+                    setTimeout(() => {
+                        tileElement.classList.remove('sliding');
+                        tileElement.classList.add('sliding-done');
+                        
+                        // 短暂延迟后移除sliding-done
+                        setTimeout(() => {
+                            tileElement.classList.remove('sliding-done');
+                        }, 100);
+                    }, this.animationDuration);
+                }, 5);
             } else {
                 tileElement.style.left = targetLeft + 'px';
                 tileElement.style.top = targetTop + 'px';
@@ -454,9 +503,10 @@ class Game2048 {
             this.isAnimating = true;
             this.renderGrid(newTile, mergedPositions, slideAnimations);
             
+            // 动画完成后清除状态（滑动动画 + 恢复动画）
             setTimeout(() => {
                 this.isAnimating = false;
-            }, this.animationDuration + 50);
+            }, this.animationDuration + 120);
             
             if (reached2048 && !this.won && !this.continuePlaying) {
                 this.won = true;
