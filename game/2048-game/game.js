@@ -597,14 +597,21 @@ class Game2048 {
                     mergedPositions.push({ row: mergePos, col: index });
                 }
                 
-                // 记录两个方块的动画
-                // 第一个方块滑动到合并位置
-                animations[tiles[i].id] = {
-                    fromRow: direction === 'left' || direction === 'right' ? index : tiles[i].originalPos,
-                    fromCol: direction === 'left' || direction === 'right' ? tiles[i].originalPos : index,
-                    toRow: direction === 'left' || direction === 'right' ? index : mergePos,
-                    toCol: direction === 'left' || direction === 'right' ? mergePos : index
-                };
+                // 记录第一个方块的动画（如果位置发生变化）
+                const fromRow1 = direction === 'left' || direction === 'right' ? index : tiles[i].originalPos;
+                const fromCol1 = direction === 'left' || direction === 'right' ? tiles[i].originalPos : index;
+                const toRow1 = direction === 'left' || direction === 'right' ? index : mergePos;
+                const toCol1 = direction === 'left' || direction === 'right' ? mergePos : index;
+                
+                // 只有当位置发生变化时才添加动画
+                if (fromRow1 !== toRow1 || fromCol1 !== toCol1) {
+                    animations[tiles[i].id] = {
+                        fromRow: fromRow1,
+                        fromCol: fromCol1,
+                        toRow: toRow1,
+                        toCol: toCol1
+                    };
+                }
                 
                 i += 2;
             } else {
@@ -613,12 +620,22 @@ class Game2048 {
                 newIdRow.push(tiles[i].id);
                 
                 const newPos = newRow.length - 1;
-                animations[tiles[i].id] = {
-                    fromRow: direction === 'left' || direction === 'right' ? index : tiles[i].originalPos,
-                    fromCol: direction === 'left' || direction === 'right' ? tiles[i].originalPos : index,
-                    toRow: direction === 'left' || direction === 'right' ? index : newPos,
-                    toCol: direction === 'left' || direction === 'right' ? newPos : index
-                };
+                
+                // 计算位置（如果位置发生变化才添加动画）
+                const fromRow2 = direction === 'left' || direction === 'right' ? index : tiles[i].originalPos;
+                const fromCol2 = direction === 'left' || direction === 'right' ? tiles[i].originalPos : index;
+                const toRow2 = direction === 'left' || direction === 'right' ? index : newPos;
+                const toCol2 = direction === 'left' || direction === 'right' ? newPos : index;
+                
+                // 只有当位置发生变化时才添加动画
+                if (fromRow2 !== toRow2 || fromCol2 !== toCol2) {
+                    animations[tiles[i].id] = {
+                        fromRow: fromRow2,
+                        fromCol: fromCol2,
+                        toRow: toRow2,
+                        toCol: toCol2
+                    };
+                }
                 
                 i++;
             }
