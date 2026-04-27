@@ -4,32 +4,23 @@
 
 ---
 
-## 游戏模式
+## 游戏特点
 
-### 🎮 本地模式（默认）
-
-游戏默认以**本地模式**运行，无需配置Gist：
-- 使用自动生成的默认地图
-- 单人游戏，无法看到其他玩家
-- 可以自定义角色外观
-- Token可随意输入（本地模式不验证）
-
-### 🌐 多人模式（需配置）
-
-要启用多人同步功能，需要配置三个Gist：
+- 🌐 **基于Gist的数据存储** - 使用GitHub Gist存储玩家数据和位置
+- 👤 **角色自定义** - 自定义性别、身高、发型、衣服、配饰等外观
+- 🎮 **实时移动** - 使用轮盘或键盘控制角色移动
+- 💬 **社交互动** - 发送聊天消息与其他玩家交流
+- 🔄 **实时同步** - 高频数据同步，实现多人在线体验
 
 ---
 
 ## 快速开始
 
-### 本地模式
+### 1. 创建GitHub Token
 
-1. 打开 `index.html`
-2. 输入任意Token（如 `local`）
-3. 输入角色名称（3-12字符）
-4. 点击"创建角色"即可开始游戏
+访问 [GitHub Token设置](https://github.com/settings/tokens/new)，创建一个具有 `gist` 权限的Token。
 
-### 多人模式配置
+### 2. 已配置的Gist
 
 ### 1. 创建GitHub Token
 
@@ -67,15 +58,15 @@
 }
 ```
 
-### 3. 配置Gist ID
+### 3. 已配置的Gist
 
-将三个Gist的ID（URL最后一段）替换到 `game.js` 中的硬编码配置：
+游戏已配置好三个Gist文件：
 
-```javascript
-static STATUS_GIST_ID = 'your-status-gist-id';
-static POSITION_GIST_ID = 'your-position-gist-id';
-static MAP_GIST_ID = 'your-map-gist-id';
-```
+| Gist | ID | 链接 |
+|------|-----|------|
+| 状态数据 | `6ff40e66e1372b4cc8670d3ab699c5b0` | [查看](https://gist.github.com/qichi7/6ff40e66e1372b4cc8670d3ab699c5b0) |
+| 位置数据 | `ef004040c5ead2f629d725a0127158f2` | [查看](https://gist.github.com/qichi7/ef004040c5ead2f629d725a0127158f2) |
+| 地图数据 | `3870a2f55dc9c3454049f149a9fb499d` | [查看](https://gist.github.com/qichi7/3870a2f55dc9c3454049f149a9fb499d) |
 
 ### 4. 开始游戏
 

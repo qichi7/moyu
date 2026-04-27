@@ -4,11 +4,11 @@
  */
 
 class GoodMorningGame {
-    // 硬编码的Gist ID（需要替换为实际的ID）
-    // 如果未配置，游戏将使用本地模式
-    static STATUS_GIST_ID = ''; // 空表示未配置
-    static POSITION_GIST_ID = '';
-    static MAP_GIST_ID = '';
+    // ========== 硬编码的Gist ID ==========
+    // GoodMorning游戏专用Gist（已创建）
+    static STATUS_GIST_ID = '6ff40e66e1372b4cc8670d3ab699c5b0';
+    static POSITION_GIST_ID = 'ef004040c5ead2f629d725a0127158f2';
+    static MAP_GIST_ID = '3870a2f55dc9c3454049f149a9fb499d';
     
     constructor() {
         // Canvas相关
