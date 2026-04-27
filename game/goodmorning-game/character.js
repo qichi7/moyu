@@ -1,33 +1,24 @@
-/**
- * CharacterManager - 角色管理
- * 管理角色的创建、状态、绘制
- */
-
-// ========== 状态默认值 ==========
-
 const DEFAULT_STATUS = {
-    gender: 'male',           // 性别：male/female
-    height: 1.0,              // 身高比例：0.8-1.2
-    hairStyle: 'short',       // 发型：short/long/curly/ponytail/bald/spiky
-    hairColor: '#333333',     // 发色：十六进制颜色
-    clothingStyle: 'casual',  // 衣服样式：casual/formal/sporty/hoodie/dress
-    clothingColor: '#3498db', // 衣服颜色：十六进制颜色
-    skinColor: '#f5d0c5',     // 肤色：十六进制颜色
-    eyeColor: '#4a4a4a',      // 眼睛颜色
-    accessories: [],          // 配饰：glasses/hat/watch/earring/necklace/backpack
-    chatMessage: '',          // 聊天消息
-    chatExpiry: 0,            // 聊天过期时间戳
-    lastUpdate: Date.now()    // 最后更新时间
+    gender: 'male',
+    height: 1.0,
+    hairStyle: 'short',
+    hairColor: '#333333',
+    clothingStyle: 'casual',
+    clothingColor: '#3498db',
+    skinColor: '#f5d0c5',
+    eyeColor: '#4a4a4a',
+    accessories: [],
+    chatMessage: '',
+    chatExpiry: 0,
+    lastUpdate: Date.now()
 };
 
 const DEFAULT_POSITION = {
     x: 100,
     y: 100,
-    direction: 'down',        // 朝向：up/down/left/right
+    direction: 'down',
     lastUpdate: Date.now()
 };
-
-// ========== 获取带默认值的状态 ==========
 
 function getStatusWithDefaults(status) {
     if (!status) return { ...DEFAULT_STATUS };
@@ -59,20 +50,16 @@ function getPositionWithDefaults(position) {
     };
 }
 
-// ========== Character类 ==========
-
 class Character {
     constructor(name) {
         this.name = name;
         
-        // 位置
         this.x = DEFAULT_POSITION.x;
         this.y = DEFAULT_POSITION.y;
         this.direction = DEFAULT_POSITION.direction;
         this.displayX = this.x;
         this.displayY = this.y;
         
-        // 状态（使用默认值）
         this.gender = DEFAULT_STATUS.gender;
         this.height = DEFAULT_STATUS.height;
         this.hairStyle = DEFAULT_STATUS.hairStyle;
@@ -83,17 +70,30 @@ class Character {
         this.eyeColor = DEFAULT_STATUS.eyeColor;
         this.accessories = DEFAULT_STATUS.accessories;
         
-        // 聊天
         this.chatMessage = '';
         this.chatExpiry = 0;
         this.chatTimeout = null;
         
-        // 其他
         this.hasMoved = false;
         this.lastUpdate = Date.now();
+        
+        this.blinkTimer = 0;
+        this.isBlinking = false;
+        this.blinkTimeout = null;
+        this.breathePhase = 0;
     }
     
-    // 设置状态（带默认值）
+    destroy() {
+        if (this.chatTimeout) {
+            clearTimeout(this.chatTimeout);
+            this.chatTimeout = null;
+        }
+        if (this.blinkTimeout) {
+            clearTimeout(this.blinkTimeout);
+            this.blinkTimeout = null;
+        }
+    }
+    
     setStatus(status) {
         const fullStatus = getStatusWithDefaults(status);
         
@@ -114,7 +114,6 @@ class Character {
         this.lastUpdate = Date.now();
     }
     
-    // 获取状态
     getStatus() {
         return {
             gender: this.gender,
@@ -132,24 +131,20 @@ class Character {
         };
     }
     
-    // 设置位置
     setPosition(x, y, direction = null) {
         this.x = x;
         this.y = y;
-        // 始终同步显示位置（修复：首次设置也要同步）
         this.displayX = x;
         this.displayY = y;
         if (direction) this.direction = direction;
         this.lastUpdate = Date.now();
     }
     
-    // 初始化显示位置（确保调用）
     initDisplayPosition() {
         this.displayX = this.x;
         this.displayY = this.y;
     }
     
-    // 获取位置
     getPosition() {
         return {
             x: this.x,
@@ -159,23 +154,19 @@ class Character {
         };
     }
     
-    // 设置聊天
     setChat(message, duration = 10000) {
         this.chatMessage = message;
         this.chatExpiry = Date.now() + duration;
         
-        // 清除之前的定时器
         if (this.chatTimeout) {
             clearTimeout(this.chatTimeout);
         }
         
-        // 设置过期定时器
         this.chatTimeout = setTimeout(() => {
             this.clearChat();
         }, duration);
     }
     
-    // 清除聊天
     clearChat() {
         this.chatMessage = '';
         this.chatExpiry = 0;
@@ -186,515 +177,1169 @@ class Character {
         }
     }
     
-    // 是否有聊天消息显示
     hasChat() {
         return this.chatMessage && this.chatExpiry > Date.now();
     }
+    
+    updateAnimations(deltaTime) {
+        this.blinkTimer += deltaTime;
+        if (this.blinkTimer > 3000) {
+            this.blinkTimer = 0;
+            this.isBlinking = true;
+            if (this.blinkTimeout) clearTimeout(this.blinkTimeout);
+            this.blinkTimeout = setTimeout(() => {
+                this.isBlinking = false;
+            }, 150);
+        }
+        
+        this.breathePhase += deltaTime * 0.003;
+    }
 }
-
-// ========== CharacterManager类 ==========
 
 class CharacterManager {
     constructor(game) {
         this.game = game;
         
-        // 角色基础尺寸
-        this.baseWidth = 32;
-        this.baseHeight = 48;
+        this.baseWidth = 48;
+        this.baseHeight = 64;
+        
+        this.gradientCache = new Map();
     }
     
-    // 创建角色
+    getGradient(ctx, type, colors, params) {
+        const key = `${type}-${colors.join('-')}-${params.join('-')}`;
+        if (!this.gradientCache.has(key)) {
+            let gradient;
+            if (type === 'linear') {
+                gradient = ctx.createLinearGradient(...params);
+            } else if (type === 'radial') {
+                gradient = ctx.createRadialGradient(...params);
+            }
+            colors.forEach((color, i) => {
+                gradient.addColorStop(i / (colors.length - 1), color);
+            });
+            this.gradientCache.set(key, gradient);
+        }
+        return this.gradientCache.get(key);
+    }
+    
+    clearGradientCache() {
+        this.gradientCache.clear();
+    }
+    
     createCharacter(name) {
         return new Character(name);
     }
     
-    // 更新其他玩家
     updateOtherPlayers(players, deltaTime) {
         players.forEach(player => {
-            // 平滑移动：使用displayX/displayY
-            const smoothFactor = 0.2; // 平滑系数
+            const smoothFactor = 0.2;
             player.displayX += (player.x - player.displayX) * smoothFactor;
             player.displayY += (player.y - player.displayY) * smoothFactor;
+            
+            if (player.updateAnimations) {
+                player.updateAnimations(deltaTime);
+            }
         });
     }
     
-    // 渲染角色
-    renderCharacter(ctx, character, camera, isCurrentPlayer) {
-        // 使用displayX/displayY实现平滑移动
+    renderCharacter(ctx, character, camera, isCurrentPlayer, time = 0) {
         const renderX = character.displayX || character.x;
         const renderY = character.displayY || character.y;
         
-        // 计算屏幕位置
         const screenX = renderX - camera.x;
         const screenY = renderY - camera.y;
         
-        // 检查是否在视口内
-        if (screenX < -50 || screenX > ctx.canvas.width + 50 ||
-            screenY < -50 || screenY > ctx.canvas.height + 50) {
-            return; // 超出视口，不渲染
+        if (screenX < -80 || screenX > ctx.canvas.width + 80 ||
+            screenY < -80 || screenY > ctx.canvas.height + 80) {
+            return;
         }
         
-        // 应用身高比例
         const scale = character.height;
         const width = this.baseWidth * scale;
         const height = this.baseHeight * scale;
         
-        // 绘制角色
-        this.drawCharacterBody(ctx, screenX, screenY, width, height, character, isCurrentPlayer);
+        const breatheOffset = Math.sin(character.breathePhase || 0) * 1.5;
         
-        // 绘制名字
-        this.drawName(ctx, screenX, screenY + height / 2 + 10, character.name, isCurrentPlayer);
+        this.drawCharacterBody(ctx, screenX, screenY + breatheOffset, width, height, character, isCurrentPlayer, time);
         
-        // 绘制聊天气泡
+        this.drawName(ctx, screenX, screenY + height / 2 + 15 + breatheOffset, character.name, isCurrentPlayer);
+        
         if (character.hasChat()) {
-            this.drawChatBubble(ctx, screenX, screenY - height / 2 - 30, character.chatMessage);
+            this.drawChatBubble(ctx, screenX, screenY - height / 2 - 40 + breatheOffset, character.chatMessage);
         }
     }
     
-    // 绘制角色身体
-    drawCharacterBody(ctx, x, y, width, height, character, isCurrentPlayer) {
+    drawCharacterBody(ctx, x, y, width, height, character, isCurrentPlayer, time) {
         ctx.save();
         ctx.translate(x, y);
         
-        // 绘制顺序：头发 -> 脸 -> 身体 -> 衣服 -> 配饰
+        this.drawShadow(ctx, width, height);
         
-        // 1. 绘制头发
-        this.drawHair(ctx, width, height, character);
+        const breatheScale = 1 + Math.sin(character.breathePhase || 0) * 0.02;
+        ctx.scale(breatheScale, breatheScale);
         
-        // 2. 绘制脸部
-        this.drawFace(ctx, width, height, character);
-        
-        // 3. 绘制身体和衣服
         this.drawBody(ctx, width, height, character);
         
-        // 4. 绘制配饰
+        this.drawHead(ctx, width, height, character, time);
+        
         this.drawAccessories(ctx, width, height, character);
         
-        // 5. 当前玩家高亮效果
         if (isCurrentPlayer) {
-            ctx.strokeStyle = '#ffeb3b';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(0, 0, width / 2 + 5, 0, Math.PI * 2);
-            ctx.stroke();
+            this.drawHighlight(ctx, width, height, time);
         }
         
         ctx.restore();
     }
     
-    // 绘制头发
-    drawHair(ctx, width, height, character) {
-        const hairColor = character.hairColor;
-        ctx.fillStyle = hairColor;
-        
-        const headRadius = width * 0.4;
-        const headY = -height * 0.2;
-        
-        switch (character.hairStyle) {
-            case 'short':
-                // 短发：顶部一小块
-                ctx.beginPath();
-                ctx.arc(0, headY - headRadius * 0.2, headRadius * 0.8, Math.PI, 0, false);
-                ctx.fill();
-                break;
-                
-            case 'long':
-                // 长发：覆盖整个头部和部分身体
-                ctx.beginPath();
-                ctx.ellipse(0, headY, headRadius * 1.1, headRadius * 1.3, 0, 0, Math.PI * 2);
-                ctx.fill();
-                
-                // 发尾
-                ctx.fillRect(-headRadius * 0.8, headY + headRadius * 0.5, headRadius * 1.6, height * 0.3);
-                break;
-                
-            case 'curly':
-                // 卷发：多个小圆圈
-                for (let i = -3; i <= 3; i++) {
-                    ctx.beginPath();
-                    ctx.arc(i * headRadius * 0.25, headY - headRadius * 0.3 + Math.abs(i) * 0.1, headRadius * 0.2, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-                break;
-                
-            case 'ponytail':
-                // 马尾：顶部头发 + 后面马尾
-                ctx.beginPath();
-                ctx.arc(0, headY - headRadius * 0.2, headRadius * 0.8, Math.PI, 0, false);
-                ctx.fill();
-                
-                // 马尾辫
-                ctx.beginPath();
-                ctx.moveTo(0, headY - headRadius * 0.5);
-                ctx.quadraticCurveTo(headRadius * 0.5, headY + headRadius, 0, headY + height * 0.3);
-                ctx.lineTo(-headRadius * 0.2, headY + height * 0.3);
-                ctx.quadraticCurveTo(-headRadius * 0.3, headY + headRadius, 0, headY - headRadius * 0.5);
-                ctx.fill();
-                break;
-                
-            case 'bald':
-                // 光头：不画头发
-                break;
-                
-            case 'spiky':
-                // 刺头：多个尖角
-                for (let i = -2; i <= 2; i++) {
-                    ctx.beginPath();
-                    ctx.moveTo(i * headRadius * 0.3, headY);
-                    ctx.lineTo(i * headRadius * 0.3 - headRadius * 0.15, headY - headRadius * 0.8);
-                    ctx.lineTo(i * headRadius * 0.3 + headRadius * 0.15, headY - headRadius * 0.8);
-                    ctx.closePath();
-                    ctx.fill();
-                }
-                break;
-        }
+    drawShadow(ctx, width, height) {
+        ctx.fillStyle = 'rgba(0,0,0,0.15)';
+        ctx.beginPath();
+        ctx.ellipse(0, height * 0.55, width * 0.35, height * 0.08, 0, 0, Math.PI * 2);
+        ctx.fill();
     }
     
-    // 绘制脸部
-    drawFace(ctx, width, height, character) {
-        const skinColor = character.skinColor;
-        const eyeColor = character.eyeColor;
+    drawHead(ctx, width, height, character, time) {
+        const headRadius = width * 0.45;
+        const headY = -height * 0.25;
         
-        const headRadius = width * 0.4;
-        const headY = -height * 0.2;
+        ctx.save();
         
-        // 脸部（椭圆）
-        ctx.fillStyle = skinColor;
+        const skinGradient = ctx.createRadialGradient(
+            -headRadius * 0.3, headY - headRadius * 0.3, 0,
+            0, headY, headRadius
+        );
+        skinGradient.addColorStop(0, this.lightenColor(character.skinColor, 20));
+        skinGradient.addColorStop(0.7, character.skinColor);
+        skinGradient.addColorStop(1, this.darkenColor(character.skinColor, 10));
+        
+        ctx.fillStyle = skinGradient;
         ctx.beginPath();
-        ctx.ellipse(0, headY, headRadius, headRadius * 1.1, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, headY, headRadius, headRadius * 1.15, 0, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = '#333';
+        
+        ctx.strokeStyle = this.darkenColor(character.skinColor, 30);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        
+        this.drawHair(ctx, width, height, character, headRadius, headY);
+        
+        this.drawFace(ctx, width, height, character, headRadius, headY, time);
+        
+        ctx.fillStyle = 'rgba(255,180,180,0.4)';
+        ctx.beginPath();
+        ctx.ellipse(-headRadius * 0.6, headY + headRadius * 0.3, headRadius * 0.22, headRadius * 0.12, 0, 0, Math.PI * 2);
+        ctx.ellipse(headRadius * 0.6, headY + headRadius * 0.3, headRadius * 0.22, headRadius * 0.12, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.restore();
+    }
+    
+    drawFace(ctx, width, height, character, headRadius, headY, time) {
+        const eyeY = headY - headRadius * 0.05;
+        const eyeOffsetX = headRadius * 0.35;
+        const eyeWidth = headRadius * 0.28;
+        const eyeHeight = headRadius * 0.35;
+        
+        const isBlinking = character.isBlinking || false;
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.ellipse(-eyeOffsetX, eyeY, eyeWidth, eyeHeight, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(eyeOffsetX, eyeY, eyeWidth, eyeHeight, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.strokeStyle = 'rgba(0,0,0,0.1)';
         ctx.lineWidth = 1;
         ctx.stroke();
         
-        // 眼睛
-        const eyeY = headY - headRadius * 0.1;
-        const eyeOffsetX = headRadius * 0.3;
-        const eyeRadius = headRadius * 0.12;
+        if (isBlinking) {
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(-eyeOffsetX - eyeWidth * 0.8, eyeY);
+            ctx.quadraticCurveTo(-eyeOffsetX, eyeY + 2, -eyeOffsetX + eyeWidth * 0.8, eyeY);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(eyeOffsetX - eyeWidth * 0.8, eyeY);
+            ctx.quadraticCurveTo(eyeOffsetX, eyeY + 2, eyeOffsetX + eyeWidth * 0.8, eyeY);
+            ctx.stroke();
+        } else {
+            const pupilY = eyeY + eyeHeight * 0.15;
+            const pupilRadius = eyeWidth * 0.45;
+            
+            ctx.fillStyle = character.eyeColor;
+            ctx.beginPath();
+            ctx.arc(-eyeOffsetX, pupilY, pupilRadius, 0, Math.PI * 2);
+            ctx.arc(eyeOffsetX, pupilY, pupilRadius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#000000';
+            ctx.beginPath();
+            ctx.arc(-eyeOffsetX, pupilY + 1, pupilRadius * 0.55, 0, Math.PI * 2);
+            ctx.arc(eyeOffsetX, pupilY + 1, pupilRadius * 0.55, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(-eyeOffsetX - pupilRadius * 0.35, pupilY - pupilRadius * 0.25, pupilRadius * 0.25, 0, Math.PI * 2);
+            ctx.arc(eyeOffsetX - pupilRadius * 0.35, pupilY - pupilRadius * 0.25, pupilRadius * 0.25, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.arc(-eyeOffsetX + pupilRadius * 0.3, pupilY + pupilRadius * 0.35, pupilRadius * 0.12, 0, Math.PI * 2);
+            ctx.arc(eyeOffsetX + pupilRadius * 0.3, pupilY + pupilRadius * 0.35, pupilRadius * 0.12, 0, Math.PI * 2);
+            ctx.fill();
+        }
         
-        ctx.fillStyle = '#fff';
+        const mouthY = headY + headRadius * 0.45;
+        const mouthWidth = headRadius * 0.35;
+        
+        ctx.fillStyle = '#FF8C32';
         ctx.beginPath();
-        ctx.ellipse(-eyeOffsetX, eyeY, eyeRadius * 1.2, eyeRadius, 0, 0, Math.PI * 2);
-        ctx.ellipse(eyeOffsetX, eyeY, eyeRadius * 1.2, eyeRadius, 0, 0, Math.PI * 2);
+        ctx.moveTo(-mouthWidth / 2, mouthY);
+        ctx.quadraticCurveTo(0, mouthY + mouthWidth * 0.4, mouthWidth / 2, mouthY);
+        ctx.quadraticCurveTo(0, mouthY + mouthWidth * 0.15, -mouthWidth / 2, mouthY);
         ctx.fill();
         
-        ctx.fillStyle = eyeColor;
-        ctx.beginPath();
-        ctx.arc(-eyeOffsetX, eyeY, eyeRadius * 0.6, 0, Math.PI * 2);
-        ctx.arc(eyeOffsetX, eyeY, eyeRadius * 0.6, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // 嘴巴
-        const mouthY = headY + headRadius * 0.3;
-        ctx.strokeStyle = '#333';
+        ctx.strokeStyle = '#c55a5a';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(-headRadius * 0.2, mouthY);
-        ctx.quadraticCurveTo(0, mouthY + headRadius * 0.1, headRadius * 0.2, mouthY);
+        ctx.moveTo(-mouthWidth / 2 + 1, mouthY + 1);
+        ctx.quadraticCurveTo(0, mouthY + mouthWidth * 0.4 + 1, mouthWidth / 2 - 1, mouthY + 1);
+        ctx.stroke();
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.beginPath();
+        ctx.moveTo(-mouthWidth * 0.3, mouthY + 2);
+        ctx.quadraticCurveTo(0, mouthY + mouthWidth * 0.25, mouthWidth * 0.3, mouthY + 2);
+        ctx.closePath();
+        ctx.fill();
+    }
+    
+    drawHair(ctx, width, height, character, headRadius, headY) {
+        ctx.save();
+        
+        const hairGradient = ctx.createLinearGradient(
+            0, headY - headRadius * 1.2,
+            0, headY + headRadius * 0.3
+        );
+        hairGradient.addColorStop(0, this.lightenColor(character.hairColor, 30));
+        hairGradient.addColorStop(0.5, character.hairColor);
+        hairGradient.addColorStop(1, this.darkenColor(character.hairColor, 20));
+        
+        ctx.fillStyle = hairGradient;
+        
+        switch (character.hairStyle) {
+            case 'short':
+                this.drawShortHair(ctx, headRadius, headY);
+                break;
+            case 'long':
+                this.drawLongHair(ctx, headRadius, headY, height);
+                break;
+            case 'curly':
+                this.drawCurlyHair(ctx, headRadius, headY, character.hairColor);
+                break;
+            case 'ponytail':
+                this.drawPonytailHair(ctx, headRadius, headY, height, character.hairColor);
+                break;
+            case 'bald':
+                break;
+            case 'spiky':
+                this.drawSpikyHair(ctx, headRadius, headY);
+                break;
+        }
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.25)';
+        ctx.beginPath();
+        ctx.ellipse(-headRadius * 0.25, headY - headRadius * 0.6, headRadius * 0.18, headRadius * 0.12, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.restore();
+    }
+    
+    drawShortHair(ctx, headRadius, headY) {
+        ctx.beginPath();
+        ctx.moveTo(-headRadius * 0.9, headY - headRadius * 0.1);
+        ctx.quadraticCurveTo(-headRadius, headY - headRadius * 0.7, -headRadius * 0.5, headY - headRadius * 1.1);
+        ctx.quadraticCurveTo(0, headY - headRadius * 1.25, headRadius * 0.5, headY - headRadius * 1.1);
+        ctx.quadraticCurveTo(headRadius, headY - headRadius * 0.7, headRadius * 0.9, headY - headRadius * 0.1);
+        ctx.quadraticCurveTo(headRadius * 0.85, headY - headRadius * 0.3, headRadius * 0.5, headY - headRadius * 0.4);
+        ctx.quadraticCurveTo(0, headY - headRadius * 0.5, -headRadius * 0.5, headY - headRadius * 0.4);
+        ctx.quadraticCurveTo(-headRadius * 0.85, headY - headRadius * 0.3, -headRadius * 0.9, headY - headRadius * 0.1);
+        ctx.fill();
+        
+        ctx.strokeStyle = this.darkenColor(ctx.fillStyle, 30);
+        ctx.lineWidth = 1;
         ctx.stroke();
     }
     
-    // 绘制身体和衣服
-    drawBody(ctx, width, height, character) {
-        const clothingColor = character.clothingColor;
-        ctx.fillStyle = clothingColor;
+    drawLongHair(ctx, headRadius, headY, height) {
+        ctx.beginPath();
+        ctx.moveTo(-headRadius * 1.1, headY + headRadius * 0.8);
+        ctx.quadraticCurveTo(-headRadius * 1.2, headY - headRadius * 0.5, -headRadius * 0.5, headY - headRadius * 1.1);
+        ctx.quadraticCurveTo(0, headY - headRadius * 1.3, headRadius * 0.5, headY - headRadius * 1.1);
+        ctx.quadraticCurveTo(headRadius * 1.2, headY - headRadius * 0.5, headRadius * 1.1, headY + headRadius * 0.8);
+        ctx.quadraticCurveTo(headRadius * 0.9, headY + headRadius * 1.2, headRadius * 0.7, headY + height * 0.35);
+        ctx.lineTo(headRadius * 0.4, headY + height * 0.35);
+        ctx.quadraticCurveTo(headRadius * 0.3, headY + headRadius * 1.5, 0, headY + height * 0.4);
+        ctx.lineTo(-headRadius * 0.4, headY + height * 0.35);
+        ctx.quadraticCurveTo(-headRadius * 0.3, headY + headRadius * 1.5, -headRadius * 0.7, headY + height * 0.35);
+        ctx.quadraticCurveTo(-headRadius * 0.9, headY + headRadius * 1.2, -headRadius * 1.1, headY + headRadius * 0.8);
+        ctx.fill();
         
-        const bodyWidth = width * 0.6;
-        const bodyHeight = height * 0.4;
-        const bodyY = height * 0.1;
+        ctx.strokeStyle = this.darkenColor(ctx.fillStyle, 25);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.beginPath();
+        ctx.moveTo(-headRadius * 0.3, headY + headRadius * 0.5);
+        ctx.quadraticCurveTo(-headRadius * 0.35, headY + height * 0.2, -headRadius * 0.25, headY + height * 0.35);
+        ctx.lineTo(-headRadius * 0.15, headY + height * 0.35);
+        ctx.quadraticCurveTo(-headRadius * 0.2, headY + height * 0.15, -headRadius * 0.15, headY + headRadius * 0.5);
+        ctx.fill();
+    }
+    
+    drawCurlyHair(ctx, headRadius, headY, hairColor) {
+        const curls = [
+            { x: -headRadius * 0.7, y: headY - headRadius * 0.6, r: headRadius * 0.25 },
+            { x: -headRadius * 0.35, y: headY - headRadius * 0.9, r: headRadius * 0.28 },
+            { x: 0, y: headY - headRadius * 1.0, r: headRadius * 0.26 },
+            { x: headRadius * 0.35, y: headY - headRadius * 0.9, r: headRadius * 0.28 },
+            { x: headRadius * 0.7, y: headY - headRadius * 0.6, r: headRadius * 0.25 },
+            { x: -headRadius * 0.85, y: headY - headRadius * 0.2, r: headRadius * 0.22 },
+            { x: headRadius * 0.85, y: headY - headRadius * 0.2, r: headRadius * 0.22 },
+            { x: -headRadius * 0.5, y: headY - headRadius * 0.35, r: headRadius * 0.18 },
+            { x: headRadius * 0.5, y: headY - headRadius * 0.35, r: headRadius * 0.18 }
+        ];
+        
+        curls.forEach(curl => {
+            const curlGradient = ctx.createRadialGradient(
+                curl.x - curl.r * 0.3, curl.y - curl.r * 0.3, 0,
+                curl.x, curl.y, curl.r
+            );
+            curlGradient.addColorStop(0, this.lightenColor(hairColor, 35));
+            curlGradient.addColorStop(0.6, hairColor);
+            curlGradient.addColorStop(1, this.darkenColor(hairColor, 15));
+            
+            ctx.fillStyle = curlGradient;
+            ctx.beginPath();
+            ctx.arc(curl.x, curl.y, curl.r, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.strokeStyle = this.darkenColor(hairColor, 20);
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+        });
+    }
+    
+    drawPonytailHair(ctx, headRadius, headY, height, hairColor) {
+        ctx.beginPath();
+        ctx.moveTo(-headRadius * 0.9, headY - headRadius * 0.1);
+        ctx.quadraticCurveTo(-headRadius, headY - headRadius * 0.7, -headRadius * 0.5, headY - headRadius * 1.1);
+        ctx.quadraticCurveTo(0, headY - headRadius * 1.25, headRadius * 0.5, headY - headRadius * 1.1);
+        ctx.quadraticCurveTo(headRadius, headY - headRadius * 0.7, headRadius * 0.9, headY - headRadius * 0.1);
+        ctx.quadraticCurveTo(headRadius * 0.7, headY - headRadius * 0.3, headRadius * 0.3, headY - headRadius * 0.35);
+        ctx.quadraticCurveTo(0, headY - headRadius * 0.4, -headRadius * 0.3, headY - headRadius * 0.35);
+        ctx.quadraticCurveTo(-headRadius * 0.7, headY - headRadius * 0.3, -headRadius * 0.9, headY - headRadius * 0.1);
+        ctx.fill();
+        
+        const ponytailGradient = ctx.createLinearGradient(
+            0, headY - headRadius,
+            0, headY + height * 0.4
+        );
+        ponytailGradient.addColorStop(0, hairColor);
+        ponytailGradient.addColorStop(0.5, this.lightenColor(hairColor, 15));
+        ponytailGradient.addColorStop(1, this.darkenColor(hairColor, 10));
+        
+        ctx.fillStyle = ponytailGradient;
+        ctx.beginPath();
+        ctx.moveTo(-headRadius * 0.15, headY - headRadius * 0.5);
+        ctx.quadraticCurveTo(-headRadius * 0.2, headY + headRadius * 0.3, -headRadius * 0.35, headY + height * 0.3);
+        ctx.quadraticCurveTo(0, headY + height * 0.35, headRadius * 0.35, headY + height * 0.3);
+        ctx.quadraticCurveTo(headRadius * 0.2, headY + headRadius * 0.3, headRadius * 0.15, headY - headRadius * 0.5);
+        ctx.quadraticCurveTo(0, headY - headRadius * 0.55, -headRadius * 0.15, headY - headRadius * 0.5);
+        ctx.fill();
+        
+        ctx.strokeStyle = this.darkenColor(hairColor, 20);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        
+        ctx.fillStyle = '#FFD93D';
+        ctx.beginPath();
+        ctx.arc(0, headY - headRadius * 0.45, headRadius * 0.12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#FF8C32';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+    
+    drawSpikyHair(ctx, headRadius, headY) {
+        const spikes = [
+            { x: -headRadius * 0.6, angle: -0.6, height: headRadius * 0.55 },
+            { x: -headRadius * 0.3, angle: -0.3, height: headRadius * 0.65 },
+            { x: 0, angle: 0, height: headRadius * 0.7 },
+            { x: headRadius * 0.3, angle: 0.3, height: headRadius * 0.65 },
+            { x: headRadius * 0.6, angle: 0.6, height: headRadius * 0.55 },
+            { x: -headRadius * 0.8, angle: -0.8, height: headRadius * 0.4 },
+            { x: headRadius * 0.8, angle: 0.8, height: headRadius * 0.4 }
+        ];
+        
+        spikes.forEach(spike => {
+            ctx.beginPath();
+            const baseY = headY - headRadius * 0.3;
+            const tipX = spike.x + Math.sin(spike.angle) * spike.height * 0.3;
+            const tipY = baseY - spike.height;
+            const width = headRadius * 0.18;
+            
+            ctx.moveTo(spike.x - width, baseY);
+            ctx.quadraticCurveTo(spike.x - width * 0.5, tipY + spike.height * 0.3, tipX, tipY);
+            ctx.quadraticCurveTo(spike.x + width * 0.5, tipY + spike.height * 0.3, spike.x + width, baseY);
+            ctx.fill();
+            
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.beginPath();
+            ctx.moveTo(spike.x - width * 0.3, baseY);
+            ctx.quadraticCurveTo(spike.x - width * 0.15, tipY + spike.height * 0.4, spike.x, tipY + spike.height * 0.2);
+            ctx.lineTo(spike.x - width * 0.1, baseY);
+            ctx.fill();
+        });
+    }
+    
+    drawBody(ctx, width, height, character) {
+        const bodyWidth = width * 0.45;
+        const bodyHeight = height * 0.35;
+        const bodyY = height * 0.05;
+        
+        ctx.save();
+        
+        const clothingGradient = ctx.createLinearGradient(
+            -bodyWidth, bodyY,
+            bodyWidth, bodyY + bodyHeight
+        );
+        clothingGradient.addColorStop(0, this.lightenColor(character.clothingColor, 25));
+        clothingGradient.addColorStop(0.5, character.clothingColor);
+        clothingGradient.addColorStop(1, this.darkenColor(character.clothingColor, 15));
+        
+        ctx.fillStyle = clothingGradient;
         
         switch (character.clothingStyle) {
             case 'casual':
-                // 休闲装：T恤
-                ctx.fillRect(-bodyWidth / 2, bodyY, bodyWidth, bodyHeight);
-                ctx.strokeStyle = '#333';
-                ctx.strokeRect(-bodyWidth / 2, bodyY, bodyWidth, bodyHeight);
-                
-                // 裤子
-                ctx.fillStyle = '#555';
-                ctx.fillRect(-bodyWidth / 2, bodyY + bodyHeight, bodyWidth * 0.4, height * 0.3);
-                ctx.fillRect(bodyWidth / 2 - bodyWidth * 0.4, bodyY + bodyHeight, bodyWidth * 0.4, height * 0.3);
+                this.drawCasualClothing(ctx, bodyWidth, bodyHeight, bodyY, height, character.clothingColor);
                 break;
-                
             case 'formal':
-                // 正装：西装
-                ctx.fillRect(-bodyWidth / 2, bodyY, bodyWidth, bodyHeight);
-                
-                // 西装领子
-                ctx.fillStyle = '#222';
-                ctx.beginPath();
-                ctx.moveTo(-bodyWidth / 2, bodyY);
-                ctx.lineTo(-bodyWidth * 0.2, bodyY + bodyHeight * 0.2);
-                ctx.lineTo(0, bodyY);
-                ctx.lineTo(bodyWidth * 0.2, bodyY + bodyHeight * 0.2);
-                ctx.lineTo(bodyWidth / 2, bodyY);
-                ctx.closePath();
-                ctx.fill();
-                
-                // 衬衫领子
-                ctx.fillStyle = '#fff';
-                ctx.beginPath();
-                ctx.moveTo(-bodyWidth * 0.1, bodyY);
-                ctx.lineTo(0, bodyY + bodyHeight * 0.15);
-                ctx.lineTo(bodyWidth * 0.1, bodyY);
-                ctx.closePath();
-                ctx.fill();
-                
-                // 裤子
-                ctx.fillStyle = '#222';
-                ctx.fillRect(-bodyWidth / 2, bodyY + bodyHeight, bodyWidth * 0.4, height * 0.3);
-                ctx.fillRect(bodyWidth / 2 - bodyWidth * 0.4, bodyY + bodyHeight, bodyWidth * 0.4, height * 0.3);
+                this.drawFormalClothing(ctx, bodyWidth, bodyHeight, bodyY, height, character.clothingColor);
                 break;
-                
             case 'sporty':
-                // 运动装：运动服
-                ctx.fillRect(-bodyWidth / 2, bodyY, bodyWidth, bodyHeight);
-                
-                // 运动服条纹
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(-bodyWidth * 0.1, bodyY, bodyWidth * 0.2, bodyHeight);
-                
-                // 运动裤
-                ctx.fillStyle = clothingColor;
-                ctx.fillRect(-bodyWidth / 2, bodyY + bodyHeight, bodyWidth, height * 0.3);
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(-bodyWidth / 2, bodyY + bodyHeight, bodyWidth, height * 0.1);
+                this.drawSportyClothing(ctx, bodyWidth, bodyHeight, bodyY, height, character.clothingColor);
                 break;
-                
             case 'hoodie':
-                // 卫衣：连帽衫
-                ctx.fillRect(-bodyWidth / 2, bodyY, bodyWidth, bodyHeight);
-                
-                // 帽子
-                ctx.fillStyle = clothingColor;
-                ctx.beginPath();
-                ctx.arc(0, bodyY - height * 0.05, bodyWidth * 0.4, Math.PI, 0, false);
-                ctx.fill();
-                
-                // 口袋
-                ctx.fillStyle = '#333';
-                ctx.beginPath();
-                ctx.moveTo(-bodyWidth * 0.3, bodyY + bodyHeight * 0.5);
-                ctx.quadraticCurveTo(0, bodyY + bodyHeight * 0.7, bodyWidth * 0.3, bodyY + bodyHeight * 0.5);
-                ctx.quadraticCurveTo(0, bodyY + bodyHeight * 0.5, -bodyWidth * 0.3, bodyY + bodyHeight * 0.5);
-                ctx.fill();
-                
-                // 裤子
-                ctx.fillStyle = '#555';
-                ctx.fillRect(-bodyWidth / 2, bodyY + bodyHeight, bodyWidth * 0.4, height * 0.3);
-                ctx.fillRect(bodyWidth / 2 - bodyWidth * 0.4, bodyY + bodyHeight, bodyWidth * 0.4, height * 0.3);
+                this.drawHoodieClothing(ctx, width, bodyWidth, bodyHeight, bodyY, height, character.clothingColor);
                 break;
-                
             case 'dress':
-                // 连衣裙（女性）
-                ctx.beginPath();
-                ctx.moveTo(-bodyWidth / 2, bodyY);
-                ctx.lineTo(bodyWidth / 2, bodyY);
-                ctx.lineTo(bodyWidth * 0.8, bodyY + height * 0.5);
-                ctx.lineTo(-bodyWidth * 0.8, bodyY + height * 0.5);
-                ctx.closePath();
-                ctx.fill();
-                
-                // 裙子装饰线
-                ctx.strokeStyle = '#333';
-                ctx.lineWidth = 1;
-                ctx.stroke();
+                this.drawDressClothing(ctx, width, bodyWidth, bodyHeight, bodyY, height, character.clothingColor);
                 break;
         }
         
-        // 根据性别调整身体宽度
-        if (character.gender === 'female') {
-            // 女性身体更窄
-            ctx.save();
-            ctx.scale(0.85, 1);
-            // 重新绘制会覆盖之前的内容...
-            ctx.restore();
-        }
+        ctx.restore();
     }
     
-    // 绘制配饰
+    drawCasualClothing(ctx, bodyWidth, bodyHeight, bodyY, height, clothingColor) {
+        ctx.beginPath();
+        ctx.moveTo(-bodyWidth * 0.8, bodyY);
+        ctx.quadraticCurveTo(-bodyWidth, bodyY + bodyHeight * 0.3, -bodyWidth * 0.85, bodyY + bodyHeight);
+        ctx.lineTo(-bodyWidth * 0.5, bodyY + bodyHeight);
+        ctx.lineTo(-bodyWidth * 0.5, bodyY + height * 0.35);
+        ctx.lineTo(bodyWidth * 0.5, bodyY + height * 0.35);
+        ctx.lineTo(bodyWidth * 0.5, bodyY + bodyHeight);
+        ctx.lineTo(bodyWidth * 0.85, bodyY + bodyHeight);
+        ctx.quadraticCurveTo(bodyWidth, bodyY + bodyHeight * 0.3, bodyWidth * 0.8, bodyY);
+        ctx.quadraticCurveTo(bodyWidth * 0.4, bodyY - bodyHeight * 0.1, 0, bodyY - bodyHeight * 0.15);
+        ctx.quadraticCurveTo(-bodyWidth * 0.4, bodyY - bodyHeight * 0.1, -bodyWidth * 0.8, bodyY);
+        ctx.fill();
+        
+        ctx.strokeStyle = this.darkenColor(clothingColor, 30);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        
+        ctx.strokeStyle = this.darkenColor(clothingColor, 15);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, bodyY);
+        ctx.lineTo(0, bodyY + bodyHeight * 0.7);
+        ctx.stroke();
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.beginPath();
+        ctx.moveTo(-bodyWidth * 0.3, bodyY);
+        ctx.lineTo(-bodyWidth * 0.25, bodyY + bodyHeight * 0.5);
+        ctx.lineTo(-bodyWidth * 0.15, bodyY + bodyHeight * 0.5);
+        ctx.lineTo(-bodyWidth * 0.1, bodyY);
+        ctx.fill();
+    }
+    
+    drawFormalClothing(ctx, bodyWidth, bodyHeight, bodyY, height, clothingColor) {
+        ctx.beginPath();
+        ctx.moveTo(-bodyWidth, bodyY);
+        ctx.quadraticCurveTo(-bodyWidth * 1.1, bodyY + bodyHeight * 0.5, -bodyWidth, bodyY + bodyHeight);
+        ctx.lineTo(-bodyWidth * 0.5, bodyY + bodyHeight);
+        ctx.lineTo(-bodyWidth * 0.5, bodyY + height * 0.35);
+        ctx.lineTo(bodyWidth * 0.5, bodyY + height * 0.35);
+        ctx.lineTo(bodyWidth * 0.5, bodyY + bodyHeight);
+        ctx.lineTo(bodyWidth, bodyY + bodyHeight);
+        ctx.quadraticCurveTo(bodyWidth * 1.1, bodyY + bodyHeight * 0.5, bodyWidth, bodyY);
+        ctx.lineTo(0, bodyY);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.fillStyle = '#2d2d2d';
+        ctx.beginPath();
+        ctx.moveTo(-bodyWidth, bodyY);
+        ctx.lineTo(-bodyWidth * 0.3, bodyY + bodyHeight * 0.2);
+        ctx.lineTo(0, bodyY);
+        ctx.lineTo(bodyWidth * 0.3, bodyY + bodyHeight * 0.2);
+        ctx.lineTo(bodyWidth, bodyY);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(-bodyWidth * 0.1, bodyY);
+        ctx.lineTo(0, bodyY + bodyHeight * 0.12);
+        ctx.lineTo(bodyWidth * 0.1, bodyY);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.fillStyle = this.darkenColor(clothingColor, 40);
+        ctx.fillRect(-bodyWidth * 0.45, bodyY + bodyHeight, bodyWidth * 0.35, height * 0.25);
+        ctx.fillRect(bodyWidth * 0.1, bodyY + bodyHeight, bodyWidth * 0.35, height * 0.25);
+        
+        ctx.strokeStyle = '#1a1a1a';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-bodyWidth * 0.45, bodyY + bodyHeight, bodyWidth * 0.35, height * 0.25);
+        ctx.strokeRect(bodyWidth * 0.1, bodyY + bodyHeight, bodyWidth * 0.35, height * 0.25);
+    }
+    
+    drawSportyClothing(ctx, bodyWidth, bodyHeight, bodyY, height, clothingColor) {
+        ctx.beginPath();
+        ctx.moveTo(-bodyWidth * 0.9, bodyY);
+        ctx.quadraticCurveTo(-bodyWidth * 1.05, bodyY + bodyHeight * 0.4, -bodyWidth * 0.9, bodyY + bodyHeight);
+        ctx.lineTo(-bodyWidth * 0.5, bodyY + bodyHeight);
+        ctx.lineTo(-bodyWidth * 0.5, bodyY + height * 0.35);
+        ctx.lineTo(bodyWidth * 0.5, bodyY + height * 0.35);
+        ctx.lineTo(bodyWidth * 0.5, bodyY + bodyHeight);
+        ctx.lineTo(bodyWidth * 0.9, bodyY + bodyHeight);
+        ctx.quadraticCurveTo(bodyWidth * 1.05, bodyY + bodyHeight * 0.4, bodyWidth * 0.9, bodyY);
+        ctx.quadraticCurveTo(bodyWidth * 0.4, bodyY - bodyHeight * 0.08, 0, bodyY - bodyHeight * 0.12);
+        ctx.quadraticCurveTo(-bodyWidth * 0.4, bodyY - bodyHeight * 0.08, -bodyWidth * 0.9, bodyY);
+        ctx.fill();
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(-bodyWidth * 0.08, bodyY + 5, bodyWidth * 0.16, bodyHeight - 10);
+        
+        ctx.strokeStyle = this.darkenColor(clothingColor, 25);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-bodyWidth * 0.9, bodyY);
+        ctx.lineTo(bodyWidth * 0.9, bodyY);
+        ctx.stroke();
+        
+        ctx.fillStyle = this.darkenColor(clothingColor, 15);
+        ctx.fillRect(-bodyWidth * 0.45, bodyY + bodyHeight, bodyWidth * 0.9, height * 0.25);
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(-bodyWidth * 0.45, bodyY + bodyHeight, bodyWidth * 0.9, height * 0.06);
+    }
+    
+    drawHoodieClothing(ctx, width, bodyWidth, bodyHeight, bodyY, height, clothingColor) {
+        ctx.beginPath();
+        ctx.moveTo(-bodyWidth * 0.95, bodyY);
+        ctx.quadraticCurveTo(-bodyWidth * 1.1, bodyY + bodyHeight * 0.3, -bodyWidth * 0.95, bodyY + bodyHeight);
+        ctx.lineTo(-bodyWidth * 0.5, bodyY + bodyHeight);
+        ctx.lineTo(-bodyWidth * 0.5, bodyY + height * 0.35);
+        ctx.lineTo(bodyWidth * 0.5, bodyY + height * 0.35);
+        ctx.lineTo(bodyWidth * 0.5, bodyY + bodyHeight);
+        ctx.lineTo(bodyWidth * 0.95, bodyY + bodyHeight);
+        ctx.quadraticCurveTo(bodyWidth * 1.1, bodyY + bodyHeight * 0.3, bodyWidth * 0.95, bodyY);
+        ctx.quadraticCurveTo(bodyWidth * 0.4, bodyY - bodyHeight * 0.1, 0, bodyY - bodyHeight * 0.15);
+        ctx.quadraticCurveTo(-bodyWidth * 0.4, bodyY - bodyHeight * 0.1, -bodyWidth * 0.95, bodyY);
+        ctx.fill();
+        
+        const hoodGradient = ctx.createLinearGradient(
+            0, bodyY - height * 0.1,
+            0, bodyY + bodyHeight * 0.1
+        );
+        hoodGradient.addColorStop(0, this.lightenColor(clothingColor, 20));
+        hoodGradient.addColorStop(0.5, clothingColor);
+        hoodGradient.addColorStop(1, this.darkenColor(clothingColor, 10));
+        
+        ctx.fillStyle = hoodGradient;
+        ctx.beginPath();
+        ctx.moveTo(-width * 0.2, bodyY);
+        ctx.quadraticCurveTo(-width * 0.25, bodyY - height * 0.15, 0, bodyY - height * 0.18);
+        ctx.quadraticCurveTo(width * 0.25, bodyY - height * 0.15, width * 0.2, bodyY);
+        ctx.quadraticCurveTo(width * 0.15, bodyY - height * 0.05, 0, bodyY - height * 0.08);
+        ctx.quadraticCurveTo(-width * 0.15, bodyY - height * 0.05, -width * 0.2, bodyY);
+        ctx.fill();
+        
+        ctx.strokeStyle = this.darkenColor(clothingColor, 20);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        
+        ctx.fillStyle = this.darkenColor(clothingColor, 35);
+        ctx.beginPath();
+        ctx.moveTo(-bodyWidth * 0.35, bodyY + bodyHeight * 0.45);
+        ctx.quadraticCurveTo(0, bodyY + bodyHeight * 0.65, bodyWidth * 0.35, bodyY + bodyHeight * 0.45);
+        ctx.quadraticCurveTo(0, bodyY + bodyHeight * 0.55, -bodyWidth * 0.35, bodyY + bodyHeight * 0.45);
+        ctx.fill();
+        
+        ctx.fillStyle = '#5D5D5D';
+        ctx.fillRect(-bodyWidth * 0.45, bodyY + bodyHeight, bodyWidth * 0.35, height * 0.25);
+        ctx.fillRect(bodyWidth * 0.1, bodyY + bodyHeight, bodyWidth * 0.35, height * 0.25);
+    }
+    
+    drawDressClothing(ctx, width, bodyWidth, bodyHeight, bodyY, height, clothingColor) {
+        ctx.beginPath();
+        ctx.moveTo(-bodyWidth * 0.7, bodyY);
+        ctx.quadraticCurveTo(-bodyWidth * 0.8, bodyY + bodyHeight * 0.3, -bodyWidth * 0.7, bodyY + bodyHeight);
+        ctx.quadraticCurveTo(-width * 0.4, bodyY + height * 0.4, -width * 0.35, bodyY + height * 0.45);
+        ctx.lineTo(width * 0.35, bodyY + height * 0.45);
+        ctx.quadraticCurveTo(width * 0.4, bodyY + height * 0.4, bodyWidth * 0.7, bodyY + bodyHeight);
+        ctx.quadraticCurveTo(bodyWidth * 0.8, bodyY + bodyHeight * 0.3, bodyWidth * 0.7, bodyY);
+        ctx.quadraticCurveTo(bodyWidth * 0.35, bodyY - bodyHeight * 0.1, 0, bodyY - bodyHeight * 0.15);
+        ctx.quadraticCurveTo(-bodyWidth * 0.35, bodyY - bodyHeight * 0.1, -bodyWidth * 0.7, bodyY);
+        ctx.fill();
+        
+        ctx.strokeStyle = this.darkenColor(clothingColor, 30);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.15)';
+        ctx.beginPath();
+        ctx.moveTo(-width * 0.3, bodyY + height * 0.35);
+        ctx.quadraticCurveTo(0, bodyY + height * 0.38, width * 0.3, bodyY + height * 0.35);
+        ctx.quadraticCurveTo(0, bodyY + height * 0.4, -width * 0.3, bodyY + height * 0.35);
+        ctx.fill();
+        
+        ctx.strokeStyle = this.darkenColor(clothingColor, 20);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, bodyY + bodyHeight * 0.2);
+        ctx.lineTo(0, bodyY + height * 0.35);
+        ctx.stroke();
+    }
+    
     drawAccessories(ctx, width, height, character) {
-        const accessories = character.accessories;
+        const headRadius = width * 0.45;
+        const headY = -height * 0.25;
+        const bodyWidth = width * 0.45;
+        const bodyY = height * 0.05;
+        const bodyHeight = height * 0.35;
         
-        const headRadius = width * 0.4;
-        const headY = -height * 0.2;
-        const bodyWidth = width * 0.6;
-        const bodyY = height * 0.1;
-        
-        accessories.forEach(acc => {
+        character.accessories.forEach(acc => {
             switch (acc) {
                 case 'glasses':
-                    // 眼镜
-                    const eyeY = headY - headRadius * 0.1;
-                    const eyeOffsetX = headRadius * 0.3;
-                    
-                    ctx.strokeStyle = '#333';
-                    ctx.lineWidth = 2;
-                    
-                    // 左镜框
-                    ctx.beginPath();
-                    ctx.rect(-eyeOffsetX - headRadius * 0.2, eyeY - headRadius * 0.1, headRadius * 0.4, headRadius * 0.2);
-                    ctx.stroke();
-                    
-                    // 右镜框
-                    ctx.beginPath();
-                    ctx.rect(eyeOffsetX - headRadius * 0.2, eyeY - headRadius * 0.1, headRadius * 0.4, headRadius * 0.2);
-                    ctx.stroke();
-                    
-                    // 鼻梁
-                    ctx.beginPath();
-                    ctx.moveTo(-eyeOffsetX + headRadius * 0.2, eyeY);
-                    ctx.lineTo(eyeOffsetX - headRadius * 0.2, eyeY);
-                    ctx.stroke();
-                    
-                    // 镜腿
-                    ctx.beginPath();
-                    ctx.moveTo(-eyeOffsetX - headRadius * 0.2, eyeY);
-                    ctx.lineTo(-headRadius, eyeY);
-                    ctx.moveTo(eyeOffsetX + headRadius * 0.2, eyeY);
-                    ctx.lineTo(headRadius, eyeY);
-                    ctx.stroke();
+                    this.drawGlasses(ctx, headRadius, headY);
                     break;
-                    
                 case 'hat':
-                    // 帽子
-                    ctx.fillStyle = '#333';
-                    
-                    // 帽顶
-                    ctx.beginPath();
-                    ctx.arc(0, headY - headRadius * 0.8, headRadius * 0.6, 0, Math.PI * 2);
-                    ctx.fill();
-                    
-                    // 帽檐
-                    ctx.beginPath();
-                    ctx.ellipse(0, headY - headRadius * 0.5, headRadius * 1.2, headRadius * 0.2, 0, 0, Math.PI * 2);
-                    ctx.fill();
+                    this.drawHat(ctx, headRadius, headY);
                     break;
-                    
                 case 'watch':
-                    // 手表（手腕位置）
-                    const watchY = bodyY + height * 0.25;
-                    
-                    ctx.fillStyle = '#gold';
-                    ctx.strokeStyle = '#333';
-                    ctx.lineWidth = 1;
-                    
-                    // 表盘
-                    ctx.beginPath();
-                    ctx.arc(-bodyWidth * 0.5, watchY, width * 0.08, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.stroke();
+                    this.drawWatch(ctx, bodyWidth, bodyY, bodyHeight);
                     break;
-                    
                 case 'earring':
-                    // 耳环
-                    ctx.fillStyle = '#gold';
-                    
-                    // 左耳环
-                    ctx.beginPath();
-                    ctx.arc(-headRadius, headY, width * 0.03, 0, Math.PI * 2);
-                    ctx.fill();
-                    
-                    // 右耳环
-                    ctx.beginPath();
-                    ctx.arc(headRadius, headY, width * 0.03, 0, Math.PI * 2);
-                    ctx.fill();
+                    this.drawEarrings(ctx, headRadius, headY);
                     break;
-                    
                 case 'necklace':
-                    // 项链
-                    ctx.strokeStyle = '#gold';
-                    ctx.lineWidth = 2;
-                    
-                    ctx.beginPath();
-                    ctx.moveTo(-bodyWidth * 0.3, bodyY);
-                    ctx.quadraticCurveTo(0, bodyY + height * 0.1, bodyWidth * 0.3, bodyY);
-                    ctx.stroke();
-                    
-                    // 吊坠
-                    ctx.fillStyle = '#gold';
-                    ctx.beginPath();
-                    ctx.arc(0, bodyY + height * 0.1, width * 0.04, 0, Math.PI * 2);
-                    ctx.fill();
+                    this.drawNecklace(ctx, bodyWidth, bodyY);
                     break;
-                    
                 case 'backpack':
-                    // 背包（在身体后面）
-                    ctx.fillStyle = '#8B4513';
-                    ctx.fillRect(-bodyWidth * 0.6, bodyY, bodyWidth * 0.15, bodyHeight * 0.8);
-                    
-                    // 背包带
-                    ctx.strokeStyle = '#8B4513';
-                    ctx.lineWidth = 3;
-                    ctx.beginPath();
-                    ctx.moveTo(-bodyWidth * 0.5, bodyY);
-                    ctx.lineTo(-bodyWidth * 0.3, bodyY);
-                    ctx.stroke();
+                    this.drawBackpack(ctx, bodyWidth, bodyY, bodyHeight, height);
                     break;
             }
         });
     }
     
-    // 绘制名字标签
-    drawName(ctx, x, y, name, isCurrentPlayer) {
-        ctx.font = 'bold 14px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+    drawGlasses(ctx, headRadius, headY) {
+        const eyeY = headY - headRadius * 0.05;
+        const eyeOffsetX = headRadius * 0.35;
         
-        // 文字宽度
-        const textWidth = ctx.measureText(name).width;
-        const padding = 6;
+        const frameGradient = ctx.createLinearGradient(
+            -eyeOffsetX - headRadius * 0.4, eyeY - headRadius * 0.3,
+            eyeOffsetX + headRadius * 0.4, eyeY + headRadius * 0.3
+        );
+        frameGradient.addColorStop(0, '#8B4513');
+        frameGradient.addColorStop(0.3, '#A0522D');
+        frameGradient.addColorStop(0.5, '#D2691E');
+        frameGradient.addColorStop(0.7, '#A0522D');
+        frameGradient.addColorStop(1, '#8B4513');
         
-        // 背景
-        ctx.fillStyle = isCurrentPlayer ? '#ffeb3b' : 'rgba(0, 0, 0, 0.6)';
+        ctx.strokeStyle = frameGradient;
+        ctx.lineWidth = 4;
+        
+        ctx.fillStyle = 'rgba(135,206,250,0.35)';
         ctx.beginPath();
-        ctx.roundRect(x - textWidth / 2 - padding, y - 10, textWidth + padding * 2, 20, 5);
+        ctx.ellipse(-eyeOffsetX, eyeY, headRadius * 0.38, headRadius * 0.32, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.ellipse(eyeOffsetX, eyeY, headRadius * 0.38, headRadius * 0.32, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.beginPath();
+        ctx.moveTo(-eyeOffsetX - headRadius * 0.25, eyeY - headRadius * 0.15);
+        ctx.quadraticCurveTo(-eyeOffsetX, eyeY - headRadius * 0.2, -eyeOffsetX + headRadius * 0.1, eyeY - headRadius * 0.08);
+        ctx.lineTo(-eyeOffsetX - headRadius * 0.15, eyeY - headRadius * 0.05);
+        ctx.quadraticCurveTo(-eyeOffsetX - headRadius * 0.2, eyeY - headRadius * 0.12, -eyeOffsetX - headRadius * 0.25, eyeY - headRadius * 0.15);
         ctx.fill();
         
-        // 文字
-        ctx.fillStyle = isCurrentPlayer ? '#333' : '#fff';
-        ctx.fillText(name, x, y);
+        ctx.beginPath();
+        ctx.moveTo(eyeOffsetX - headRadius * 0.25, eyeY - headRadius * 0.15);
+        ctx.quadraticCurveTo(eyeOffsetX, eyeY - headRadius * 0.2, eyeOffsetX + headRadius * 0.1, eyeY - headRadius * 0.08);
+        ctx.lineTo(eyeOffsetX - headRadius * 0.15, eyeY - headRadius * 0.05);
+        ctx.quadraticCurveTo(eyeOffsetX - headRadius * 0.2, eyeY - headRadius * 0.12, eyeOffsetX - headRadius * 0.25, eyeY - headRadius * 0.15);
+        ctx.fill();
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.25)';
+        ctx.beginPath();
+        ctx.ellipse(-eyeOffsetX, eyeY + headRadius * 0.05, headRadius * 0.35, headRadius * 0.2, 0, 0, Math.PI * 2);
+        ctx.ellipse(eyeOffsetX, eyeY + headRadius * 0.05, headRadius * 0.35, headRadius * 0.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.strokeStyle = '#5D4037';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(-eyeOffsetX + headRadius * 0.38, eyeY);
+        ctx.quadraticCurveTo(0, eyeY - headRadius * 0.05, eyeOffsetX - headRadius * 0.38, eyeY);
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.moveTo(-eyeOffsetX - headRadius * 0.38, eyeY);
+        ctx.lineTo(-headRadius * 0.92, eyeY - headRadius * 0.12);
+        ctx.moveTo(eyeOffsetX + headRadius * 0.38, eyeY);
+        ctx.lineTo(headRadius * 0.92, eyeY - headRadius * 0.12);
+        ctx.stroke();
+        
+        ctx.fillStyle = '#FFD93D';
+        ctx.font = 'bold 8px Arial';
+        ctx.fillText('✦', -eyeOffsetX - headRadius * 0.3, eyeY - headRadius * 0.22);
+        ctx.fillText('✦', eyeOffsetX - headRadius * 0.3, eyeY - headRadius * 0.22);
     }
     
-    // 绘制聊天气泡
-    drawChatBubble(ctx, x, y, message) {
-        ctx.font = '14px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+    drawHat(ctx, headRadius, headY) {
+        const hatGradient = ctx.createLinearGradient(
+            0, headY - headRadius * 1.5,
+            0, headY - headRadius * 0.5
+        );
+        hatGradient.addColorStop(0, '#FFD93D');
+        hatGradient.addColorStop(0.2, '#FF8C32');
+        hatGradient.addColorStop(0.5, '#FF6B6B');
+        hatGradient.addColorStop(0.8, '#FF6B9D');
+        hatGradient.addColorStop(1, '#FF6B6B');
         
-        // 文字宽度
-        const textWidth = ctx.measureText(message).width;
-        const padding = 10;
-        const bubbleWidth = Math.min(textWidth + padding * 2, 150);
-        const bubbleHeight = 30;
+        ctx.fillStyle = hatGradient;
         
-        // 气泡背景
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.beginPath();
+        ctx.moveTo(-headRadius * 1.15, headY - headRadius * 0.42);
+        ctx.quadraticCurveTo(-headRadius * 0.85, headY - headRadius * 1.05, 0, headY - headRadius * 1.2);
+        ctx.quadraticCurveTo(headRadius * 0.85, headY - headRadius * 1.05, headRadius * 1.15, headY - headRadius * 0.42);
+        ctx.quadraticCurveTo(headRadius * 0.65, headY - headRadius * 0.48, 0, headY - headRadius * 0.55);
+        ctx.quadraticCurveTo(-headRadius * 0.65, headY - headRadius * 0.48, -headRadius * 1.15, headY - headRadius * 0.42);
+        ctx.fill();
+        
+        ctx.strokeStyle = '#FF8C32';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        ctx.fillStyle = '#FFD93D';
+        ctx.beginPath();
+        ctx.ellipse(0, headY - headRadius * 0.42, headRadius * 1.35, headRadius * 0.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.strokeStyle = '#FF8C32';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        ctx.beginPath();
+        ctx.moveTo(-headRadius * 0.25, headY - headRadius * 0.55);
+        ctx.quadraticCurveTo(-headRadius * 0.4, headY - headRadius * 0.85, -headRadius * 0.3, headY - headRadius * 1.0);
+        ctx.quadraticCurveTo(-headRadius * 0.2, headY - headRadius * 0.85, -headRadius * 0.1, headY - headRadius * 0.55);
+        ctx.fill();
+        
+        ctx.fillStyle = '#FF6B9D';
+        ctx.beginPath();
+        ctx.arc(-headRadius * 0.5, headY - headRadius * 0.65, headRadius * 0.12, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.beginPath();
+        ctx.arc(-headRadius * 0.55, headY - headRadius * 0.7, headRadius * 0.04, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.strokeStyle = '#6BCB77';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, headY - headRadius * 1.0, headRadius * 0.25, Math.PI * 0.8, Math.PI * 0.2, true);
+        ctx.stroke();
+        
+        ctx.fillStyle = '#6BCB77';
+        ctx.beginPath();
+        ctx.arc(headRadius * 0.2, headY - headRadius * 1.15, headRadius * 0.08, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#FFD93D';
+        ctx.font = 'bold 10px Arial';
+        ctx.fillText('★', -headRadius * 0.45, headY - headRadius * 0.75);
+    }
+    
+    drawWatch(ctx, bodyWidth, bodyY, bodyHeight) {
+        const watchY = bodyY + bodyHeight * 0.6;
+        const watchX = -bodyWidth * 0.65;
+        const watchRadius = bodyWidth * 0.12;
+        
+        const watchGradient = ctx.createRadialGradient(
+            watchX, watchY, 0,
+            watchX, watchY, watchRadius
+        );
+        watchGradient.addColorStop(0, '#FFD93D');
+        watchGradient.addColorStop(0.6, '#FF8C32');
+        watchGradient.addColorStop(1, '#FF6B6B');
+        
+        ctx.fillStyle = watchGradient;
+        ctx.beginPath();
+        ctx.arc(watchX, watchY, watchRadius, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.strokeStyle = '#5D4037';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(watchX, watchY, watchRadius * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+        
         ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(watchX, watchY);
+        ctx.lineTo(watchX, watchY - watchRadius * 0.4);
+        ctx.moveTo(watchX, watchY);
+        ctx.lineTo(watchX + watchRadius * 0.3, watchY);
+        ctx.stroke();
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.beginPath();
+        ctx.arc(watchX - watchRadius * 0.2, watchY - watchRadius * 0.2, watchRadius * 0.15, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    
+    drawEarrings(ctx, headRadius, headY) {
+        const earGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, headRadius * 0.08);
+        earGradient.addColorStop(0, '#FFD93D');
+        earGradient.addColorStop(0.5, '#FF8C32');
+        earGradient.addColorStop(1, '#FF6B6B');
+        
+        ctx.fillStyle = earGradient;
+        
+        ctx.beginPath();
+        ctx.arc(-headRadius, headY + headRadius * 0.2, headRadius * 0.06, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.beginPath();
+        ctx.arc(headRadius, headY + headRadius * 0.2, headRadius * 0.06, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.beginPath();
+        ctx.arc(-headRadius - headRadius * 0.02, headY + headRadius * 0.18, headRadius * 0.02, 0, Math.PI * 2);
+        ctx.arc(headRadius - headRadius * 0.02, headY + headRadius * 0.18, headRadius * 0.02, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    
+    drawNecklace(ctx, bodyWidth, bodyY) {
+        ctx.strokeStyle = '#FFD93D';
         ctx.lineWidth = 2;
         
         ctx.beginPath();
-        ctx.roundRect(x - bubbleWidth / 2, y - bubbleHeight / 2, bubbleWidth, bubbleHeight, 10);
-        ctx.fill();
+        ctx.moveTo(-bodyWidth * 0.35, bodyY - 3);
+        ctx.quadraticCurveTo(0, bodyY + bodyWidth * 0.25, bodyWidth * 0.35, bodyY - 3);
         ctx.stroke();
         
-        // 气泡尾巴
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        const pendantGradient = ctx.createRadialGradient(
+            0, bodyY + bodyWidth * 0.25, 0,
+            0, bodyY + bodyWidth * 0.25, bodyWidth * 0.08
+        );
+        pendantGradient.addColorStop(0, '#FFD93D');
+        pendantGradient.addColorStop(0.5, '#FF8C32');
+        pendantGradient.addColorStop(1, '#FF6B6B');
+        
+        ctx.fillStyle = pendantGradient;
         ctx.beginPath();
-        ctx.moveTo(x - 10, y + bubbleHeight / 2);
-        ctx.lineTo(x, y + bubbleHeight / 2 + 15);
-        ctx.lineTo(x + 10, y + bubbleHeight / 2);
+        ctx.arc(0, bodyY + bodyWidth * 0.25, bodyWidth * 0.08, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.beginPath();
+        ctx.arc(-bodyWidth * 0.03, bodyY + bodyWidth * 0.23, bodyWidth * 0.03, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    
+    drawBackpack(ctx, bodyWidth, bodyY, bodyHeight, height) {
+        const packGradient = ctx.createLinearGradient(
+            -bodyWidth * 0.85, bodyY,
+            -bodyWidth * 0.45, bodyY + bodyHeight * 0.8
+        );
+        packGradient.addColorStop(0, '#6BCB77');
+        packGradient.addColorStop(0.25, '#4D96FF');
+        packGradient.addColorStop(0.5, '#FFD93D');
+        packGradient.addColorStop(0.75, '#FF6B6B');
+        packGradient.addColorStop(1, '#FF6B9D');
+        
+        ctx.fillStyle = packGradient;
+        
+        ctx.beginPath();
+        ctx.moveTo(-bodyWidth * 0.85, bodyY + 8);
+        ctx.quadraticCurveTo(-bodyWidth * 0.9, bodyY + bodyHeight * 0.45, -bodyWidth * 0.85, bodyY + bodyHeight * 0.82);
+        ctx.lineTo(-bodyWidth * 0.45, bodyY + bodyHeight * 0.82);
+        ctx.quadraticCurveTo(-bodyWidth * 0.4, bodyY + bodyHeight * 0.45, -bodyWidth * 0.45, bodyY + 8);
         ctx.closePath();
         ctx.fill();
+        
+        ctx.strokeStyle = '#5D4037';
+        ctx.lineWidth = 3;
         ctx.stroke();
         
-        // 文字
-        ctx.fillStyle = '#333';
-        ctx.fillText(message, x, y);
+        ctx.fillStyle = 'rgba(255,255,255,0.25)';
+        ctx.beginPath();
+        ctx.moveTo(-bodyWidth * 0.8, bodyY + 12);
+        ctx.quadraticCurveTo(-bodyWidth * 0.82, bodyY + bodyHeight * 0.35, -bodyWidth * 0.78, bodyY + bodyHeight * 0.4);
+        ctx.lineTo(-bodyWidth * 0.68, bodyY + bodyHeight * 0.4);
+        ctx.quadraticCurveTo(-bodyWidth * 0.65, bodyY + bodyHeight * 0.35, -bodyWidth * 0.7, bodyY + 12);
+        ctx.fill();
+        
+        ctx.fillStyle = '#FFD93D';
+        ctx.beginPath();
+        ctx.roundRect(-bodyWidth * 0.75, bodyY + bodyHeight * 0.35, bodyWidth * 0.25, bodyHeight * 0.12, 5);
+        ctx.fill();
+        ctx.strokeStyle = '#FF8C32';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 8px Arial';
+        ctx.fillText('★', -bodyWidth * 0.68, bodyY + bodyHeight * 0.42);
+        
+        ctx.strokeStyle = this.darkenColor('#6BCB77', 30);
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-bodyWidth * 0.65, bodyY + 8);
+        ctx.lineTo(-bodyWidth * 0.3, bodyY + 8);
+        ctx.stroke();
+        
+        ctx.fillStyle = '#FF6B6B';
+        ctx.beginPath();
+        ctx.arc(-bodyWidth * 0.65, bodyY + bodyHeight * 0.22, bodyWidth * 0.08, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#FFD93D';
+        ctx.beginPath();
+        ctx.arc(-bodyWidth * 0.65, bodyY + bodyHeight * 0.22, bodyWidth * 0.05, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.strokeStyle = '#FF8C32';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.beginPath();
+        ctx.arc(-bodyWidth * 0.68, bodyY + bodyHeight * 0.19, bodyWidth * 0.02, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#6BCB77';
+        ctx.beginPath();
+        ctx.moveTo(-bodyWidth * 0.6, bodyY + bodyHeight * 0.55);
+        ctx.lineTo(-bodyWidth * 0.55, bodyY + bodyHeight * 0.62);
+        ctx.lineTo(-bodyWidth * 0.5, bodyY + bodyHeight * 0.55);
+        ctx.lineTo(-bodyWidth * 0.55, bodyY + bodyHeight * 0.48);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.fillStyle = '#FFD93D';
+        ctx.beginPath();
+        ctx.arc(-bodyWidth * 0.55, bodyY + bodyHeight * 0.55, bodyWidth * 0.03, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#FF6B9D';
+        ctx.beginPath();
+        ctx.arc(-bodyWidth * 0.55, bodyY + bodyHeight * 0.7, bodyWidth * 0.06, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.beginPath();
+        ctx.arc(-bodyWidth * 0.58, bodyY + bodyHeight * 0.68, bodyWidth * 0.02, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    
+    drawHighlight(ctx, width, height, time) {
+        const glowPhase = (time * 0.001) % (Math.PI * 2);
+        const glowRadius = width * 0.6 + Math.sin(glowPhase) * 5;
+        
+        ctx.strokeStyle = `rgba(255,217,61,${0.6 + Math.sin(glowPhase) * 0.2})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, -height * 0.1, glowRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        ctx.strokeStyle = 'rgba(255,140,50,0.3)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, -height * 0.1, glowRadius + 5, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+    
+    drawName(ctx, x, y, name, isCurrentPlayer) {
+        ctx.font = 'bold 16px "Comic Sans MS", cursive';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        const textWidth = ctx.measureText(name).width;
+        const padding = 10;
+        const bgWidth = textWidth + padding * 2;
+        const bgHeight = 26;
+        
+        if (isCurrentPlayer) {
+            const bgGradient = ctx.createLinearGradient(
+                x - bgWidth / 2, y - bgHeight / 2,
+                x + bgWidth / 2, y + bgHeight / 2
+            );
+            bgGradient.addColorStop(0, '#FFD93D');
+            bgGradient.addColorStop(0.5, '#FF8C32');
+            bgGradient.addColorStop(1, '#FF6B6B');
+            
+            ctx.fillStyle = bgGradient;
+            ctx.beginPath();
+            ctx.roundRect(x - bgWidth / 2, y - bgHeight / 2, bgWidth, bgHeight, 13);
+            ctx.fill();
+            
+            ctx.strokeStyle = '#FF6B6B';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            ctx.fillStyle = '#5D4037';
+            ctx.fillText(name, x, y);
+        } else {
+            ctx.fillStyle = 'rgba(77,150,255,0.85)';
+            ctx.beginPath();
+            ctx.roundRect(x - bgWidth / 2, y - bgHeight / 2, bgWidth, bgHeight, 13);
+            ctx.fill();
+            
+            ctx.strokeStyle = '#6BCB77';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            ctx.fillStyle = '#FFFACD';
+            ctx.fillText(name, x, y);
+        }
+    }
+    
+    drawChatBubble(ctx, x, y, message) {
+        ctx.font = 'bold 15px "Comic Sans MS", cursive';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        const textWidth = ctx.measureText(message).width;
+        const padding = 15;
+        const bubbleWidth = Math.min(textWidth + padding * 2, 180);
+        const bubbleHeight = 40;
+        
+        const time = Date.now();
+        const bounceOffset = Math.sin(time * 0.008) * 3;
+        const bubbleY = y + bounceOffset;
+        
+        const cloudGradient = ctx.createRadialGradient(
+            x, bubbleY - 5, 0,
+            x, bubbleY, bubbleWidth / 2
+        );
+        cloudGradient.addColorStop(0, '#ffffff');
+        cloudGradient.addColorStop(0.4, '#FFFACD');
+        cloudGradient.addColorStop(0.7, '#FFE5B4');
+        cloudGradient.addColorStop(1, '#FFDAB9');
+        
+        ctx.fillStyle = cloudGradient;
+        
+        ctx.beginPath();
+        ctx.moveTo(x - bubbleWidth / 2 + 12, bubbleY - bubbleHeight / 2 + 8);
+        ctx.quadraticCurveTo(x - bubbleWidth / 2 + 5, bubbleY - bubbleHeight / 2, x - bubbleWidth / 2 + 20, bubbleY - bubbleHeight / 2 + 5);
+        ctx.quadraticCurveTo(x, bubbleY - bubbleHeight / 2 - 5, x + bubbleWidth / 2 - 20, bubbleY - bubbleHeight / 2 + 5);
+        ctx.quadraticCurveTo(x + bubbleWidth / 2 - 5, bubbleY - bubbleHeight / 2, x + bubbleWidth / 2 - 12, bubbleY - bubbleHeight / 2 + 8);
+        ctx.quadraticCurveTo(x + bubbleWidth / 2, bubbleY - 5, x + bubbleWidth / 2 - 12, bubbleY + bubbleHeight / 2 - 8);
+        ctx.quadraticCurveTo(x + bubbleWidth / 2 - 5, bubbleY + bubbleHeight / 2, x + bubbleWidth / 2 - 25, bubbleY + bubbleHeight / 2 - 3);
+        ctx.quadraticCurveTo(x + 15, bubbleY + bubbleHeight / 2 + 8, x + 8, bubbleY + bubbleHeight / 2 + 18);
+        ctx.quadraticCurveTo(x, bubbleY + bubbleHeight / 2 + 22, x - 8, bubbleY + bubbleHeight / 2 + 18);
+        ctx.quadraticCurveTo(x - 15, bubbleY + bubbleHeight / 2 + 8, x - bubbleWidth / 2 + 25, bubbleY + bubbleHeight / 2 - 3);
+        ctx.quadraticCurveTo(x - bubbleWidth / 2 + 5, bubbleY + bubbleHeight / 2, x - bubbleWidth / 2 + 12, bubbleY + bubbleHeight / 2 - 8);
+        ctx.quadraticCurveTo(x - bubbleWidth / 2, bubbleY - 5, x - bubbleWidth / 2 + 12, bubbleY - bubbleHeight / 2 + 8);
+        ctx.fill();
+        
+        ctx.strokeStyle = '#FFD93D';
+        ctx.lineWidth = 4;
+        ctx.stroke();
+        
+        ctx.strokeStyle = 'rgba(255,140,50,0.5)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        ctx.beginPath();
+        ctx.ellipse(x - bubbleWidth * 0.2, bubbleY - bubbleHeight * 0.25, bubbleWidth * 0.15, bubbleHeight * 0.15, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(x + bubbleWidth * 0.15, bubbleY - bubbleHeight * 0.3, bubbleWidth * 0.1, bubbleHeight * 0.12, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#FFD93D';
+        ctx.font = '10px Arial';
+        const sparkleCount = 3;
+        for (let i = 0; i < sparkleCount; i++) {
+            const sx = x - bubbleWidth * 0.35 + (i * bubbleWidth * 0.25);
+            const sy = bubbleY - bubbleHeight / 2 - 8 + Math.sin(time * 0.01 + i) * 2;
+            ctx.fillText('✦', sx, sy);
+        }
+        
+        ctx.fillStyle = '#5D4037';
+        ctx.font = 'bold 15px "Comic Sans MS", cursive';
+        ctx.fillText(message, x, bubbleY);
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.fillText(message, x + 1, bubbleY + 1);
+    }
+    
+    lightenColor(color, percent) {
+        const num = parseInt(color.replace('#', ''), 16);
+        const amt = Math.round(2.55 * percent);
+        const R = Math.min(255, (num >> 16) + amt);
+        const G = Math.min(255, ((num >> 8) & 0x00FF) + amt);
+        const B = Math.min(255, (num & 0x0000FF) + amt);
+        return '#' + (0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1);
+    }
+    
+    darkenColor(color, percent) {
+        const num = parseInt(color.replace('#', ''), 16);
+        const amt = Math.round(2.55 * percent);
+        const R = Math.max(0, (num >> 16) - amt);
+        const G = Math.max(0, ((num >> 8) & 0x00FF) - amt);
+        const B = Math.max(0, (num & 0x0000FF) - amt);
+        return '#' + (0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1);
     }
 }
 
-// 导出默认值函数供其他模块使用
 window.getStatusWithDefaults = getStatusWithDefaults;
 window.getPositionWithDefaults = getPositionWithDefaults;
 window.DEFAULT_STATUS = DEFAULT_STATUS;

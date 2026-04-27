@@ -7,69 +7,191 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- 登录界面 -->
     <div id="login-overlay" class="overlay">
+        <div class="overlay-background">
+            <div class="floating-cloud cloud-1"></div>
+            <div class="floating-cloud cloud-2"></div>
+            <div class="floating-cloud cloud-3"></div>
+            <div class="floating-cloud cloud-4"></div>
+            <div class="floating-bird bird-1"></div>
+            <div class="floating-bird bird-2"></div>
+            <div class="floating-butterfly butterfly-1"></div>
+            <div class="floating-butterfly butterfly-2"></div>
+            <div class="rainbow-decoration"></div>
+            <div class="sun-rays"></div>
+        </div>
+        
         <div class="overlay-content">
-            <h2>☀️ GoodMorning</h2>
-            <p class="subtitle">一个基于Gist的多人社交游戏</p>
+            <div class="login-header">
+                <div class="sun-decoration-container">
+                    <div class="sun-core"></div>
+                    <div class="sun-ray ray-1"></div>
+                    <div class="sun-ray ray-2"></div>
+                    <div class="sun-ray ray-3"></div>
+                    <div class="sun-ray ray-4"></div>
+                    <div class="sun-ray ray-5"></div>
+                    <div class="sun-ray ray-6"></div>
+                    <div class="sun-ray ray-7"></div>
+                    <div class="sun-ray ray-8"></div>
+                    <div class="sun-face">
+                        <div class="sun-eye sun-eye-left"></div>
+                        <div class="sun-eye sun-eye-right"></div>
+                        <div class="sun-mouth"></div>
+                    </div>
+                </div>
+                
+                <div class="game-title">
+                    <h1>
+                        <span class="letter letter-1">G</span>
+                        <span class="letter letter-2">o</span>
+                        <span class="letter letter-3">o</span>
+                        <span class="letter letter-4">d</span>
+                        <span class="letter letter-5">M</span>
+                        <span class="letter letter-6">o</span>
+                        <span class="letter letter-7">r</span>
+                        <span class="letter letter-8">n</span>
+                        <span class="letter letter-9">i</span>
+                        <span class="letter letter-10">n</span>
+                        <span class="letter letter-11">g</span>
+                    </h1>
+                    <div class="sparkles">
+                        <span class="sparkle sparkle-1">✦</span>
+                        <span class="sparkle sparkle-2">✦</span>
+                        <span class="sparkle sparkle-3">✦</span>
+                        <span class="sparkle sparkle-4">✦</span>
+                        <span class="sparkle sparkle-5">✦</span>
+                    </div>
+                </div>
+                
+                <div class="character-preview-container">
+                    <div class="character-preview" id="preview-canvas-container">
+                        <canvas id="preview-canvas" width="100" height="120"></canvas>
+                    </div>
+                    <div class="preview-label">你的角色预览</div>
+                </div>
+            </div>
+            
+            <p class="subtitle">
+                <span class="subtitle-icon">🌿</span>
+                一个基于Gist的多人社交游戏
+                <span class="subtitle-icon">🌸</span>
+            </p>
             
             <div class="login-form">
                 <div class="form-group">
-                    <label for="gist-token">GitHub Token</label>
+                    <label for="gist-token">
+                        <span class="label-icon">🔑</span>
+                        GitHub Token
+                    </label>
                     <input type="password" id="gist-token" placeholder="ghp_xxxxxx (需要gist权限)">
                     <small>Token仅用于写入数据，存储在sessionStorage中</small>
                 </div>
                 
                 <div class="form-group">
-                    <label for="player-name">角色名称</label>
+                    <label for="player-name">
+                        <span class="label-icon">✨</span>
+                        角色名称
+                    </label>
                     <input type="text" id="player-name" placeholder="输入3-12字符的名称" maxlength="12">
                 </div>
                 
                 <div class="form-buttons">
-                    <button id="create-character-btn" class="btn primary-btn">创建角色</button>
-                    <button id="select-character-btn" class="btn secondary-btn">选择已有角色</button>
+                    <button id="create-character-btn" class="btn primary-btn">
+                        <span class="btn-icon">🌟</span>
+                        创建角色
+                    </button>
+                    <button id="select-character-btn" class="btn secondary-btn">
+                        <span class="btn-icon">👥</span>
+                        选择已有角色
+                    </button>
                 </div>
                 
                 <a href="https://github.com/settings/tokens/new" target="_blank" class="token-link">
+                    <span class="link-icon">🔗</span>
                     创建Token（需要gist权限）
                 </a>
+            </div>
+            
+            <div class="footer-decoration">
+                <div class="footer-flower flower-1">🌸</div>
+                <div class="footer-flower flower-2">🌼</div>
+                <div class="footer-flower flower-3">🌺</div>
+                <div class="footer-flower flower-4">🌷</div>
             </div>
         </div>
     </div>
     
-    <!-- 角色选择界面 -->
     <div id="character-select-overlay" class="overlay" style="display: none;">
+        <div class="overlay-background">
+            <div class="floating-cloud cloud-1"></div>
+            <div class="floating-cloud cloud-2"></div>
+        </div>
+        
         <div class="overlay-content">
-            <h2>选择角色</h2>
+            <div class="game-logo">
+                <h2>选择角色</h2>
+                <div class="sparkles">
+                    <span class="sparkle sparkle-1">✦</span>
+                    <span class="sparkle sparkle-2">✦</span>
+                </div>
+            </div>
             <div id="character-list" class="character-list"></div>
-            <button id="back-to-login-btn" class="btn">返回</button>
+            <button id="back-to-login-btn" class="btn secondary-btn">
+                <span class="btn-icon">↩️</span>
+                返回
+            </button>
         </div>
     </div>
     
-    <!-- 游戏主界面 -->
     <div id="game-container" style="display: none;">
-        <!-- 游戏画布 -->
         <canvas id="game-canvas"></canvas>
         
-        <!-- 控制区域 -->
         <div class="control-area">
-            <!-- 轮盘控制器 -->
             <div class="joystick-container">
                 <div class="joystick-base" id="joystick-base">
-                    <div class="joystick-stick" id="joystick-stick"></div>
+                    <div class="joystick-outer-ring"></div>
+                    <div class="joystick-inner-ring"></div>
+                    <div class="joystick-stars">
+                        <span class="joystick-star star-1">✦</span>
+                        <span class="joystick-star star-2">✦</span>
+                        <span class="joystick-star star-3">✦</span>
+                        <span class="joystick-star star-4">✦</span>
+                        <span class="joystick-star star-5">✦</span>
+                        <span class="joystick-star star-6">✦</span>
+                    </div>
+                    <div class="joystick-stick" id="joystick-stick">
+                        <div class="stick-face">
+                            <div class="stick-eye stick-eye-left"></div>
+                            <div class="stick-eye stick-eye-right"></div>
+                            <div class="stick-mouth"></div>
+                        </div>
+                        <div class="stick-highlight"></div>
+                        <div class="stick-sparkles">
+                            <span class="stick-sparkle">✦</span>
+                            <span class="stick-sparkle">✦</span>
+                        </div>
+                    </div>
+                    <div class="joystick-direction-indicator" id="direction-indicator"></div>
                     <div class="joystick-label">拖拽移动</div>
                 </div>
             </div>
             
-            <!-- 功能按钮 -->
             <div class="button-area">
-                <button id="settings-btn" class="btn">⚙️ 设置</button>
-                <button id="chat-btn" class="btn">💬 聊天</button>
-                <button id="refresh-btn" class="btn">🔄 刷新</button>
+                <button id="settings-btn" class="btn secondary-btn">
+                    <span class="btn-icon">⚙️</span>
+                    设置
+                </button>
+                <button id="chat-btn" class="btn primary-btn">
+                    <span class="btn-icon">💬</span>
+                    聊天
+                </button>
+                <button id="refresh-btn" class="btn secondary-btn">
+                    <span class="btn-icon">🔄</span>
+                    刷新
+                </button>
             </div>
         </div>
         
-        <!-- 信息显示 -->
         <div class="info-area">
             <div id="player-info">
                 <span id="current-player-name"></span>
@@ -78,33 +200,43 @@
         </div>
     </div>
     
-    <!-- 设置界面 -->
     <div id="settings-overlay" class="overlay" style="display: none;">
+        <div class="overlay-background">
+            <div class="floating-cloud cloud-1"></div>
+        </div>
+        
         <div class="overlay-content settings-panel">
             <div class="settings-header">
-                <h2>⚙️ 设置</h2>
+                <h2>
+                    <span class="header-icon">⚙️</span>
+                    设置
+                </h2>
                 <button id="close-settings-btn" class="close-btn">×</button>
             </div>
             
             <div class="settings-body">
-                <!-- 基本信息 -->
                 <div class="settings-section">
-                    <h3>基本信息</h3>
+                    <h3>
+                        <span class="section-icon">📋</span>
+                        基本信息
+                    </h3>
                     <div class="setting-item">
                         <label>角色名称</label>
                         <input type="text" id="setting-name" maxlength="12">
-                        <button id="change-name-btn" class="btn small-btn">修改</button>
+                        <button id="change-name-btn" class="btn small-btn primary-btn">修改</button>
                     </div>
                     <div class="setting-item">
-                        <label>刷新时间间隔 (ms)</label>
+                        <label>刷新间隔</label>
                         <input type="number" id="refresh-interval" min="100" max="1000" value="200" step="50">
-                        <small>建议范围: 100-500ms</small>
+                        <small>建议: 100-500ms</small>
                     </div>
                 </div>
                 
-                <!-- 外观设置 -->
                 <div class="settings-section">
-                    <h3>外观设置</h3>
+                    <h3>
+                        <span class="section-icon">🎨</span>
+                        外观设置
+                    </h3>
                     <div class="setting-item">
                         <label>性别</label>
                         <select id="setting-gender">
@@ -113,7 +245,7 @@
                         </select>
                     </div>
                     <div class="setting-item">
-                        <label>身高比例</label>
+                        <label>身高</label>
                         <input type="range" id="setting-height" min="0.8" max="1.2" value="1.0" step="0.1">
                         <span id="height-value">1.0</span>
                     </div>
@@ -133,7 +265,7 @@
                         <input type="color" id="setting-hairColor" value="#333333">
                     </div>
                     <div class="setting-item">
-                        <label>衣服样式</label>
+                        <label>衣服</label>
                         <select id="setting-clothingStyle">
                             <option value="casual">休闲装</option>
                             <option value="formal">正装</option>
@@ -144,7 +276,7 @@
                     </div>
                     <div class="setting-item">
                         <label>衣服颜色</label>
-                        <input type="color" id="setting-clothingColor" value="#3498db">
+                        <input type="color" id="setting-clothingColor" value="#4D96FF">
                     </div>
                     <div class="setting-item">
                         <label>肤色</label>
@@ -167,48 +299,222 @@
                     </div>
                 </div>
                 
-                <!-- 保存按钮 -->
                 <div class="settings-footer">
-                    <button id="save-settings-btn" class="btn primary-btn">保存设置</button>
-                    <button id="cancel-settings-btn" class="btn secondary-btn">取消</button>
+                    <button id="save-settings-btn" class="btn primary-btn">
+                        <span class="btn-icon">✅</span>
+                        保存设置
+                    </button>
+                    <button id="cancel-settings-btn" class="btn secondary-btn">
+                        <span class="btn-icon">❌</span>
+                        取消
+                    </button>
                 </div>
             </div>
         </div>
     </div>
     
-    <!-- 聊天界面 -->
     <div id="chat-overlay" class="overlay" style="display: none;">
+        <div class="overlay-background">
+            <div class="floating-cloud cloud-1"></div>
+        </div>
+        
         <div class="overlay-content chat-panel">
             <div class="chat-header">
-                <h2>💬 发送消息</h2>
+                <h2>
+                    <span class="header-icon">💬</span>
+                    发送消息
+                </h2>
                 <button id="close-chat-btn" class="close-btn">×</button>
             </div>
             <div class="chat-body">
                 <textarea id="chat-input" placeholder="输入消息内容..." maxlength="50"></textarea>
                 <div class="chat-buttons">
-                    <button id="send-chat-btn" class="btn primary-btn">发送</button>
-                    <button id="cancel-chat-btn" class="btn secondary-btn">取消聊天</button>
+                    <button id="send-chat-btn" class="btn primary-btn">
+                        <span class="btn-icon">📨</span>
+                        发送
+                    </button>
+                    <button id="cancel-chat-btn" class="btn secondary-btn">
+                        <span class="btn-icon">🚫</span>
+                        取消
+                    </button>
                 </div>
-                <small>消息显示在头顶，10秒后自动消失</small>
+                <small>消息显示在头顶，10秒后消失</small>
             </div>
         </div>
     </div>
     
-    <!-- 加载提示 -->
     <div id="loading-overlay" class="overlay" style="display: none;">
-        <div class="overlay-content">
+        <div class="overlay-background">
+            <div class="floating-cloud cloud-1"></div>
+            <div class="floating-cloud cloud-2"></div>
+        </div>
+        
+        <div class="overlay-content loading-panel">
+            <div class="loading-sun">
+                <div class="loading-sun-core"></div>
+                <div class="loading-sun-rays"></div>
+            </div>
             <div class="loading-spinner"></div>
             <p id="loading-text">加载中...</p>
+            <div class="loading-dots">
+                <span class="loading-dot dot-1">●</span>
+                <span class="loading-dot dot-2">●</span>
+                <span class="loading-dot dot-3">●</span>
+            </div>
         </div>
     </div>
     
-    <!-- Toast通知 -->
     <div id="toast-container" style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 300;"></div>
     
-    <!-- 加载脚本 -->
+    <script src="assets/textures/utils.js"></script>
+    <script src="assets/textures/grass-texture.js"></script>
+    <script src="assets/textures/flower-texture.js"></script>
+    <script src="assets/textures/tree-texture.js"></script>
+    <script src="assets/textures/water-texture.js"></script>
+    <script src="assets/textures/character-base.js"></script>
     <script src="gist-manager.js"></script>
     <script src="character.js"></script>
     <script src="map.js"></script>
     <script src="game.js"></script>
+    <script>
+        window.addEventListener('DOMContentLoaded', () => {
+            const previewCanvas = document.getElementById('preview-canvas');
+            if (previewCanvas) {
+                const ctx = previewCanvas.getContext('2d');
+                drawPreviewCharacter(ctx);
+            }
+        });
+        
+        function drawPreviewCharacter(ctx) {
+            ctx.clearRect(0, 0, 100, 120);
+            
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, 0, 100, 120);
+            
+            ctx.fillStyle = 'rgba(255,255,255,0.6)';
+            ctx.beginPath();
+            ctx.arc(20, 20, 12, 0, Math.PI * 2);
+            ctx.arc(35, 15, 8, 0, Math.PI * 2);
+            ctx.arc(45, 20, 10, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.save();
+            ctx.translate(50, 65);
+            
+            ctx.fillStyle = 'rgba(0,0,0,0.15)';
+            ctx.beginPath();
+            ctx.ellipse(0, 45, 18, 5, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            const skinGradient = ctx.createRadialGradient(-5, -20, 0, 0, -15, 18);
+            skinGradient.addColorStop(0, '#ffecd2');
+            skinGradient.addColorStop(0.7, '#f5d0c5');
+            skinGradient.addColorStop(1, '#e8c0b5');
+            ctx.fillStyle = skinGradient;
+            ctx.beginPath();
+            ctx.ellipse(0, -15, 18, 22, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#d4b5a5';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.ellipse(-7, -12, 5, 7, 0, 0, Math.PI * 2);
+            ctx.ellipse(7, -12, 5, 7, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#4D96FF';
+            ctx.beginPath();
+            ctx.arc(-7, -10, 3, 0, Math.PI * 2);
+            ctx.arc(7, -10, 3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#000000';
+            ctx.beginPath();
+            ctx.arc(-7, -9, 1.5, 0, Math.PI * 2);
+            ctx.arc(7, -9, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(-8, -11, 1, 0, Math.PI * 2);
+            ctx.arc(6, -11, 1, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = 'rgba(255,180,180,0.4)';
+            ctx.beginPath();
+            ctx.ellipse(-12, -5, 4, 2, 0, 0, Math.PI * 2);
+            ctx.ellipse(12, -5, 4, 2, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#FF8C32';
+            ctx.beginPath();
+            ctx.moveTo(-6, 0);
+            ctx.quadraticCurveTo(0, 5, 6, 0);
+            ctx.quadraticCurveTo(0, 2, -6, 0);
+            ctx.fill();
+            
+            ctx.strokeStyle = '#c55a5a';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(-5, 1);
+            ctx.quadraticCurveTo(0, 5, 5, 1);
+            ctx.stroke();
+            
+            const hairGradient = ctx.createLinearGradient(0, -35, 0, -10);
+            hairGradient.addColorStop(0, '#5a5a5a');
+            hairGradient.addColorStop(0.5, '#333333');
+            hairGradient.addColorStop(1, '#2a2a2a');
+            ctx.fillStyle = hairGradient;
+            ctx.beginPath();
+            ctx.moveTo(-16, -5);
+            ctx.quadraticCurveTo(-18, -25, -8, -35);
+            ctx.quadraticCurveTo(0, -40, 8, -35);
+            ctx.quadraticCurveTo(18, -25, 16, -5);
+            ctx.quadraticCurveTo(8, -10, 0, -12);
+            ctx.quadraticCurveTo(-8, -10, -16, -5);
+            ctx.fill();
+            
+            ctx.fillStyle = 'rgba(255,255,255,0.2)';
+            ctx.beginPath();
+            ctx.ellipse(-5, -30, 4, 2.5, -0.3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            const clothGradient = ctx.createLinearGradient(-12, 10, 12, 40);
+            clothGradient.addColorStop(0, '#6BCB77');
+            clothGradient.addColorStop(0.5, '#4D96FF');
+            clothGradient.addColorStop(1, '#FF6B9D');
+            ctx.fillStyle = clothGradient;
+            ctx.beginPath();
+            ctx.moveTo(-12, 10);
+            ctx.quadraticCurveTo(-14, 20, -11, 32);
+            ctx.lineTo(-8, 32);
+            ctx.lineTo(-8, 40);
+            ctx.lineTo(8, 40);
+            ctx.lineTo(8, 32);
+            ctx.lineTo(11, 32);
+            ctx.quadraticCurveTo(14, 20, 12, 10);
+            ctx.quadraticCurveTo(0, 5, -12, 10);
+            ctx.fill();
+            
+            ctx.fillStyle = '#5D5D5D';
+            ctx.fillRect(-8, 32, 6, 12);
+            ctx.fillRect(2, 32, 6, 12);
+            
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.beginPath();
+            ctx.arc(0, 25, 3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.restore();
+            
+            ctx.strokeStyle = 'rgba(255,217,61,0.6)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(50, 65, 25, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+    </script>
 </body>
 </html>

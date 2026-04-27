@@ -155,11 +155,13 @@ class GoodMorningGame {
         if (!base || !stick) return;
         
         let isDragging = false;
-        const maxDistance = 35;
+        const maxDistance = 40;
         
         const handleStart = (e) => {
             isDragging = true;
             this.joystick.active = true;
+            base.classList.add('dragging');
+            stick.style.animation = 'none';
             e.preventDefault();
         };
         
@@ -182,17 +184,29 @@ class GoodMorningGame {
             let dx = clientX - centerX;
             let dy = clientY - centerY;
             
-            // 限制距离
             const distance = Math.sqrt(dx * dx + dy * dy);
             if (distance > maxDistance) {
                 dx = dx / distance * maxDistance;
                 dy = dy / distance * maxDistance;
             }
             
-            // 更新摇杆位置
-            stick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+            const angle = Math.atan2(dy, dx);
+            const intensity = Math.min(distance / maxDistance, 1);
             
-            // 计算方向
+            stick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(${1 + intensity * 0.15})`;
+            
+            const hueShift = intensity * 30;
+            stick.style.filter = `hue-rotate(${hueShift}deg) brightness(${1 + intensity * 0.1})`;
+            
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                stick.classList.add('active');
+                const mouth = stick.querySelector('.stick-mouth');
+                if (mouth) {
+                    mouth.style.width = `${10 + intensity * 8}px`;
+                    mouth.style.height = `${5 + intensity * 3}px`;
+                }
+            }
+            
             this.joystick.dx = dx / maxDistance;
             this.joystick.dy = dy / maxDistance;
             
@@ -204,7 +218,17 @@ class GoodMorningGame {
             this.joystick.active = false;
             this.joystick.dx = 0;
             this.joystick.dy = 0;
+            base.classList.remove('dragging');
+            stick.classList.remove('active');
             stick.style.transform = 'translate(-50%, -50%)';
+            stick.style.filter = '';
+            stick.style.animation = 'stick-bounce 2s ease-in-out infinite';
+            
+            const mouth = stick.querySelector('.stick-mouth');
+            if (mouth) {
+                mouth.style.width = '10px';
+                mouth.style.height = '5px';
+            }
         };
         
         base.addEventListener('mousedown', handleStart);
@@ -722,22 +746,25 @@ class GoodMorningGame {
         this.camera.y = Math.max(0, Math.min(this.camera.y, mapHeight - this.canvas.height));
     }
     
-    render() {
-        // 清空画布
+render() {
+        const time = this.lastTime || Date.now();
+        
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         
-        // 渲染地图
         this.mapManager.render(this.ctx, this.camera);
         
-        // 渲染其他玩家
         this.otherPlayers.forEach(player => {
-            this.characterManager.renderCharacter(this.ctx, player, this.camera, false);
+            this.characterManager.renderCharacter(this.ctx, player, this.camera, false, time);
         });
         
-        // 渲染当前玩家
         if (this.currentPlayer) {
-            this.characterManager.renderCharacter(this.ctx, this.currentPlayer, this.camera, true);
+            this.characterManager.renderCharacter(this.ctx, this.currentPlayer, this.camera, true, time);
         }
+        
+        if (this.showDebug) {
+            this.renderDebugInfo();
+        }
+    }
         
         // 调试信息（按F3显示）
         if (this.showDebug) {
