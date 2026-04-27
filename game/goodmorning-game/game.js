@@ -62,6 +62,7 @@ class GoodMorningGame {
         
         // 设置事件监听
         this.setupEventListeners();
+        this.setupChatEnterKey();
         
         // 显示登录界面
         this.showLoginOverlay();
@@ -334,6 +335,16 @@ class GoodMorningGame {
     showChatOverlay() {
         document.getElementById('chat-overlay').style.display = 'flex';
         document.getElementById('chat-input').focus();
+    }
+    
+    setupChatEnterKey() {
+        // 只在初始化时设置一次Enter键监听
+        document.getElementById('chat-input')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.sendChat();
+            }
+        });
     }
     
     hideChatOverlay() {
