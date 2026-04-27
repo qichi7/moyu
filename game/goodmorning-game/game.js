@@ -270,6 +270,24 @@ class GoodMorningGame {
     
     // ========== 界面控制 ==========
     
+    // Toast通知系统
+    showToast(message, type = 'info', duration = 3000) {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.textContent = message;
+        
+        container.appendChild(toast);
+        
+        // 自动移除
+        setTimeout(() => {
+            toast.style.animation = 'toastFadeOut 0.3s ease';
+            setTimeout(() => {
+                toast.remove();
+            }, 300);
+        }, duration);
+    }
+    
     showLoginOverlay() {
         document.getElementById('login-overlay').style.display = 'flex';
         document.getElementById('character-select-overlay').style.display = 'none';
@@ -367,12 +385,12 @@ class GoodMorningGame {
         const name = document.getElementById('player-name').value.trim();
         
         if (!token) {
-            alert('请输入GitHub Token');
+            this.showToast('请输入GitHub Token', 'warning');
             return;
         }
         
         if (!name || name.length < 3 || name.length > 12) {
-            alert('角色名称需要3-12个字符');
+            this.showToast('角色名称需要3-12个字符', 'warning');
             return;
         }
         
@@ -404,7 +422,7 @@ class GoodMorningGame {
         const token = document.getElementById('gist-token').value.trim();
         
         if (!token) {
-            alert('请输入GitHub Token');
+            this.showToast('请输入GitHub Token', 'warning');
             return;
         }
         
@@ -419,7 +437,7 @@ class GoodMorningGame {
         this.hideLoadingOverlay();
         
         if (characters.length === 0) {
-            alert('没有找到已存在的角色，请创建新角色');
+            this.showToast('没有找到已存在的角色，请创建新角色', 'info');
             return;
         }
         
@@ -458,7 +476,7 @@ class GoodMorningGame {
         // 检查名称是否修改
         if (newName !== oldName) {
             if (!newName || newName.length < 3 || newName.length > 12) {
-                alert('角色名称需要3-12个字符');
+                this.showToast('角色名称需要3-12个字符', 'warning');
                 return;
             }
             
@@ -471,7 +489,7 @@ class GoodMorningGame {
                 this.playerName = newName;
                 document.getElementById('current-player-name').textContent = newName;
             } else {
-                alert('修改名称失败');
+                this.showToast('修改名称失败', 'error');
                 this.hideLoadingOverlay();
                 return;
             }
@@ -510,7 +528,7 @@ class GoodMorningGame {
         this.hideLoadingOverlay();
         this.hideSettingsOverlay();
         
-        alert('设置已保存');
+        this.showToast('设置已保存', 'success');
     }
     
     // ========== 聊天功能 ==========
@@ -519,7 +537,7 @@ class GoodMorningGame {
         const message = document.getElementById('chat-input').value.trim();
         
         if (!message) {
-            alert('请输入消息内容');
+            this.showToast('请输入消息内容', 'warning');
             return;
         }
         

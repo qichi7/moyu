@@ -431,7 +431,7 @@ class GistManager {
             
             // 检查新名称是否已存在
             if (statusData.players[newName] || positionData.positions[newName]) {
-                alert('该名称已被使用');
+                this.game.showToast('该名称已被使用', 'warning');
                 return false;
             }
             
