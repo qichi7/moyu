@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>GoodMorning - 社交游戏</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 登录界面 -->
+    <div id="login-overlay" class="overlay">
+        <div class="overlay-content">
+            <h2>☀️ GoodMorning</h2>
+            <p class="subtitle">一个基于Gist的多人社交游戏</p>
+            
+            <div class="login-form">
+                <div class="form-group">
+                    <label for="gist-token">GitHub Token</label>
+                    <input type="password" id="gist-token" placeholder="ghp_xxxxxx (需要gist权限)">
+                    <small>Token仅用于写入数据，存储在sessionStorage中</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="player-name">角色名称</label>
+                    <input type="text" id="player-name" placeholder="输入3-12字符的名称" maxlength="12">
+                </div>
+                
+                <div class="form-buttons">
+                    <button id="create-character-btn" class="btn primary-btn">创建角色</button>
+                    <button id="select-character-btn" class="btn secondary-btn">选择已有角色</button>
+                </div>
+                
+                <a href="https://github.com/settings/tokens/new" target="_blank" class="token-link">
+                    创建Token（需要gist权限）
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 角色选择界面 -->
+    <div id="character-select-overlay" class="overlay" style="display: none;">
+        <div class="overlay-content">
+            <h2>选择角色</h2>
+            <div id="character-list" class="character-list"></div>
+            <button id="back-to-login-btn" class="btn">返回</button>
+        </div>
+    </div>
+    
+    <!-- 游戏主界面 -->
+    <div id="game-container" style="display: none;">
+        <!-- 游戏画布 -->
+        <canvas id="game-canvas"></canvas>
+        
+        <!-- 控制区域 -->
+        <div class="control-area">
+            <!-- 轮盘控制器 -->
+            <div class="joystick-container">
+                <div class="joystick-base" id="joystick-base">
+                    <div class="joystick-stick" id="joystick-stick"></div>
+                    <div class="joystick-label">拖拽移动</div>
+                </div>
+            </div>
+            
+            <!-- 功能按钮 -->
+            <div class="button-area">
+                <button id="settings-btn" class="btn">⚙️ 设置</button>
+                <button id="chat-btn" class="btn">💬 聊天</button>
+                <button id="refresh-btn" class="btn">🔄 刷新</button>
+            </div>
+        </div>
+        
+        <!-- 信息显示 -->
+        <div class="info-area">
+            <div id="player-info">
+                <span id="current-player-name"></span>
+                <span id="player-count">在线: 0</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 设置界面 -->
+    <div id="settings-overlay" class="overlay" style="display: none;">
+        <div class="overlay-content settings-panel">
+            <div class="settings-header">
+                <h2>⚙️ 设置</h2>
+                <button id="close-settings-btn" class="close-btn">×</button>
+            </div>
+            
+            <div class="settings-body">
+                <!-- 基本信息 -->
+                <div class="settings-section">
+                    <h3>基本信息</h3>
+                    <div class="setting-item">
+                        <label>角色名称</label>
+                        <input type="text" id="setting-name" maxlength="12">
+                        <button id="change-name-btn" class="btn small-btn">修改</button>
+                    </div>
+                    <div class="setting-item">
+                        <label>刷新时间间隔 (ms)</label>
+                        <input type="number" id="refresh-interval" min="100" max="1000" value="200" step="50">
+                        <small>建议范围: 100-500ms</small>
+                    </div>
+                </div>
+                
+                <!-- 外观设置 -->
+                <div class="settings-section">
+                    <h3>外观设置</h3>
+                    <div class="setting-item">
+                        <label>性别</label>
+                        <select id="setting-gender">
+                            <option value="male">男性</option>
+                            <option value="female">女性</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label>身高比例</label>
+                        <input type="range" id="setting-height" min="0.8" max="1.2" value="1.0" step="0.1">
+                        <span id="height-value">1.0</span>
+                    </div>
+                    <div class="setting-item">
+                        <label>发型</label>
+                        <select id="setting-hair-style">
+                            <option value="short">短发</option>
+                            <option value="long">长发</option>
+                            <option value="curly">卷发</option>
+                            <option value="ponytail">马尾</option>
+                            <option value="bald">光头</option>
+                            <option value="spiky">刺头</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label>发色</label>
+                        <input type="color" id="setting-hair-color" value="#333333">
+                    </div>
+                    <div class="setting-item">
+                        <label>衣服样式</label>
+                        <select id="setting-clothing-style">
+                            <option value="casual">休闲装</option>
+                            <option value="formal">正装</option>
+                            <option value="sporty">运动装</option>
+                            <option value="hoodie">卫衣</option>
+                            <option value="dress">连衣裙</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label>衣服颜色</label>
+                        <input type="color" id="setting-clothing-color" value="#3498db">
+                    </div>
+                    <div class="setting-item">
+                        <label>肤色</label>
+                        <input type="color" id="setting-skin-color" value="#f5d0c5">
+                    </div>
+                    <div class="setting-item">
+                        <label>眼睛颜色</label>
+                        <input type="color" id="setting-eye-color" value="#4a4a4a">
+                    </div>
+                    <div class="setting-item">
+                        <label>配饰</label>
+                        <div class="checkbox-group">
+                            <label><input type="checkbox" value="glasses"> 眼镜</label>
+                            <label><input type="checkbox" value="hat"> 帽子</label>
+                            <label><input type="checkbox" value="watch"> 手表</label>
+                            <label><input type="checkbox" value="earring"> 耳环</label>
+                            <label><input type="checkbox" value="necklace"> 项链</label>
+                            <label><input type="checkbox" value="backpack"> 背包</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 保存按钮 -->
+                <div class="settings-footer">
+                    <button id="save-settings-btn" class="btn primary-btn">保存设置</button>
+                    <button id="cancel-settings-btn" class="btn secondary-btn">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 聊天界面 -->
+    <div id="chat-overlay" class="overlay" style="display: none;">
+        <div class="overlay-content chat-panel">
+            <div class="chat-header">
+                <h2>💬 发送消息</h2>
+                <button id="close-chat-btn" class="close-btn">×</button>
+            </div>
+            <div class="chat-body">
+                <textarea id="chat-input" placeholder="输入消息内容..." maxlength="50"></textarea>
+                <div class="chat-buttons">
+                    <button id="send-chat-btn" class="btn primary-btn">发送</button>
+                    <button id="cancel-chat-btn" class="btn secondary-btn">取消聊天</button>
+                </div>
+                <small>消息显示在头顶，10秒后自动消失</small>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 加载提示 -->
+    <div id="loading-overlay" class="overlay" style="display: none;">
+        <div class="overlay-content">
+            <div class="loading-spinner"></div>
+            <p id="loading-text">加载中...</p>
+        </div>
+    </div>
+    
+    <!-- 加载脚本 -->
+    <script src="gist-manager.js"></script>
+    <script src="character.js"></script>
+    <script src="map.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
