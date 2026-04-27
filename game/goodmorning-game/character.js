@@ -136,16 +136,14 @@ class Character {
     setPosition(x, y, direction = null) {
         this.x = x;
         this.y = y;
-        // 如果是新角色或位置变化较大，直接设置display位置
-        if (this.displayX === 0 && this.displayY === 0) {
-            this.displayX = x;
-            this.displayY = y;
-        }
+        // 始终同步显示位置（修复：首次设置也要同步）
+        this.displayX = x;
+        this.displayY = y;
         if (direction) this.direction = direction;
         this.lastUpdate = Date.now();
     }
     
-    // 初始化显示位置
+    // 初始化显示位置（确保调用）
     initDisplayPosition() {
         this.displayX = this.x;
         this.displayY = this.y;

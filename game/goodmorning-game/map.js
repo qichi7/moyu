@@ -252,6 +252,11 @@ class MapManager {
     
     // 渲染地图（到主Canvas）
     render(ctx, camera) {
+        // 确保tiles已初始化
+        if (!this.tiles || this.tiles.length === 0) {
+            this.loadDefaultMap();
+        }
+        
         if (!this.prerendered || !this.offscreenCanvas) {
             // 如果没有预渲染，直接绘制
             this.renderDirect(ctx, camera);
@@ -270,6 +275,11 @@ class MapManager {
     
     // 直接渲染（备用）
     renderDirect(ctx, camera) {
+        // 如果tiles未初始化，先生成默认地图
+        if (!this.tiles || this.tiles.length === 0) {
+            this.loadDefaultMap();
+        }
+        
         // 计算可见区域
         const startX = Math.floor(camera.x / this.tileSize);
         const startY = Math.floor(camera.y / this.tileSize);

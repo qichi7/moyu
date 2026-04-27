@@ -97,8 +97,9 @@ class GistManager {
     }
     
     async _doReadStatus() {
-        if (!this.statusGistId) {
-            console.error('状态Gist ID未配置');
+        // 如果Gist ID为空，返回空数据（本地模式）
+        if (!this.statusGistId || this.statusGistId === '') {
+            console.log('状态Gist未配置，使用本地模式');
             return { players: {} };
         }
         
@@ -146,9 +147,10 @@ class GistManager {
     }
     
     async _doWriteStatus(name, status) {
-        if (!this.statusGistId) {
-            console.error('状态Gist ID未配置');
-            return false;
+        // 如果Gist ID为空，跳过写入（本地模式）
+        if (!this.statusGistId || this.statusGistId === '') {
+            console.log('状态Gist未配置，跳过写入（本地模式）');
+            return true; // 返回成功，但不实际写入
         }
         
         if (!this.token) {
@@ -223,8 +225,9 @@ class GistManager {
     }
     
     async _doReadPosition() {
-        if (!this.positionGistId) {
-            console.error('位置Gist ID未配置');
+        // 如果Gist ID为空，返回空数据（本地模式）
+        if (!this.positionGistId || this.positionGistId === '') {
+            console.log('位置Gist未配置，使用本地模式');
             return { positions: {} };
         }
         
@@ -272,9 +275,10 @@ class GistManager {
     }
     
     async _doWritePosition(name, position) {
-        if (!this.positionGistId) {
-            console.error('位置Gist ID未配置');
-            return false;
+        // 如果Gist ID为空，跳过写入（本地模式）
+        if (!this.positionGistId || this.positionGistId === '') {
+            console.log('位置Gist未配置，跳过写入（本地模式）');
+            return true; // 返回成功，但不实际写入
         }
         
         if (!this.token) {
@@ -349,8 +353,9 @@ class GistManager {
     }
     
     async _doReadMap() {
-        if (!this.mapGistId) {
-            console.error('地图Gist ID未配置');
+        // 如果Gist ID为空，直接返回默认地图（本地模式）
+        if (!this.mapGistId || this.mapGistId === '') {
+            console.log('地图Gist未配置，使用默认地图');
             return this.getDefaultMap();
         }
         

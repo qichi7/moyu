@@ -5,9 +5,10 @@
 
 class GoodMorningGame {
     // 硬编码的Gist ID（需要替换为实际的ID）
-    static STATUS_GIST_ID = 'your-status-gist-id';
-    static POSITION_GIST_ID = 'your-position-gist-id';
-    static MAP_GIST_ID = 'your-map-gist-id';
+    // 如果未配置，游戏将使用本地模式
+    static STATUS_GIST_ID = ''; // 空表示未配置
+    static POSITION_GIST_ID = '';
+    static MAP_GIST_ID = '';
     
     constructor() {
         // Canvas相关
@@ -60,9 +61,13 @@ class GoodMorningGame {
         this.characterManager = new CharacterManager(this);
         this.mapManager = new MapManager(this);
         
+        // 预加载默认地图（确保地图能显示）
+        this.mapManager.loadDefaultMap();
+        
         // 设置事件监听
         this.setupEventListeners();
         this.setupChatEnterKey();
+        this.setupDebugMode();
         
         // 显示登录界面
         this.showLoginOverlay();
@@ -567,11 +572,14 @@ class GoodMorningGame {
         this.isRunning = true;
         this.lastTime = 0;
         
+        // 预渲染默认地图（确保地图能显示）
+        this.mapManager.loadDefaultMap();
+        
+        // 尝试加载在线地图（如果已配置）
+        this.loadMap();
+        
         // 设置定时器
         this.setupTimers();
-        
-        // 加载地图
-        this.loadMap();
         
         // 开始游戏循环
         requestAnimationFrame((ts) => this.gameLoop(ts));
@@ -730,6 +738,34 @@ class GoodMorningGame {
         if (this.currentPlayer) {
             this.characterManager.renderCharacter(this.ctx, this.currentPlayer, this.camera, true);
         }
+        
+        // 调试信息（按F3显示）
+        if (this.showDebug) {
+            this.renderDebugInfo();
+        }
+    }
+    
+    // 调试信息渲染
+    renderDebugInfo() {
+        this.ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        this.ctx.fillRect(10, 10, 200, 100);
+        this.ctx.fillStyle = '#fff';
+        this.ctx.font = '12px Arial';
+        this.ctx.fillText(`玩家: ${this.playerName}`, 20, 30);
+        this.ctx.fillText(`位置: (${Math.round(this.currentPlayer?.x || 0)}, ${Math.round(this.currentPlayer?.y || 0)})`, 20, 50);
+        this.ctx.fillText(`相机: (${Math.round(this.camera.x)}, ${Math.round(this.camera.y)})`, 20, 70);
+        this.ctx.fillText(`地图预渲染: ${this.mapManager.prerendered}`, 20, 90);
+    }
+    
+    // F3键切换调试信息
+    setupDebugMode() {
+        this.showDebug = false;
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'F3') {
+                e.preventDefault();
+                this.showDebug = !this.showDebug;
+            }
+        });
     }
     
     // ========== 数据同步 ==========
