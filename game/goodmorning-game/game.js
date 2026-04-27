@@ -374,6 +374,12 @@ class GoodMorningGame {
         this.playerName = name;
         this.currentPlayer = this.characterManager.createCharacter(name);
         
+        // 设置初始位置在地图中央
+        const centerX = (this.mapManager.width * this.cellSize) / 2 || 800;
+        const centerY = (this.mapManager.height * this.cellSize) / 2 || 800;
+        this.currentPlayer.setPosition(centerX, centerY);
+        this.currentPlayer.initDisplayPosition();
+        
         // 写入初始状态和位置
         await this.gistManager.writeStatus(this.playerName, this.currentPlayer.getStatus());
         await this.gistManager.writePosition(this.playerName, this.currentPlayer.getPosition());
@@ -425,6 +431,7 @@ class GoodMorningGame {
         this.currentPlayer = this.characterManager.createCharacter(name);
         this.currentPlayer.setStatus(status);
         this.currentPlayer.setPosition(position.x, position.y, position.direction);
+        this.currentPlayer.initDisplayPosition();
         
         this.hideLoadingOverlay();
         this.showGameContainer();
@@ -601,44 +608,74 @@ class GoodMorningGame {
         const speed = 150; // 移动速度：150像素/秒
         let dx = 0, dy = 0;
         
-        // 轮盘控制
-        if (this.joystick.active) {
+        // 轮盘控制（优先）
+        if (this.joystick.active && (Math.abs(this.joystick.dx) > 0.1 || Math.abs(this.joystick.dy) > 0.1)) {
             dx = this.joystick.dx * speed * deltaTime / 1000;
             dy = this.joystick.dy * speed * deltaTime / 1000;
         }
         
-        // 键盘控制
-        if (this.keys.up) dy -= speed * deltaTime / 1000;
-        if (this.keys.down) dy += speed * deltaTime / 1000;
-        if (this.keys.left) dx -= speed * deltaTime / 1000;
-        if (this.keys.right) dx += speed * deltaTime / 1000;
+        // 键盘控制（轮盘未激活时）
+        if (!this.joystick.active || (Math.abs(this.joystick.dx) < 0.1 && Math.abs(this.joystick.dy) < 0.1)) {
+            if (this.keys.up) dy -= speed * deltaTime / 1000;
+            if (this.keys.down) dy += speed * deltaTime / 1000;
+            if (this.keys.left) dx -= speed * deltaTime / 1000;
+            if (this.keys.right) dx += speed * deltaTime / 1000;
+        }
         
         // 更新位置
         if (dx !== 0 || dy !== 0) {
             const newX = this.currentPlayer.x + dx;
             const newY = this.currentPlayer.y + dy;
             
-            // 碰撞检测
-            if (this.mapManager.isWalkable(newX, newY)) {
+            // 碰撞检测（检查四个角点）
+            const radius = 10; // 角色半径
+            const canMove = 
+                this.mapManager.isWalkable(newX - radius, newY - radius) &&
+                this.mapManager.isWalkable(newX + radius, newY - radius) &&
+                this.mapManager.isWalkable(newX - radius, newY + radius) &&
+                this.mapManager.isWalkable(newX + radius, newY + radius);
+            
+            if (canMove) {
+                // 更新逻辑位置
                 this.currentPlayer.setPosition(newX, newY);
                 this.currentPlayer.hasMoved = true;
                 
-                // 更新朝向
+                // 更新朝向（根据移动方向）
                 if (Math.abs(dx) > Math.abs(dy)) {
                     this.currentPlayer.direction = dx > 0 ? 'right' : 'left';
-                } else {
+                } else if (Math.abs(dy) > Math.abs(dx)) {
+                    this.currentPlayer.direction = dy > 0 ? 'down' : 'up';
+                }
+            } else {
+                // 碰撞时尝试滑动（沿墙滑动）
+                if (this.mapManager.isWalkable(newX, this.currentPlayer.y)) {
+                    this.currentPlayer.setPosition(newX, this.currentPlayer.y);
+                    this.currentPlayer.hasMoved = true;
+                    this.currentPlayer.direction = dx > 0 ? 'right' : 'left';
+                } else if (this.mapManager.isWalkable(this.currentPlayer.x, newY)) {
+                    this.currentPlayer.setPosition(this.currentPlayer.x, newY);
+                    this.currentPlayer.hasMoved = true;
                     this.currentPlayer.direction = dy > 0 ? 'down' : 'up';
                 }
             }
         }
+        
+        // 平滑更新显示位置
+        const smoothFactor = 0.3; // 平滑系数
+        this.currentPlayer.displayX += (this.currentPlayer.x - this.currentPlayer.displayX) * smoothFactor;
+        this.currentPlayer.displayY += (this.currentPlayer.y - this.currentPlayer.displayY) * smoothFactor;
     }
     
     updateCamera() {
         if (!this.currentPlayer) return;
         
+        // 使用显示位置实现平滑相机跟随
+        const renderX = this.currentPlayer.displayX || this.currentPlayer.x;
+        const renderY = this.currentPlayer.displayY || this.currentPlayer.y;
+        
         // 以当前玩家为中心
-        this.camera.x = this.currentPlayer.x - this.canvas.width / 2;
-        this.camera.y = this.currentPlayer.y - this.canvas.height / 2;
+        this.camera.x = renderX - this.canvas.width / 2;
+        this.camera.y = renderY - this.canvas.height / 2;
         
         // 限制相机边界
         const mapWidth = this.mapManager.width * this.cellSize;

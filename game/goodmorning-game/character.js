@@ -136,8 +136,19 @@ class Character {
     setPosition(x, y, direction = null) {
         this.x = x;
         this.y = y;
+        // 如果是新角色或位置变化较大，直接设置display位置
+        if (this.displayX === 0 && this.displayY === 0) {
+            this.displayX = x;
+            this.displayY = y;
+        }
         if (direction) this.direction = direction;
         this.lastUpdate = Date.now();
+    }
+    
+    // 初始化显示位置
+    initDisplayPosition() {
+        this.displayX = this.x;
+        this.displayY = this.y;
     }
     
     // 获取位置
@@ -202,16 +213,22 @@ class CharacterManager {
     // 更新其他玩家
     updateOtherPlayers(players, deltaTime) {
         players.forEach(player => {
-            // 平滑移动（可选）
-            // 这里简单直接显示，不做平滑插值
+            // 平滑移动：使用displayX/displayY
+            const smoothFactor = 0.2; // 平滑系数
+            player.displayX += (player.x - player.displayX) * smoothFactor;
+            player.displayY += (player.y - player.displayY) * smoothFactor;
         });
     }
     
     // 渲染角色
     renderCharacter(ctx, character, camera, isCurrentPlayer) {
+        // 使用displayX/displayY实现平滑移动
+        const renderX = character.displayX || character.x;
+        const renderY = character.displayY || character.y;
+        
         // 计算屏幕位置
-        const screenX = character.x - camera.x;
-        const screenY = character.y - camera.y;
+        const screenX = renderX - camera.x;
+        const screenY = renderY - camera.y;
         
         // 检查是否在视口内
         if (screenX < -50 || screenX > ctx.canvas.width + 50 ||
