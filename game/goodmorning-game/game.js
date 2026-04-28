@@ -425,26 +425,38 @@ class GoodMorningGame {
         
         this.showLoadingOverlay('创建角色...');
         
-        // 设置Token
-        this.gistManager.setToken(token);
-        
-        // 创建角色
-        this.playerName = name;
-        this.currentPlayer = this.characterManager.createCharacter(name);
-        
-        // 设置初始位置在地图中央
-        const centerX = (this.mapManager.width * this.cellSize) / 2 || 800;
-        const centerY = (this.mapManager.height * this.cellSize) / 2 || 800;
-        this.currentPlayer.setPosition(centerX, centerY);
-        this.currentPlayer.initDisplayPosition();
-        
-        // 写入初始状态和位置
-        await this.gistManager.writeStatus(this.playerName, this.currentPlayer.getStatus());
-        await this.gistManager.writePosition(this.playerName, this.currentPlayer.getPosition());
-        
-        this.hideLoadingOverlay();
-        this.showGameContainer();
-        this.startGame();
+        try {
+            // 设置Token
+            this.gistManager.setToken(token);
+            
+            // 创建角色
+            this.playerName = name;
+            this.currentPlayer = this.characterManager.createCharacter(name);
+            
+            // 设置初始位置在地图中央
+            const centerX = (this.mapManager.width * this.cellSize) / 2 || 800;
+            const centerY = (this.mapManager.height * this.cellSize) / 2 || 800;
+            this.currentPlayer.setPosition(centerX, centerY);
+            this.currentPlayer.initDisplayPosition();
+            
+            // 写入初始状态和位置
+            const statusResult = await this.gistManager.writeStatus(this.playerName, this.currentPlayer.getStatus());
+            const positionResult = await this.gistManager.writePosition(this.playerName, this.currentPlayer.getPosition());
+            
+            if (!statusResult || !positionResult) {
+                this.hideLoadingOverlay();
+                this.showToast('创建角色失败，请检查Token权限', 'error');
+                return;
+            }
+            
+            this.hideLoadingOverlay();
+            this.showGameContainer();
+            this.startGame();
+        } catch (error) {
+            console.error('创建角色异常:', error);
+            this.hideLoadingOverlay();
+            this.showToast('创建角色失败：' + error.message, 'error');
+        }
     }
     
     async handleSelectCharacter() {
@@ -761,12 +773,6 @@ render() {
             this.characterManager.renderCharacter(this.ctx, this.currentPlayer, this.camera, true, time);
         }
         
-        if (this.showDebug) {
-            this.renderDebugInfo();
-        }
-    }
-        
-        // 调试信息（按F3显示）
         if (this.showDebug) {
             this.renderDebugInfo();
         }
