@@ -162,6 +162,7 @@ class GoodMorningGame {
             this.joystick.active = true;
             base.classList.add('dragging');
             stick.style.animation = 'none';
+            stick.style.transition = 'none'; // 禁用transition，防止延迟跑出轮盘
             e.preventDefault();
         };
         
@@ -220,6 +221,7 @@ class GoodMorningGame {
             this.joystick.dy = 0;
             base.classList.remove('dragging');
             stick.classList.remove('active');
+            stick.style.transition = 'transform 0.15s cubic-bezier(0.68, -0.55, 0.265, 1.55)'; // 恢复transition
             stick.style.transform = 'translate(-50%, -50%)';
             stick.style.filter = '';
             stick.style.animation = 'stick-bounce 2s ease-in-out infinite';

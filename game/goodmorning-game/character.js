@@ -134,15 +134,19 @@ class Character {
     setPosition(x, y, direction = null) {
         this.x = x;
         this.y = y;
-        this.displayX = x;
-        this.displayY = y;
+        // 不重置displayX/displayY，保持平滑移动效果
         if (direction) this.direction = direction;
         this.lastUpdate = Date.now();
     }
     
-    initDisplayPosition() {
+    // 强制同步显示位置（用于初始化或特殊场景）
+    syncDisplayPosition() {
         this.displayX = this.x;
         this.displayY = this.y;
+    }
+    
+    initDisplayPosition() {
+        this.syncDisplayPosition();
     }
     
     getPosition() {
