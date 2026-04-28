@@ -360,12 +360,12 @@ class GoodMorningGame {
             document.getElementById('setting-gender').value = this.currentPlayer.gender;
             document.getElementById('setting-height').value = this.currentPlayer.height;
             document.getElementById('height-value').textContent = this.currentPlayer.height;
-            document.getElementById('setting-hair-style').value = this.currentPlayer.hairStyle;
-            document.getElementById('setting-hair-color').value = this.currentPlayer.hairColor;
-            document.getElementById('setting-clothing-style').value = this.currentPlayer.clothingStyle;
-            document.getElementById('setting-clothing-color').value = this.currentPlayer.clothingColor;
-            document.getElementById('setting-skin-color').value = this.currentPlayer.skinColor;
-            document.getElementById('setting-eye-color').value = this.currentPlayer.eyeColor;
+            document.getElementById('setting-hairStyle').value = this.currentPlayer.hairStyle;
+            document.getElementById('setting-hairColor').value = this.currentPlayer.hairColor;
+            document.getElementById('setting-clothingStyle').value = this.currentPlayer.clothingStyle;
+            document.getElementById('setting-clothingColor').value = this.currentPlayer.clothingColor;
+            document.getElementById('setting-skinColor').value = this.currentPlayer.skinColor;
+            document.getElementById('setting-eyeColor').value = this.currentPlayer.eyeColor;
             
             // 配饰复选框
             const checkboxes = document.querySelectorAll('.checkbox-group input[type="checkbox"]');
@@ -531,12 +531,12 @@ class GoodMorningGame {
         const newStatus = {
             gender: document.getElementById('setting-gender').value,
             height: parseFloat(document.getElementById('setting-height').value),
-            hairStyle: document.getElementById('setting-hair-style').value,
-            hairColor: document.getElementById('setting-hair-color').value,
-            clothingStyle: document.getElementById('setting-clothing-style').value,
-            clothingColor: document.getElementById('setting-clothing-color').value,
-            skinColor: document.getElementById('setting-skin-color').value,
-            eyeColor: document.getElementById('setting-eye-color').value,
+            hairStyle: document.getElementById('setting-hairStyle').value,
+            hairColor: document.getElementById('setting-hairColor').value,
+            clothingStyle: document.getElementById('setting-clothingStyle').value,
+            clothingColor: document.getElementById('setting-clothingColor').value,
+            skinColor: document.getElementById('setting-skinColor').value,
+            eyeColor: document.getElementById('setting-eyeColor').value,
             accessories: []
         };
         
