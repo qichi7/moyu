@@ -931,29 +931,31 @@ render() {
         
         if (!positionData.positions) return;
         
+        const now = Date.now();
+        
         Object.keys(positionData.positions).forEach(name => {
             if (name === this.playerName) return; // 跳过自己
             
             const pos = positionData.positions[name];
-            const now = Date.now();
             
-            // 检查是否过期（10秒未更新）
-            if (now - pos.lastUpdate > 10000) {
-                this.otherPlayers.delete(name);
-                return;
-            }
-            
-            // 更新或创建其他玩家
+            // 创建或获取角色（不再删除离线角色）
             if (!this.otherPlayers.has(name)) {
                 this.otherPlayers.set(name, this.characterManager.createCharacter(name));
             }
             
             const player = this.otherPlayers.get(name);
+            
+            // 判断在线状态：10秒内更新视为在线
+            const isOnline = (now - pos.lastUpdate) < 10000;
+            player.isOnline = isOnline;
+            
+            // 更新位置
             player.setPosition(pos.x, pos.y, pos.direction);
         });
         
-        // 更新在线人数
-        document.getElementById('player-count').textContent = `在线: ${this.otherPlayers.size + 1}`;
+        // 统计在线人数
+        const onlineCount = Array.from(this.otherPlayers.values()).filter(p => p.isOnline).length + 1;
+        document.getElementById('player-count').textContent = `在线: ${onlineCount}`;
     }
     
     async syncOtherPlayersStatus() {

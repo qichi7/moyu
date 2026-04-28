@@ -88,6 +88,9 @@ class Character {
         this.loginTime = DEFAULT_STATUS.loginTime;
         this.sessionId = DEFAULT_STATUS.sessionId;
         
+        // 在线状态（用于显示，由位置同步更新）
+        this.isOnline = true;
+        
         this.blinkTimer = 0;
         this.isBlinking = false;
         this.blinkTimeout = null;
@@ -304,9 +307,21 @@ class CharacterManager {
         
         const breatheOffset = Math.sin(character.breathePhase || 0) * 1.5;
         
+        // 离线角色半透明渲染
+        const isOnline = character.isOnline !== false;
+        const originalAlpha = ctx.globalAlpha;
+        if (!isOnline && !isCurrentPlayer) {
+            ctx.globalAlpha = 0.5;
+        }
+        
         this.drawCharacterBody(ctx, screenX, screenY + breatheOffset, width, height, character, isCurrentPlayer, time);
         
-        this.drawName(ctx, screenX, screenY + height / 2 + 15 + breatheOffset, character.name, isCurrentPlayer);
+        // 恢复透明度
+        ctx.globalAlpha = originalAlpha;
+        
+        // 名字显示（离线角色添加"离线"标签）
+        const displayName = isOnline ? character.name : `${character.name} (离线)`;
+        this.drawName(ctx, screenX, screenY + height / 2 + 15 + breatheOffset, displayName, isCurrentPlayer, isOnline);
         
         if (character.hasChat()) {
             this.drawChatBubble(ctx, screenX, screenY - height / 2 - 40 + breatheOffset, character.chatMessage);
@@ -1247,7 +1262,7 @@ class CharacterManager {
         ctx.stroke();
     }
     
-    drawName(ctx, x, y, name, isCurrentPlayer) {
+    drawName(ctx, x, y, name, isCurrentPlayer, isOnline = true) {
         ctx.font = 'bold 16px "Comic Sans MS", cursive';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -1278,17 +1293,33 @@ class CharacterManager {
             ctx.fillStyle = '#5D4037';
             ctx.fillText(name, x, y);
         } else {
-            ctx.fillStyle = 'rgba(77,150,255,0.85)';
-            ctx.beginPath();
-            ctx.roundRect(x - bgWidth / 2, y - bgHeight / 2, bgWidth, bgHeight, 13);
-            ctx.fill();
-            
-            ctx.strokeStyle = '#6BCB77';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            
-            ctx.fillStyle = '#FFFACD';
-            ctx.fillText(name, x, y);
+            // 在线角色和离线角色使用不同颜色
+            if (isOnline) {
+                ctx.fillStyle = 'rgba(77,150,255,0.85)';
+                ctx.beginPath();
+                ctx.roundRect(x - bgWidth / 2, y - bgHeight / 2, bgWidth, bgHeight, 13);
+                ctx.fill();
+                
+                ctx.strokeStyle = '#6BCB77';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                ctx.fillStyle = '#FFFACD';
+                ctx.fillText(name, x, y);
+            } else {
+                // 离线角色使用灰色背景
+                ctx.fillStyle = 'rgba(128,128,128,0.7)';
+                ctx.beginPath();
+                ctx.roundRect(x - bgWidth / 2, y - bgHeight / 2, bgWidth, bgHeight, 13);
+                ctx.fill();
+                
+                ctx.strokeStyle = 'rgba(80,80,80,0.8)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                ctx.fillStyle = '#FFFACD';
+                ctx.fillText(name, x, y);
+            }
         }
     }
     
