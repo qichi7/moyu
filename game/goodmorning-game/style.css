@@ -1484,6 +1484,15 @@ h2 {
         bottom: 5px;
     }
     
+    .sun-eye-left { left: 5px; }
+    .sun-eye-right { right: 5px; }
+    
+    .sun-mouth {
+        width: 9px;
+        height: 4px;
+        bottom: 5px;
+    }
+    
     .sun-eye-left { left: 4px; }
     .sun-eye-right { right: 4px; }
     
