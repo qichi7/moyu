@@ -154,6 +154,17 @@ class GoodMorningGame {
         
         if (!base || !stick) return;
         
+        // 检查元素是否可见
+        const rect = base.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) {
+            // 元素不可见，稍后再设置
+            return;
+        }
+        
+        // 防止重复绑定事件
+        if (this.joystickSetupComplete) return;
+        this.joystickSetupComplete = true;
+        
         let isDragging = false;
         const maxDistance = 40;
         
@@ -350,6 +361,9 @@ class GoodMorningGame {
         
         // 更新玩家信息显示
         document.getElementById('current-player-name').textContent = this.playerName;
+        
+        // 重新设置轮盘（因为元素之前隐藏，getBoundingClientRect返回无效值）
+        this.setupJoystick();
     }
     
     showSettingsOverlay() {
