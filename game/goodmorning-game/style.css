@@ -720,24 +720,6 @@ body {
     transform: translateY(-3px) scale(1.04);
 }
 
-/* 禁用创建角色按钮的悬停动画 */
-#create-character-btn {
-    animation: none;
-}
-
-#create-character-btn::before,
-#create-character-btn::after {
-    display: none;
-}
-
-#create-character-btn:hover {
-    transform: none;
-}
-
-#create-character-btn:hover .btn-icon {
-    transform: none;
-}
-
 .secondary-btn {
     background: linear-gradient(145deg, #6BCB77 0%, #4D96FF 50%, #4a90d9 100%);
     color: #FFFACD;
