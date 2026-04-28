@@ -362,8 +362,12 @@ class GoodMorningGame {
         // 更新玩家信息显示
         document.getElementById('current-player-name').textContent = this.playerName;
         
-        // 重新设置轮盘（因为元素之前隐藏，getBoundingClientRect返回无效值）
-        this.setupJoystick();
+        // 延迟设置轮盘（等待浏览器渲染完成）
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                this.setupJoystick();
+            });
+        });
     }
     
     showSettingsOverlay() {
