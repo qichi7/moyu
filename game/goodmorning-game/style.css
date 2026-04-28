@@ -351,6 +351,7 @@ body {
     background: radial-gradient(circle, #FFD93D 0%, #FF8C32 50%, #FF6B6B 100%);
     border-radius: 50%;
     box-shadow: 0 0 30px rgba(255,217,61,0.7), 0 0 60px rgba(255,140,50,0.4);
+    z-index: 5;
 }
 
 .sun-ray {
@@ -363,6 +364,7 @@ body {
     border-radius: 3px;
     transform-origin: center bottom;
     animation: sun-rotate 20s linear infinite;
+    z-index: 1;
 }
 
 .ray-1 { transform: translate(-50%, -100%) rotate(0deg); animation-delay: 0s; }
@@ -381,20 +383,22 @@ body {
     transform: translate(-50%, -50%);
     width: 35px;
     height: 35px;
+    /* 确保脸和阳光在同一中心 */
+    z-index: 10;
 }
 
 .sun-eye {
     position: absolute;
-    top: 9px;
+    top: 8px;
     width: 6px;
-    height: 7px;
+    height: 6px;
     background: #5D4037;
     border-radius: 50%;
     animation: blink 4s ease-in-out infinite;
 }
 
-.sun-eye-left { left: 6px; }
-.sun-eye-right { right: 6px; }
+.sun-eye-left { left: 7px; }
+.sun-eye-right { right: 7px; }
 
 .sun-eye::after {
     content: '';
@@ -414,13 +418,13 @@ body {
 
 .sun-mouth {
     position: absolute;
-    bottom: 8px;
+    bottom: 7px;
     left: 50%;
     transform: translateX(-50%);
-    width: 15px;
-    height: 8px;
+    width: 12px;
+    height: 6px;
     background: #FF6B6B;
-    border-radius: 0 0 10px 10px;
+    border-radius: 0 0 8px 8px;
 }
 
 .game-title {
@@ -1465,10 +1469,19 @@ h2 {
         height: 25px;
     }
     
-    .sun-eye {
+.sun-eye {
         width: 4px;
         height: 5px;
-        top: 7px;
+        top: 6px;
+    }
+    
+    .sun-eye-left { left: 5px; }
+    .sun-eye-right { right: 5px; }
+    
+    .sun-mouth {
+        width: 9px;
+        height: 4px;
+        bottom: 5px;
     }
     
     .sun-eye-left { left: 4px; }
