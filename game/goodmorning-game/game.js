@@ -491,18 +491,34 @@ class GoodMorningGame {
         
         this.gistManager.setToken(token);
         
-        // 获取所有角色
-        const statusData = await this.gistManager.readStatus();
-        const characters = Object.keys(statusData.players || {});
-        
-        this.hideLoadingOverlay();
-        
-        if (characters.length === 0) {
-            this.showToast('没有找到已存在的角色，请创建新角色', 'info');
-            return;
+        try {
+            // 获取所有角色
+            const statusData = await this.gistManager.readStatus();
+            
+            console.log('statusData:', statusData);
+            
+            if (!statusData || !statusData.players) {
+                this.hideLoadingOverlay();
+                this.showToast('获取角色列表失败，请检查网络连接', 'error');
+                return;
+            }
+            
+            const characters = Object.keys(statusData.players || {});
+            console.log('角色列表:', characters);
+            
+            this.hideLoadingOverlay();
+            
+            if (characters.length === 0) {
+                this.showToast('没有找到已存在的角色，请创建新角色', 'info');
+                return;
+            }
+            
+            this.showCharacterSelectOverlay(characters);
+        } catch (error) {
+            console.error('获取角色列表异常:', error);
+            this.hideLoadingOverlay();
+            this.showToast('获取角色列表失败：' + error.message, 'error');
         }
-        
-        this.showCharacterSelectOverlay(characters);
     }
     
     async selectCharacter(name) {

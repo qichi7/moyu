@@ -20,12 +20,15 @@ class GistManager {
         this.positionFilename = 'position-gist.json';
         this.mapFilename = 'map-gist.json';
         
-        // 缓存
+        // 缓存（分离缓存时间，避免共享导致的问题）
         this.statusCache = null;
         this.positionCache = null;
         this.mapCache = null;
-        this.cacheTime = 0;
+        this.statusCacheTime = 0;
+        this.positionCacheTime = 0;
+        this.mapCacheTime = 0;
         this.cacheExpire = 100; // 100ms缓存过期（高频刷新场景）
+        this.mapCacheExpire = 5000; // 地图缓存5秒
         
         // 请求节流
         this.lastRequestTime = 0;
@@ -77,9 +80,10 @@ class GistManager {
         const pending = await this.checkPendingRequest(key);
         if (pending) return pending;
         
-        // 检查缓存
+        // 检查缓存（使用独立的缓存时间）
         const now = Date.now();
-        if (this.statusCache && (now - this.cacheTime) < this.cacheExpire) {
+        if (this.statusCache && (now - this.statusCacheTime) < this.cacheExpire) {
+            console.log('使用status缓存');
             return this.statusCache;
         }
         
@@ -89,7 +93,8 @@ class GistManager {
         try {
             const result = await request;
             this.statusCache = result;
-            this.cacheTime = now;
+            this.statusCacheTime = now;
+            console.log('读取status结果:', result);
             return result;
         } finally {
             this.pendingRequests.delete(key);
@@ -205,9 +210,10 @@ class GistManager {
         const pending = await this.checkPendingRequest(key);
         if (pending) return pending;
         
-        // 检查缓存
+        // 检查缓存（使用独立的缓存时间）
         const now = Date.now();
-        if (this.positionCache && (now - this.cacheTime) < this.cacheExpire) {
+        if (this.positionCache && (now - this.positionCacheTime) < this.cacheExpire) {
+            console.log('使用position缓存');
             return this.positionCache;
         }
         
@@ -217,7 +223,8 @@ class GistManager {
         try {
             const result = await request;
             this.positionCache = result;
-            this.cacheTime = now;
+            this.positionCacheTime = now;
+            console.log('读取position结果:', result);
             return result;
         } finally {
             this.pendingRequests.delete(key);
@@ -333,9 +340,10 @@ class GistManager {
         const pending = await this.checkPendingRequest(key);
         if (pending) return pending;
         
-        // 检查缓存
+        // 检查缓存（使用独立的缓存时间，地图缓存更长）
         const now = Date.now();
-        if (this.mapCache && (now - this.cacheTime) < 5000) { // 地图缓存5秒
+        if (this.mapCache && (now - this.mapCacheTime) < this.mapCacheExpire) {
+            console.log('使用map缓存');
             return this.mapCache;
         }
         
@@ -345,7 +353,7 @@ class GistManager {
         try {
             const result = await request;
             this.mapCache = result;
-            this.cacheTime = now;
+            this.mapCacheTime = now;
             return result;
         } finally {
             this.pendingRequests.delete(key);
