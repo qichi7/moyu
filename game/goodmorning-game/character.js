@@ -10,7 +10,10 @@ const DEFAULT_STATUS = {
     accessories: [],
     chatMessage: '',
     chatExpiry: 0,
-    lastUpdate: Date.now()
+    lastUpdate: Date.now(),
+    isLoggedIn: false,      // 是否在线
+    loginTime: 0,           // 登录时间
+    sessionId: ''           // 会话ID（防止重复登录）
 };
 
 const DEFAULT_POSITION = {
@@ -35,7 +38,10 @@ function getStatusWithDefaults(status) {
         accessories: Array.isArray(status.accessories) ? status.accessories : DEFAULT_STATUS.accessories,
         chatMessage: status.chatMessage || DEFAULT_STATUS.chatMessage,
         chatExpiry: status.chatExpiry || DEFAULT_STATUS.chatExpiry,
-        lastUpdate: status.lastUpdate || Date.now()
+        lastUpdate: status.lastUpdate || Date.now(),
+        isLoggedIn: status.isLoggedIn || DEFAULT_STATUS.isLoggedIn,
+        loginTime: status.loginTime || DEFAULT_STATUS.loginTime,
+        sessionId: status.sessionId || DEFAULT_STATUS.sessionId
     };
 }
 
@@ -77,10 +83,35 @@ class Character {
         this.hasMoved = false;
         this.lastUpdate = Date.now();
         
+        // 登录状态
+        this.isLoggedIn = DEFAULT_STATUS.isLoggedIn;
+        this.loginTime = DEFAULT_STATUS.loginTime;
+        this.sessionId = DEFAULT_STATUS.sessionId;
+        
         this.blinkTimer = 0;
         this.isBlinking = false;
         this.blinkTimeout = null;
         this.breathePhase = 0;
+    }
+    
+    // 生成唯一会话ID
+    generateSessionId() {
+        return `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+    }
+    
+    // 设置登录状态
+    setLoggedIn(sessionId) {
+        this.isLoggedIn = true;
+        this.loginTime = Date.now();
+        this.sessionId = sessionId || this.generateSessionId();
+        this.lastUpdate = Date.now();
+    }
+    
+    // 设置离线状态
+    setOffline() {
+        this.isLoggedIn = false;
+        this.sessionId = '';
+        this.lastUpdate = Date.now();
     }
     
     destroy() {
@@ -107,6 +138,11 @@ class Character {
         this.eyeColor = fullStatus.eyeColor;
         this.accessories = fullStatus.accessories;
         
+        // 登录状态（不覆盖当前玩家的登录状态）
+        this.isLoggedIn = fullStatus.isLoggedIn;
+        this.loginTime = fullStatus.loginTime;
+        this.sessionId = fullStatus.sessionId;
+        
         if (fullStatus.chatMessage && fullStatus.chatExpiry > Date.now()) {
             this.setChat(fullStatus.chatMessage, fullStatus.chatExpiry - Date.now());
         }
@@ -127,7 +163,10 @@ class Character {
             accessories: this.accessories,
             chatMessage: this.chatMessage,
             chatExpiry: this.chatExpiry,
-            lastUpdate: this.lastUpdate
+            lastUpdate: this.lastUpdate,
+            isLoggedIn: this.isLoggedIn,
+            loginTime: this.loginTime,
+            sessionId: this.sessionId
         };
     }
     

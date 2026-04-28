@@ -429,6 +429,15 @@ class GoodMorningGame {
     
     // ========== 登录流程 ==========
     
+    // 检查角色是否在线（30秒内活跃视为在线）
+    isCharacterOnline(status) {
+        if (!status) return false;
+        const now = Date.now();
+        const lastUpdate = status.lastUpdate || 0;
+        // 如果isLoggedIn为true且lastUpdate在30秒内，视为在线
+        return status.isLoggedIn === true && (now - lastUpdate) < 30000;
+    }
+    
     async handleCreateCharacter() {
         const token = document.getElementById('gist-token').value.trim();
         const name = document.getElementById('player-name').value.trim();
@@ -449,6 +458,20 @@ class GoodMorningGame {
             // 设置Token
             this.gistManager.setToken(token);
             
+            // 先检查角色是否已存在且在线
+            const statusData = await this.gistManager.readStatus();
+            const existingStatus = statusData.players?.[name];
+            
+            if (existingStatus && this.isCharacterOnline(existingStatus)) {
+                this.hideLoadingOverlay();
+                this.showToast(`角色"${name}"正在游戏中，请选择其他角色或稍后再试`, 'warning');
+                return;
+            }
+            
+            // 生成会话ID
+            const sessionId = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+            this.sessionId = sessionId;
+            
             // 创建角色
             this.playerName = name;
             this.currentPlayer = this.characterManager.createCharacter(name);
@@ -459,6 +482,9 @@ class GoodMorningGame {
             this.currentPlayer.setPosition(centerX, centerY);
             this.currentPlayer.initDisplayPosition();
             
+            // 设置登录状态
+            this.currentPlayer.setLoggedIn(sessionId);
+            
             // 写入初始状态和位置
             const statusResult = await this.gistManager.writeStatus(this.playerName, this.currentPlayer.getStatus());
             const positionResult = await this.gistManager.writePosition(this.playerName, this.currentPlayer.getPosition());
@@ -468,6 +494,9 @@ class GoodMorningGame {
                 this.showToast('创建角色失败，请检查Token权限', 'error');
                 return;
             }
+            
+            // 设置退出登录处理
+            this.setupLogoutHandler();
             
             this.hideLoadingOverlay();
             this.showGameContainer();
@@ -524,24 +553,82 @@ class GoodMorningGame {
     async selectCharacter(name) {
         this.showLoadingOverlay('加载角色...');
         
-        this.playerName = name;
+        try {
+            // 获取角色状态和位置
+            const statusData = await this.gistManager.readStatus();
+            const positionData = await this.gistManager.readPosition();
+            
+            const status = statusData.players?.[name] || {};
+            const position = positionData.positions?.[name] || { x: 100, y: 100, direction: 'down' };
+            
+            // 检查角色是否在线
+            if (this.isCharacterOnline(status)) {
+                this.hideLoadingOverlay();
+                this.showToast(`角色"${name}"正在游戏中，请选择其他角色或稍后再试`, 'warning');
+                return;
+            }
+            
+            this.playerName = name;
+            
+            // 生成会话ID
+            const sessionId = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+            this.sessionId = sessionId;
+            
+            // 创建角色并设置状态
+            this.currentPlayer = this.characterManager.createCharacter(name);
+            this.currentPlayer.setStatus(status);
+            this.currentPlayer.setPosition(position.x, position.y, position.direction);
+            this.currentPlayer.initDisplayPosition();
+            
+            // 设置登录状态
+            this.currentPlayer.setLoggedIn(sessionId);
+            
+            // 写入登录状态
+            await this.gistManager.writeStatus(this.playerName, this.currentPlayer.getStatus());
+            
+            // 设置退出登录处理
+            this.setupLogoutHandler();
+            
+            this.hideLoadingOverlay();
+            this.showGameContainer();
+            this.startGame();
+        } catch (error) {
+            console.error('加载角色异常:', error);
+            this.hideLoadingOverlay();
+            this.showToast('加载角色失败：' + error.message, 'error');
+        }
+    }
+    
+    // 设置退出登录处理
+    setupLogoutHandler() {
+        // 移除旧的处理函数（如果存在）
+        if (this.logoutHandler) {
+            window.removeEventListener('beforeunload', this.logoutHandler);
+        }
         
-        // 获取角色状态和位置
-        const statusData = await this.gistManager.readStatus();
-        const positionData = await this.gistManager.readPosition();
+        // 创建新的处理函数
+        this.logoutHandler = async () => {
+            if (this.currentPlayer) {
+                this.currentPlayer.setOffline();
+                // 尝试写入离线状态（注意：beforeunload中异步请求可能无法完成）
+                // 使用同步方式标记
+                try {
+                    await this.gistManager.writeStatus(this.playerName, this.currentPlayer.getStatus());
+                } catch (e) {
+                    console.log('退出登录写入失败（正常情况）');
+                }
+            }
+        };
         
-        const status = statusData.players?.[name] || {};
-        const position = positionData.positions?.[name] || { x: 100, y: 100, direction: 'down' };
+        window.addEventListener('beforeunload', this.logoutHandler);
         
-        // 创建角色并设置状态
-        this.currentPlayer = this.characterManager.createCharacter(name);
-        this.currentPlayer.setStatus(status);
-        this.currentPlayer.setPosition(position.x, position.y, position.direction);
-        this.currentPlayer.initDisplayPosition();
-        
-        this.hideLoadingOverlay();
-        this.showGameContainer();
-        this.startGame();
+        // 页面隐藏时也标记离线
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden' && this.currentPlayer) {
+                this.currentPlayer.setOffline();
+                this.gistManager.writeStatus(this.playerName, this.currentPlayer.getStatus());
+            }
+        });
     }
     
     // ========== 设置保存 ==========
