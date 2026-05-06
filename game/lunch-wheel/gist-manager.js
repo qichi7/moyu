@@ -4,15 +4,34 @@
  */
 
 class GistManager {
-    static GIST_ID = '8db89a5ec373b9e93642971d839a8e49';
-    
+    static STORAGE_KEY = 'lunch-wheel:gist-id';
+    static GIST_ID_PATTERN = /^[a-f0-9]{20,40}$/i;
+
+    static getGistId() {
+        return localStorage.getItem(GistManager.STORAGE_KEY) || '';
+    }
+
+    static setGistId(id) {
+        if (!GistManager.GIST_ID_PATTERN.test(id)) return false;
+        localStorage.setItem(GistManager.STORAGE_KEY, id);
+        return true;
+    }
+
     constructor() {
         this.filename = 'lunch-options.json';
         this.cache = null;
         this.cacheTime = 0;
         this.cacheExpire = 5000; // 5秒缓存
     }
-    
+
+    get gistId() {
+        return GistManager.getGistId();
+    }
+
+    isConfigured() {
+        return GistManager.GIST_ID_PATTERN.test(this.gistId);
+    }
+
     // 清除缓存（用于刷新数据）
     clearCache() {
         this.cache = null;
@@ -21,8 +40,13 @@ class GistManager {
     
     // 读取数据
     async readData() {
+        if (!this.isConfigured()) {
+            console.warn('Gist ID 未配置');
+            return { options: [], history: [] };
+        }
+
         const now = Date.now();
-        
+
         // 只有在缓存有效且未被清除时才使用缓存
         if (this.cache && this.cacheTime > 0 && (now - this.cacheTime) < this.cacheExpire) {
             console.log('使用缓存数据');
@@ -32,7 +56,7 @@ class GistManager {
         console.log('从Gist读取最新数据...');
         
         try {
-            const apiUrl = `https://api.github.com/gists/${GistManager.GIST_ID}`;
+            const apiUrl = `https://api.github.com/gists/${this.gistId}`;
             const response = await fetch(apiUrl);
             
             if (!response.ok) {
@@ -85,11 +109,16 @@ class GistManager {
     
     // 写入数据（需要Token）
     async writeData(data, token) {
+        if (!this.isConfigured()) {
+            console.error('Gist ID 未配置，无法写入');
+            return false;
+        }
+
         if (!token) {
             console.error('需要Token才能写入');
             return false;
         }
-        
+
         // 验证数据格式
         if (!data || !Array.isArray(data.options) || !Array.isArray(data.history)) {
             console.error('数据格式无效，拒绝写入');
@@ -97,7 +126,7 @@ class GistManager {
         }
         
         try {
-            const apiUrl = `https://api.github.com/gists/${GistManager.GIST_ID}`;
+            const apiUrl = `https://api.github.com/gists/${this.gistId}`;
             const response = await fetch(apiUrl, {
                 method: 'PATCH',
                 headers: {

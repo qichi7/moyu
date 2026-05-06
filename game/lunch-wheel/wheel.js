@@ -19,20 +19,27 @@ class LunchWheel {
     }
     
     async init() {
+        // 绑定事件（先于异步加载，避免设置入口不可用）
+        this.bindEvents();
+
+        // 未配置 Gist ID 时引导用户配置
+        if (!this.gistManager.isConfigured()) {
+            this.drawWheel();
+            this.showConfigOverlay();
+            return;
+        }
+
         // 清除缓存，确保每次打开/刷新都从gist重新读取
         this.gistManager.clearCache();
-        
+
         // 加载选项
         await this.loadOptions();
-        
+
         // 绘制轮盘
         this.drawWheel();
-        
+
         // 加载并显示历史记录
         await this.updateHistoryDisplay();
-        
-        // 绑定事件
-        this.bindEvents();
     }
     
     async loadOptions() {
@@ -220,6 +227,51 @@ class LunchWheel {
             this.hideResult();
             this.showRecordWithSelected();
         });
+
+        // 设置入口
+        document.getElementById('settings-btn').addEventListener('click', () => {
+            this.showConfigOverlay();
+        });
+
+        document.getElementById('submit-gist-id').addEventListener('click', () => {
+            this.submitGistId();
+        });
+
+        document.getElementById('cancel-gist-id').addEventListener('click', () => {
+            // 未配置时不允许直接关闭（否则界面无法工作）
+            if (!this.gistManager.isConfigured()) {
+                alert('需要配置 Gist ID 才能使用');
+                return;
+            }
+            this.hideConfigOverlay();
+        });
+    }
+
+    showConfigOverlay() {
+        const input = document.getElementById('gist-id-input');
+        input.value = this.gistManager.gistId || '';
+        document.getElementById('config-overlay').style.display = 'flex';
+        input.focus();
+    }
+
+    hideConfigOverlay() {
+        document.getElementById('config-overlay').style.display = 'none';
+    }
+
+    async submitGistId() {
+        const id = document.getElementById('gist-id-input').value.trim();
+        if (!GistManager.GIST_ID_PATTERN.test(id)) {
+            alert('Gist ID 格式无效（应为 20-40 位的十六进制字符）');
+            return;
+        }
+        const ok = GistManager.setGistId(id);
+        if (!ok) {
+            alert('保存失败');
+            return;
+        }
+        this.gistManager.clearCache();
+        this.hideConfigOverlay();
+        await this.refreshAll();
     }
     
     async spin() {
