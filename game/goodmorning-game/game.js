@@ -860,6 +860,7 @@ class GoodMorningGame {
         if (this.joystick.active && (Math.abs(this.joystick.dx) > 0.1 || Math.abs(this.joystick.dy) > 0.1)) {
             dx = this.joystick.dx * speed * deltaTime / 1000;
             dy = this.joystick.dy * speed * deltaTime / 1000;
+            console.log('轮盘移动:', { dx, dy, joystickDx: this.joystick.dx, joystickDy: this.joystick.dy, deltaTime });
         }
         
         // 键盘控制（轮盘未激活时）
@@ -868,6 +869,9 @@ class GoodMorningGame {
             if (this.keys.down) dy += speed * deltaTime / 1000;
             if (this.keys.left) dx -= speed * deltaTime / 1000;
             if (this.keys.right) dx += speed * deltaTime / 1000;
+            if (dx !== 0 || dy !== 0) {
+                console.log('键盘移动:', { dx, dy, keys: this.keys, deltaTime });
+            }
         }
         
         // 更新位置
@@ -956,13 +960,15 @@ render() {
     // 调试信息渲染
     renderDebugInfo() {
         this.ctx.fillStyle = 'rgba(0,0,0,0.7)';
-        this.ctx.fillRect(10, 10, 200, 100);
+        this.ctx.fillRect(10, 10, 280, 140);
         this.ctx.fillStyle = '#fff';
         this.ctx.font = '12px Arial';
         this.ctx.fillText(`玩家: ${this.playerName}`, 20, 30);
         this.ctx.fillText(`位置: (${Math.round(this.currentPlayer?.x || 0)}, ${Math.round(this.currentPlayer?.y || 0)})`, 20, 50);
-        this.ctx.fillText(`相机: (${Math.round(this.camera.x)}, ${Math.round(this.camera.y)})`, 20, 70);
-        this.ctx.fillText(`地图预渲染: ${this.mapManager.prerendered}`, 20, 90);
+        this.ctx.fillText(`显示位置: (${Math.round(this.currentPlayer?.displayX || 0)}, ${Math.round(this.currentPlayer?.displayY || 0)})`, 20, 70);
+        this.ctx.fillText(`相机: (${Math.round(this.camera.x)}, ${Math.round(this.camera.y)})`, 20, 90);
+        this.ctx.fillText(`轮盘: active=${this.joystick.active}, dx=${this.joystick.dx.toFixed(2)}, dy=${this.joystick.dy.toFixed(2)}`, 20, 110);
+        this.ctx.fillText(`键盘: up=${this.keys.up}, down=${this.keys.down}, left=${this.keys.left}, right=${this.keys.right}`, 20, 130);
     }
     
     // F3键切换调试信息
