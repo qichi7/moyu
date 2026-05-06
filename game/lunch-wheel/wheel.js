@@ -351,6 +351,9 @@ class LunchWheel {
     }
     
     async showRecordOverlay() {
+        // 清除缓存，确保获取最新数据
+        this.gistManager.clearCache();
+        
         // 获取所有选项（包括被排除的）
         const allOptions = await this.gistManager.getAllOptions();
         
