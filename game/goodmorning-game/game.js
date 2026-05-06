@@ -123,6 +123,10 @@ class GoodMorningGame {
             this.hideSettingsOverlay();
         });
         
+        document.getElementById('logout-btn')?.addEventListener('click', () => {
+            this.handleLogout();
+        });
+        
         // 设置界面身高滑块
         document.getElementById('setting-height')?.addEventListener('input', (e) => {
             document.getElementById('height-value').textContent = e.target.value;
@@ -362,6 +366,9 @@ class GoodMorningGame {
         // 更新玩家信息显示
         document.getElementById('current-player-name').textContent = this.playerName;
         
+        // 强制重新设置轮盘（允许重复绑定）
+        this.joystickSetupComplete = false;
+        
         // 延迟设置轮盘（等待浏览器渲染完成）
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
@@ -458,13 +465,14 @@ class GoodMorningGame {
             // 设置Token
             this.gistManager.setToken(token);
             
-            // 先检查角色是否已存在且在线
+            // 先检查角色是否已存在（无论在线或离线）
             const statusData = await this.gistManager.readStatus();
             const existingStatus = statusData.players?.[name];
             
-            if (existingStatus && this.isCharacterOnline(existingStatus)) {
+            if (existingStatus) {
+                // 角色已存在，禁止创建，提示使用"选择已有角色"
                 this.hideLoadingOverlay();
-                this.showToast(`角色"${name}"正在游戏中，请选择其他角色或稍后再试`, 'warning');
+                this.showToast(`角色"${name}"已存在，请使用"选择已有角色"功能`, 'warning');
                 return;
             }
             
@@ -693,6 +701,50 @@ class GoodMorningGame {
         this.hideSettingsOverlay();
         
         this.showToast('设置已保存', 'success');
+    }
+    
+    // ========== 注销功能 ==========
+    
+    async handleLogout() {
+        this.showLoadingOverlay('注销中...');
+        
+        try {
+            // 标记离线状态
+            if (this.currentPlayer) {
+                this.currentPlayer.setOffline();
+                await this.gistManager.writeStatus(this.playerName, this.currentPlayer.getStatus());
+            }
+            
+            // 停止游戏循环
+            this.isRunning = false;
+            
+            // 清除定时器
+            if (this.positionWriteTimer) clearInterval(this.positionWriteTimer);
+            if (this.positionReadTimer) clearInterval(this.positionReadTimer);
+            if (this.statusReadTimer) clearInterval(this.statusReadTimer);
+            
+            // 移除退出登录处理
+            if (this.logoutHandler) {
+                window.removeEventListener('beforeunload', this.logoutHandler);
+            }
+            
+            // 清除当前玩家
+            this.currentPlayer = null;
+            this.playerName = '';
+            this.otherPlayers.clear();
+            
+            this.hideLoadingOverlay();
+            this.hideSettingsOverlay();
+            
+            // 返回登录界面
+            this.showLoginOverlay();
+            
+            this.showToast('已注销角色', 'success');
+        } catch (error) {
+            console.error('注销异常:', error);
+            this.hideLoadingOverlay();
+            this.showToast('注销失败：' + error.message, 'error');
+        }
     }
     
     // ========== 聊天功能 ==========
