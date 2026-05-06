@@ -52,16 +52,28 @@ class LunchWheel {
     async updateHistoryDisplay() {
         const history = await this.gistManager.getHistory();
         const historyList = document.getElementById('history-list');
-        
+        historyList.replaceChildren();
+
         if (history.length === 0) {
-            historyList.innerHTML = '<div class="no-history">暂无记录</div>';
-        } else {
-            historyList.innerHTML = history.map(item => `
-                <div class="history-item">
-                    <span class="history-name">${item.name}</span>
-                    <span class="history-time">${item.time}</span>
-                </div>
-            `).join('');
+            const empty = document.createElement('div');
+            empty.className = 'no-history';
+            empty.textContent = '暂无记录';
+            historyList.appendChild(empty);
+            return;
+        }
+
+        for (const item of history) {
+            const wrap = document.createElement('div');
+            wrap.className = 'history-item';
+            const name = document.createElement('span');
+            name.className = 'history-name';
+            // textContent 而非 innerHTML：Gist 数据不可信，防 XSS
+            name.textContent = item.name;
+            const time = document.createElement('span');
+            time.className = 'history-time';
+            time.textContent = item.time;
+            wrap.append(name, time);
+            historyList.appendChild(wrap);
         }
     }
     
@@ -419,29 +431,48 @@ class LunchWheel {
     }
     
     showClearOverlay() {
-        // 创建一个简单的Token输入弹窗
         const overlay = document.createElement('div');
         overlay.className = 'record-overlay';
         overlay.id = 'clear-token-overlay';
-        overlay.innerHTML = `
-            <div class="record-content">
-                <h2>🗑️ 清空记录</h2>
-                <div class="form-group">
-                    <label for="clear-token">GitHub Token：</label>
-                    <input type="password" id="clear-token" placeholder="ghp_xxxxxx（需要gist权限）">
-                    <small>需要Token才能清空记录</small>
-                </div>
-                <div class="form-buttons">
-                    <button id="confirm-clear" class="submit-btn danger-btn">确认清空</button>
-                    <button id="cancel-clear" class="cancel-btn">取消</button>
-                </div>
-            </div>
-        `;
+        overlay.style.display = 'flex';
+
+        const content = document.createElement('div');
+        content.className = 'record-content';
+
+        const h2 = document.createElement('h2');
+        h2.textContent = '🗑️ 清空记录';
+
+        const formGroup = document.createElement('div');
+        formGroup.className = 'form-group';
+        const label = document.createElement('label');
+        label.htmlFor = 'clear-token';
+        label.textContent = 'GitHub Token：';
+        const tokenInput = document.createElement('input');
+        tokenInput.type = 'password';
+        tokenInput.id = 'clear-token';
+        tokenInput.placeholder = 'ghp_xxxxxx（需要gist权限）';
+        const hint = document.createElement('small');
+        hint.textContent = '需要Token才能清空记录';
+        formGroup.append(label, tokenInput, hint);
+
+        const buttons = document.createElement('div');
+        buttons.className = 'form-buttons';
+        const confirmBtn = document.createElement('button');
+        confirmBtn.id = 'confirm-clear';
+        confirmBtn.className = 'submit-btn danger-btn';
+        confirmBtn.textContent = '确认清空';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.id = 'cancel-clear';
+        cancelBtn.className = 'cancel-btn';
+        cancelBtn.textContent = '取消';
+        buttons.append(confirmBtn, cancelBtn);
+
+        content.append(h2, formGroup, buttons);
+        overlay.appendChild(content);
         document.body.appendChild(overlay);
-        
-        // 绑定事件
-        overlay.querySelector('#confirm-clear').addEventListener('click', async () => {
-            const token = overlay.querySelector('#clear-token').value.trim();
+
+        confirmBtn.addEventListener('click', async () => {
+            const token = tokenInput.value.trim();
             if (!token) {
                 alert('请输入GitHub Token');
                 return;
@@ -449,8 +480,8 @@ class LunchWheel {
             await this.clearHistory(token);
             overlay.remove();
         });
-        
-        overlay.querySelector('#cancel-clear').addEventListener('click', () => {
+
+        cancelBtn.addEventListener('click', () => {
             overlay.remove();
         });
     }
