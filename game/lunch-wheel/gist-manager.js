@@ -37,6 +37,12 @@ class GistManager {
         this.cache = null;
         this.cacheTime = 0;
     }
+
+    // 深拷贝，避免调用方 mutation 污染缓存
+    _clone(data) {
+        if (typeof structuredClone === 'function') return structuredClone(data);
+        return JSON.parse(JSON.stringify(data));
+    }
     
     // 读取数据
     async readData() {
@@ -50,7 +56,7 @@ class GistManager {
         // 只有在缓存有效且未被清除时才使用缓存
         if (this.cache && this.cacheTime > 0 && (now - this.cacheTime) < this.cacheExpire) {
             console.log('使用缓存数据');
-            return this.cache;
+            return this._clone(this.cache);
         }
         
         console.log('从Gist读取最新数据...');
@@ -85,23 +91,21 @@ class GistManager {
                     data.history = [];
                 }
                 console.log('成功读取数据:', data);
-                // 只有成功读取到数据后才缓存
+                // 只有成功读取到数据后才缓存（缓存内部副本，返回另一份给调用方）
                 this.cache = data;
                 this.cacheTime = now;
-                return data;
+                return this._clone(data);
             }
-            
+
             console.error('Gist文件不存在或格式错误');
-            // 如果有旧缓存，返回旧缓存；否则返回空对象（但不缓存）
             if (this.cache) {
-                return this.cache;
+                return this._clone(this.cache);
             }
             return { options: [], history: [] };
         } catch (e) {
             console.error('读取Gist异常:', e);
-            // 如果有旧缓存，返回旧缓存；否则返回空对象（但不缓存）
             if (this.cache) {
-                return this.cache;
+                return this._clone(this.cache);
             }
             return { options: [], history: [] };
         }
@@ -149,8 +153,8 @@ class GistManager {
                 return false;
             }
             
-            // 写入成功后更新缓存
-            this.cache = data;
+            // 写入成功后更新缓存（存内部副本，避免外部继续 mutation 影响缓存）
+            this.cache = this._clone(data);
             this.cacheTime = Date.now();
             return true;
         } catch (e) {
@@ -159,28 +163,33 @@ class GistManager {
         }
     }
     
-    // 添加新选项
+    // 添加新选项；返回 { status: 'added' | 'duplicate' | 'failed' }
     async addOption(option, token) {
-        // 先读取数据，确保有有效数据
         const data = await this.readData();
-        
-        // 验证数据有效性（空数组也算有效）
+
         if (!data || !Array.isArray(data.options)) {
             console.error('数据无效，无法添加选项');
-            return false;
+            return { status: 'failed' };
         }
-        
-        if (!data.options.includes(option)) {
-            data.options.push(option);
-            const success = await this.writeData(data, token);
-            if (success) {
-                // 清除缓存，确保下次读取最新数据
-                this.clearCache();
-            }
-            return success;
+
+        if (data.options.includes(option)) {
+            return { status: 'duplicate' };
         }
-        
-        return true; // 已存在，无需添加
+
+        data.options.push(option);
+        const ok = await this.writeData(data, token);
+        if (ok) this.clearCache();
+        return { status: ok ? 'added' : 'failed' };
+    }
+
+    // 删除选项
+    async deleteOption(option, token) {
+        const data = await this.readData();
+        if (!data || !Array.isArray(data.options)) return false;
+        data.options = data.options.filter(o => o !== option);
+        const ok = await this.writeData(data, token);
+        if (ok) this.clearCache();
+        return ok;
     }
     
     // 记录历史（最近三次）
@@ -219,13 +228,15 @@ class GistManager {
     // 获取可用选项（排除最近三次吃过的）
     async getAvailableOptions() {
         const data = await this.readData();
-        
-        // 获取最近三次吃过的选项名称
+
         const recentOptions = data.history.map(h => h.name);
-        
-        // 过滤掉最近吃过的
         const available = data.options.filter(opt => !recentOptions.includes(opt));
-        
+
+        // 选项不足以承载完整历史时，降级返回全部选项，避免被永久锁死
+        if (available.length === 0 && data.options.length > 0) {
+            return data.options.slice();
+        }
+
         return available;
     }
     

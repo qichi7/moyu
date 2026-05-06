@@ -374,30 +374,40 @@ class LunchWheel {
     async submitNewOption() {
         const option = document.getElementById('new-option').value.trim();
         const token = document.getElementById('gist-token').value.trim();
-        
+
         if (!option) {
             alert('请输入选项名称');
             return;
         }
-        
+
+        // 拒绝可能产生意外渲染的字符（防御性，配合 textContent）
+        if (/[<>&"']/.test(option)) {
+            alert('选项名包含非法字符（<, >, &, ", \'）');
+            return;
+        }
+
+        if (option.length > 20) {
+            alert('选项名不能超过 20 个字符');
+            return;
+        }
+
         if (!token) {
             alert('请输入GitHub Token');
             return;
         }
-        
+
         try {
-            const success = await this.gistManager.addOption(option, token);
-            
-            if (success) {
+            const result = await this.gistManager.addOption(option, token);
+
+            if (result.status === 'added') {
                 alert(`"${option}" 已添加成功！`);
                 this.hideAddOverlay();
-                // 刷新轮盘和历史记录
                 await this.refreshAll();
-                
-                // 隐藏空状态提示
                 document.getElementById('empty-message').style.display = 'none';
+            } else if (result.status === 'duplicate') {
+                alert('已存在该选项，无需重复添加');
             } else {
-                alert('添加失败，请检查Token权限');
+                alert('添加失败，请检查 Token 权限或 Gist ID');
             }
         } catch (e) {
             alert('添加失败：' + e.message);
