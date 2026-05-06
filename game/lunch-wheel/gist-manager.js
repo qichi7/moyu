@@ -32,19 +32,28 @@ class GistManager {
             
             if (!response.ok) {
                 console.error('读取Gist失败:', response.status);
-                return { options: [], history: [] };
+                // 修复：返回缓存数据而不是空对象，避免数据丢失
+                return this.cache || { options: [], history: [] };
             }
             
             const gist = await response.json();
             
             if (gist.files && gist.files[this.filename]) {
                 const data = JSON.parse(gist.files[this.filename].content);
+                // 验证数据格式
+                if (!data.options || !Array.isArray(data.options)) {
+                    data.options = [];
+                }
+                if (!data.history || !Array.isArray(data.history)) {
+                    data.history = [];
+                }
                 this.cache = data;
                 this.cacheTime = now;
                 return data;
             }
             
-            return { options: [], history: [] };
+            // 修复：返回缓存数据而不是空对象
+            return this.cache || { options: [], history: [] };
         } catch (e) {
             console.error('读取Gist异常:', e);
             return this.cache || { options: [], history: [] };
@@ -55,6 +64,12 @@ class GistManager {
     async writeData(data, token) {
         if (!token) {
             console.error('需要Token才能写入');
+            return false;
+        }
+        
+        // 验证数据格式
+        if (!data || !Array.isArray(data.options) || !Array.isArray(data.history)) {
+            console.error('数据格式无效，拒绝写入');
             return false;
         }
         
@@ -77,11 +92,14 @@ class GistManager {
             
             if (!response.ok) {
                 console.error('写入Gist失败:', response.status);
+                const errorText = await response.text();
+                console.error('错误详情:', errorText);
                 return false;
             }
             
-            // 清除缓存
-            this.cache = null;
+            // 写入成功后更新缓存
+            this.cache = data;
+            this.cacheTime = Date.now();
             return true;
         } catch (e) {
             console.error('写入Gist异常:', e);
@@ -91,11 +109,25 @@ class GistManager {
     
     // 添加新选项
     async addOption(option, token) {
+        // 清除缓存，确保读取最新数据
+        this.clearCache();
         const data = await this.readData();
+        
+        // 验证数据有效性
+        if (!data || !data.options) {
+            console.error('数据无效，无法添加选项');
+            return false;
+        }
         
         if (!data.options.includes(option)) {
             data.options.push(option);
-            return await this.writeData(data, token);
+            const success = await this.writeData(data, token);
+            if (success) {
+                // 更新缓存
+                this.cache = data;
+                this.cacheTime = Date.now();
+            }
+            return success;
         }
         
         return true; // 已存在，无需添加
@@ -103,7 +135,15 @@ class GistManager {
     
     // 记录历史（最近三次）
     async recordHistory(option, token) {
+        // 清除缓存，确保读取最新数据
+        this.clearCache();
         const data = await this.readData();
+        
+        // 验证数据有效性
+        if (!data || !data.history) {
+            console.error('数据无效，无法记录历史');
+            return false;
+        }
         
         const now = new Date();
         const timeStr = now.toLocaleDateString('zh-CN') + ' ' + now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
@@ -119,7 +159,13 @@ class GistManager {
             data.history = data.history.slice(0, 3);
         }
         
-        return await this.writeData(data, token);
+        const success = await this.writeData(data, token);
+        if (success) {
+            // 更新缓存
+            this.cache = data;
+            this.cacheTime = Date.now();
+        }
+        return success;
     }
     
     // 获取可用选项（排除最近三次吃过的）
