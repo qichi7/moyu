@@ -7,15 +7,35 @@ class LunchWheel {
         this.canvas = document.getElementById('wheel-canvas');
         this.ctx = this.canvas.getContext('2d');
         this.gistManager = new GistManager();
-        
+
         this.options = [];
         this.availableOptions = [];
         this.colors = [];
         this.isSpinning = false;
         this.currentRotation = 0;
-        this.lastSelectedOption = null; // 保存最后选择的选项
-        
+        this.lastSelectedOption = null;
+        this.cssSize = 400;
+
+        this.setupCanvas();
+        window.addEventListener('resize', () => {
+            this.setupCanvas();
+            this.drawWheel();
+        });
+
         this.init();
+    }
+
+    setupCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        // 优先用 CSS 实际宽度（响应式 + 移动端缩放后）
+        const cssSize = this.canvas.clientWidth || 400;
+        this.canvas.width = cssSize * dpr;
+        this.canvas.height = cssSize * dpr;
+        this.canvas.style.width = cssSize + 'px';
+        this.canvas.style.height = cssSize + 'px';
+        // setTransform 使后续绘制全部以 CSS 像素为单位
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        this.cssSize = cssSize;
     }
     
     async init() {
@@ -95,25 +115,23 @@ class LunchWheel {
     }
     
     generateColors() {
-        const baseColors = [
-            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
-            '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F',
-            '#BB8FCE', '#85C1E9', '#F8B500', '#00CED1'
-        ];
-        
+        // HSL 等距色环，避免大量选项时相邻同色
         this.colors = [];
-        for (let i = 0; i < this.options.length; i++) {
-            this.colors.push(baseColors[i % baseColors.length]);
+        const N = this.options.length;
+        if (N === 0) return;
+        for (let i = 0; i < N; i++) {
+            const hue = (i * 360 / N).toFixed(1);
+            this.colors.push(`hsl(${hue}, 65%, 60%)`);
         }
     }
     
     drawWheel() {
-        const centerX = this.canvas.width / 2;
-        const centerY = this.canvas.height / 2;
+        const centerX = this.cssSize / 2;
+        const centerY = this.cssSize / 2;
         const radius = Math.min(centerX, centerY) - 10;
-        
-        // 清除画布
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // 清除画布（按 CSS 像素清，不会受 DPR 影响）
+        this.ctx.clearRect(0, 0, this.cssSize, this.cssSize);
         
         // 绘制外圈阴影
         this.ctx.save();
@@ -160,16 +178,24 @@ class LunchWheel {
             this.ctx.textAlign = 'right';
             this.ctx.textBaseline = 'middle';
             this.ctx.fillStyle = '#fff';
-            this.ctx.font = 'bold 16px Microsoft YaHei, sans-serif';
-            
-            const text = this.options[i];
-            const textRadius = radius - 40;
-            
-            // 文字阴影
+            // 字号随选项数动态收缩
+            const fontSize = Math.max(10, Math.min(16, Math.floor(220 / this.options.length)));
+            this.ctx.font = `bold ${fontSize}px Microsoft YaHei, sans-serif`;
+
+            const original = this.options[i];
+            const maxWidth = radius - 60;
+            let text = original;
+            while (text.length > 1 && this.ctx.measureText(text).width > maxWidth) {
+                text = text.slice(0, -1);
+            }
+            if (text !== original) text = text.slice(0, -1) + '…';
+
+            const textRadius = radius - 15;
+
             this.ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
             this.ctx.shadowBlur = 3;
             this.ctx.fillText(text, textRadius, 0);
-            
+
             this.ctx.restore();
         }
         
@@ -243,6 +269,40 @@ class LunchWheel {
             this.showConfigOverlay();
         });
 
+        // 管理选项
+        document.getElementById('manage-options-btn').addEventListener('click', () => {
+            this.showManageOverlay();
+        });
+
+        document.getElementById('close-manage').addEventListener('click', () => {
+            this.hideManageOverlay();
+        });
+
+        // 全局键盘：Esc 关闭顶部弹窗 / Enter 在 input 中提交对应表单
+        const overlayMap = [
+            { id: 'config-overlay', submit: 'submit-gist-id', cancel: 'cancel-gist-id' },
+            { id: 'add-overlay', submit: 'submit-option', cancel: 'cancel-add' },
+            { id: 'record-overlay', submit: 'submit-record', cancel: 'cancel-record' },
+            { id: 'manage-overlay', submit: null, cancel: 'close-manage' },
+            { id: 'result-overlay', submit: null, cancel: 'close-result' },
+        ];
+
+        document.addEventListener('keydown', (e) => {
+            const visible = overlayMap.find(m => {
+                const el = document.getElementById(m.id);
+                return el && el.style.display === 'flex';
+            });
+            if (!visible) return;
+
+            if (e.key === 'Escape' && visible.cancel) {
+                e.preventDefault();
+                document.getElementById(visible.cancel).click();
+            } else if (e.key === 'Enter' && visible.submit && document.activeElement?.tagName === 'INPUT') {
+                e.preventDefault();
+                document.getElementById(visible.submit).click();
+            }
+        });
+
         document.getElementById('submit-gist-id').addEventListener('click', () => {
             this.submitGistId();
         });
@@ -250,7 +310,7 @@ class LunchWheel {
         document.getElementById('cancel-gist-id').addEventListener('click', () => {
             // 未配置时不允许直接关闭（否则界面无法工作）
             if (!this.gistManager.isConfigured()) {
-                alert('需要配置 Gist ID 才能使用');
+                this.showToast('需要配置 Gist ID 才能使用', 'warn');
                 return;
             }
             this.hideConfigOverlay();
@@ -271,16 +331,17 @@ class LunchWheel {
     async submitGistId() {
         const id = document.getElementById('gist-id-input').value.trim();
         if (!GistManager.GIST_ID_PATTERN.test(id)) {
-            alert('Gist ID 格式无效（应为 20-40 位的十六进制字符）');
+            this.showToast('Gist ID 格式无效（应为 20-40 位的十六进制字符）', 'warn');
             return;
         }
         const ok = GistManager.setGistId(id);
         if (!ok) {
-            alert('保存失败');
+            this.showToast('保存失败', 'error');
             return;
         }
         this.gistManager.clearCache();
         this.hideConfigOverlay();
+        this.showToast('Gist ID 已保存', 'success');
         await this.refreshAll();
     }
     
@@ -371,6 +432,24 @@ class LunchWheel {
         }
     }
     
+    // 顶部 toast，3 秒自动消失
+    showToast(msg, type = 'info') {
+        const stack = document.getElementById('toast-stack');
+        if (!stack) {
+            // 兜底：DOM 还未就绪
+            console.log(`[toast/${type}] ${msg}`);
+            return;
+        }
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = msg;
+        stack.appendChild(toast);
+        setTimeout(() => {
+            toast.classList.add('fade-out');
+            setTimeout(() => toast.remove(), 300);
+        }, 2700);
+    }
+
     // Token 会话缓存（仅 sessionStorage，关闭标签页即清除）
     static TOKEN_KEY = 'lunch-wheel:token';
 
@@ -407,23 +486,23 @@ class LunchWheel {
         const token = document.getElementById('gist-token').value.trim();
 
         if (!option) {
-            alert('请输入选项名称');
+            this.showToast('请输入选项名称', 'warn');
             return;
         }
 
         // 拒绝可能产生意外渲染的字符（防御性，配合 textContent）
         if (/[<>&"']/.test(option)) {
-            alert('选项名包含非法字符（<, >, &, ", \'）');
+            this.showToast('选项名包含非法字符（<, >, &, ", \')', 'warn');
             return;
         }
 
         if (option.length > 20) {
-            alert('选项名不能超过 20 个字符');
+            this.showToast('选项名不能超过 20 个字符', 'warn');
             return;
         }
 
         if (!token) {
-            alert('请输入GitHub Token');
+            this.showToast('请输入 GitHub Token', 'warn');
             return;
         }
 
@@ -434,17 +513,17 @@ class LunchWheel {
 
             if (result.status === 'added') {
                 this.rememberToken(token, remember);
-                alert(`"${option}" 已添加成功！`);
+                this.showToast(`"${option}" 已添加`, 'success');
                 this.hideAddOverlay();
                 await this.refreshAll();
                 document.getElementById('empty-message').style.display = 'none';
             } else if (result.status === 'duplicate') {
-                alert('已存在该选项，无需重复添加');
+                this.showToast('已存在该选项，无需重复添加', 'warn');
             } else {
-                alert('添加失败，请检查 Token 权限或 Gist ID');
+                this.showToast('添加失败，请检查 Token 权限或 Gist ID', 'error');
             }
         } catch (e) {
-            alert('添加失败：' + e.message);
+            this.showToast('添加失败：' + e.message, 'error');
         }
     }
     
@@ -499,12 +578,12 @@ class LunchWheel {
         const token = document.getElementById('record-token').value.trim();
 
         if (!option) {
-            alert('请选择吃了什么');
+            this.showToast('请选择吃了什么', 'warn');
             return;
         }
 
         if (!token) {
-            alert('请输入GitHub Token');
+            this.showToast('请输入 GitHub Token', 'warn');
             return;
         }
 
@@ -515,14 +594,14 @@ class LunchWheel {
 
             if (success) {
                 this.rememberToken(token, remember);
-                alert(`已记录：${option}`);
+                this.showToast(`已记录：${option}`, 'success');
                 this.hideRecordOverlay();
                 await this.refreshAll();
             } else {
-                alert('记录失败，请检查Token权限');
+                this.showToast('记录失败，请检查 Token 权限', 'error');
             }
         } catch (e) {
-            alert('记录失败：' + e.message);
+            this.showToast('记录失败：' + e.message, 'error');
         }
     }
     
@@ -577,7 +656,7 @@ class LunchWheel {
         confirmBtn.addEventListener('click', async () => {
             const token = tokenInput.value.trim();
             if (!token) {
-                alert('请输入GitHub Token');
+                this.showToast('请输入 GitHub Token', 'warn');
                 return;
             }
             await this.clearHistory(token);
@@ -587,27 +666,100 @@ class LunchWheel {
         cancelBtn.addEventListener('click', () => {
             overlay.remove();
         });
+
+        // Esc 关闭 / Enter 提交
+        const onKey = (e) => {
+            if (e.key === 'Escape') {
+                overlay.remove();
+                document.removeEventListener('keydown', onKey);
+            } else if (e.key === 'Enter' && document.activeElement === tokenInput) {
+                confirmBtn.click();
+            }
+        };
+        document.addEventListener('keydown', onKey);
     }
-    
+
     async clearHistory(token) {
         try {
-            // 读取数据并清空历史
             const data = await this.gistManager.readData();
             data.history = [];
-            
+
             const success = await this.gistManager.writeData(data, token);
-            
+
             if (success) {
-                // 清除缓存，确保下次读取最新数据
                 this.gistManager.clearCache();
-                alert('历史记录已清空！');
-                // 刷新轮盘和历史记录
+                this.showToast('历史记录已清空', 'success');
                 await this.refreshAll();
             } else {
-                alert('清空失败，请检查Token权限');
+                this.showToast('清空失败，请检查 Token 权限', 'error');
             }
         } catch (e) {
-            alert('清空失败：' + e.message);
+            this.showToast('清空失败：' + e.message, 'error');
+        }
+    }
+
+    // 管理选项弹窗：列出所有选项 + 删除
+    async showManageOverlay() {
+        await this.renderManageList();
+        document.getElementById('manage-overlay').style.display = 'flex';
+        this.fillCachedToken('manage-token', 'remember-token-manage');
+    }
+
+    hideManageOverlay() {
+        document.getElementById('manage-overlay').style.display = 'none';
+        document.getElementById('manage-token').value = '';
+    }
+
+    async renderManageList() {
+        const list = document.getElementById('manage-list');
+        list.replaceChildren();
+        const allOptions = await this.gistManager.getAllOptions();
+
+        if (allOptions.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'manage-empty';
+            empty.textContent = '暂无选项';
+            list.appendChild(empty);
+            return;
+        }
+
+        allOptions.forEach(name => {
+            const item = document.createElement('div');
+            item.className = 'manage-item';
+            const nameEl = document.createElement('span');
+            nameEl.className = 'manage-item-name';
+            nameEl.textContent = name; // textContent 防 XSS
+            const del = document.createElement('button');
+            del.className = 'manage-item-delete';
+            del.textContent = '删除';
+            del.addEventListener('click', () => this.deleteOption(name));
+            item.append(nameEl, del);
+            list.appendChild(item);
+        });
+    }
+
+    async deleteOption(name) {
+        const token = document.getElementById('manage-token').value.trim();
+        if (!token) {
+            this.showToast('请先填写 Token 再删除', 'warn');
+            return;
+        }
+        if (!confirm(`确定删除选项 "${name}" 吗？`)) return;
+
+        const remember = document.getElementById('remember-token-manage').checked;
+
+        try {
+            const ok = await this.gistManager.deleteOption(name, token);
+            if (ok) {
+                this.rememberToken(token, remember);
+                this.showToast(`已删除 "${name}"`, 'success');
+                await this.renderManageList();
+                await this.refreshAll();
+            } else {
+                this.showToast('删除失败，请检查 Token 权限', 'error');
+            }
+        } catch (e) {
+            this.showToast('删除失败：' + e.message, 'error');
         }
     }
 }

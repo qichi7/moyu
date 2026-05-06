@@ -134,6 +134,28 @@
             </div>
         </div>
         
+        <div class="add-overlay" id="manage-overlay" style="display: none;">
+            <div class="add-content">
+                <h2>📝 管理选项</h2>
+                <div class="manage-list" id="manage-list"></div>
+                <p style="color:#666;font-size:13px;margin-bottom:12px;">
+                    删除选项需要 GitHub Token；删除后需刷新页面同步。
+                </p>
+                <div class="form-group">
+                    <label for="manage-token">GitHub Token：</label>
+                    <input type="password" id="manage-token" placeholder="ghp_xxxxxx（需要gist权限）">
+                    <label class="remember-token">
+                        <input type="checkbox" id="remember-token-manage"> 本次浏览器标签页内记住 Token
+                    </label>
+                </div>
+                <div class="form-buttons">
+                    <button id="close-manage" class="cancel-btn">关闭</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="toast-stack" id="toast-stack"></div>
+
         <div class="empty-message" id="empty-message" style="display: none;">
             <div class="empty-content">
                 <div class="empty-icon">🍽️</div>
