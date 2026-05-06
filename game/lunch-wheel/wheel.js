@@ -182,15 +182,21 @@ class LunchWheel {
             const fontSize = Math.max(10, Math.min(16, Math.floor(220 / this.options.length)));
             this.ctx.font = `bold ${fontSize}px Microsoft YaHei, sans-serif`;
 
+            const textRadius = radius - 15;
+            // 文字内端 x 必须 ≥ innerLimit，使文字半高 (fontSize/2) 不越过扇形辐边：
+            //   2 * innerLimit * tan(sliceAngle/2) ≥ fontSize → innerLimit = fontSize / (2*tan)
+            // 加 4px 余量。再确保至少留出中心圆 50px + 5px 视觉间距。
+            const halfTan = Math.tan(sliceAngle / 2);
+            const safeInner = halfTan > 0 ? (fontSize / 2) / halfTan + 4 : 60;
+            const innerLimit = Math.max(55, safeInner);
+            const maxWidth = Math.max(20, textRadius - innerLimit);
+
             const original = this.options[i];
-            const maxWidth = radius - 60;
             let text = original;
             while (text.length > 1 && this.ctx.measureText(text).width > maxWidth) {
                 text = text.slice(0, -1);
             }
             if (text !== original) text = text.slice(0, -1) + '…';
-
-            const textRadius = radius - 15;
 
             this.ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
             this.ctx.shadowBlur = 3;
@@ -347,60 +353,62 @@ class LunchWheel {
     
     async spin() {
         if (this.isSpinning) return;
-        
+
         if (this.availableOptions.length === 0) {
             // 没有选项，直接显示结果
             this.showResult('你没饭吃了');
             return;
         }
-        
+
         this.isSpinning = true;
         document.getElementById('spin-btn').disabled = true;
-        
-        // 随机选择结果
-        const selectedIndex = Math.floor(Math.random() * this.availableOptions.length);
-        const selectedOption = this.availableOptions[selectedIndex];
-        
-        // 计算旋转角度
-        const sliceAngle = (Math.PI * 2) / this.options.length;
-        // 指针指向右侧（0度），计算目标扇形中点的角度
-        const targetAngle = selectedIndex * sliceAngle + sliceAngle / 2;
-        // 需要把当前 rotation 修正到 -targetAngle，使该扇形中点指向右侧
+
         const TWO_PI = Math.PI * 2;
-        const normalizedStart = ((this.currentRotation % TWO_PI) + TWO_PI) % TWO_PI;
-        const baseRotation = ((-targetAngle - normalizedStart) % TWO_PI + TWO_PI) % TWO_PI;
-        // 必须是 2π 的整数倍额外圈数，否则最终角度会偏离选中扇形
-        const extraRotation = TWO_PI * (5 + Math.floor(Math.random() * 5));
-        const totalRotation = baseRotation + extraRotation;
-        
+        const N = this.options.length;
+        const sliceAngle = TWO_PI / N;
+
+        // 不预先选定 index，只生成一个随机最终偏移：5-9 整圈 + 任意单圈内偏移
+        const extraTurns = 5 + Math.floor(Math.random() * 5);
+        const targetOffset = Math.random() * TWO_PI;
+        const totalRotation = TWO_PI * extraTurns + targetOffset;
+
         // 动画参数
         const duration = 5000; // 5秒
         const startTime = Date.now();
         const startRotation = this.currentRotation;
-        
+
         // 缓动函数（缓入缓出）
         const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
-        
+
         const animate = () => {
             const elapsed = Date.now() - startTime;
             const progress = Math.min(elapsed / duration, 1);
             const easedProgress = easeOutCubic(progress);
-            
+
             this.currentRotation = startRotation + totalRotation * easedProgress;
             this.drawWheel();
-            
+
             if (progress < 1) {
                 requestAnimationFrame(animate);
             } else {
-                const TWO_PI = Math.PI * 2;
-                this.currentRotation = ((startRotation + totalRotation) % TWO_PI + TWO_PI) % TWO_PI;
+                // 归一化到 [0, 2π)
+                const finalRotation = ((startRotation + totalRotation) % TWO_PI + TWO_PI) % TWO_PI;
+                this.currentRotation = finalRotation;
                 this.drawWheel();
+
+                // 反推：指针指向 0°（canvas 右侧），扇形 i 的全局起始角 = i*sliceAngle + currentRotation
+                // 找 i 使 0° 落在 [i*sliceAngle + currentRotation, (i+1)*sliceAngle + currentRotation) (mod 2π)
+                // 等价于 (-currentRotation mod 2π) 落在 [i*sliceAngle, (i+1)*sliceAngle)
+                const pointerLocal = ((TWO_PI - finalRotation) % TWO_PI + TWO_PI) % TWO_PI;
+                const finalIndex = Math.floor(pointerLocal / sliceAngle) % N;
+                const finalOption = this.options[finalIndex];
+
                 this.isSpinning = false;
                 document.getElementById('spin-btn').disabled = false;
-                this.showResult(selectedOption);
+                this.showResult(finalOption);
             }
         };
-        
+
         animate();
     }
     
