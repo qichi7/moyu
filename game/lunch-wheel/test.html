@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GistManager 测试</title>
+</head>
+<body>
+    <h1>GistManager 功能测试</h1>
+    
+    <div id="test-results">
+        <h2>测试结果</h2>
+        <pre id="output"></pre>
+    </div>
+    
+    <script src="gist-manager.js"></script>
+    <script>
+        const output = document.getElementById('output');
+        const gistManager = new GistManager();
+        
+        async function runTests() {
+            output.innerHTML = '开始测试...\n\n';
+            
+            // 测试1：读取数据
+            output.innerHTML += '=== 测试1：读取Gist数据 ===\n';
+            try {
+                const data = await gistManager.readData();
+                output.innerHTML += `读取成功！\n`;
+                output.innerHTML += `选项数量：${data.options.length}\n`;
+                output.innerHTML += `选项列表：${JSON.stringify(data.options)}\n`;
+                output.innerHTML += `历史记录数量：${data.history.length}\n`;
+                output.innerHTML += `历史记录：${JSON.stringify(data.history)}\n\n`;
+            } catch (e) {
+                output.innerHTML += `读取失败：${e.message}\n\n`;
+            }
+            
+            // 测试2：获取所有选项
+            output.innerHTML += '=== 测试2：获取所有选项 ===\n';
+            try {
+                const allOptions = await gistManager.getAllOptions();
+                output.innerHTML += `所有选项：${JSON.stringify(allOptions)}\n\n`;
+            } catch (e) {
+                output.innerHTML += `获取失败：${e.message}\n\n`;
+            }
+            
+            // 测试3：获取可用选项
+            output.innerHTML += '=== 测试3：获取可用选项（排除最近三次） ===\n';
+            try {
+                const available = await gistManager.getAvailableOptions();
+                output.innerHTML += `可用选项：${JSON.stringify(available)}\n\n`;
+            } catch (e) {
+                output.innerHTML += `获取失败：${e.message}\n\n`;
+            }
+            
+            // 测试4：缓存机制
+            output.innerHTML += '=== 测试4：缓存机制 ===\n';
+            output.innerHTML += `缓存过期时间：${gistManager.cacheExpire}ms\n`;
+            output.innerHTML += `缓存状态：${gistManager.cache ? '已缓存' : '未缓存'}\n`;
+            if (gistManager.cache) {
+                output.innerHTML += `缓存时间：${gistManager.cacheTime}\n`;
+                output.innerHTML += `缓存内容：${JSON.stringify(gistManager.cache)}\n\n`;
+            }
+            
+            // 测试5：清除缓存
+            output.innerHTML += '=== 测试5：清除缓存 ===\n';
+            gistManager.clearCache();
+            output.innerHTML += `缓存已清除\n`;
+            output.innerHTML += `缓存状态：${gistManager.cache ? '已缓存' : '未缓存'}\n\n`;
+            
+            // 测试6：重新读取（验证清除缓存后能重新读取）
+            output.innerHTML += '=== 测试6：重新读取数据 ===\n';
+            try {
+                const data = await gistManager.readData();
+                output.innerHTML += `重新读取成功！\n`;
+                output.innerHTML += `选项数量：${data.options.length}\n`;
+                output.innerHTML += `选项列表：${JSON.stringify(data.options)}\n\n`;
+            } catch (e) {
+                output.innerHTML += `读取失败：${e.message}\n\n`;
+            }
+            
+            output.innerHTML += '=== 所有测试完成 ===\n';
+        }
+        
+        // 运行测试
+        runTests();
+    </script>
+</body>
+</html>
