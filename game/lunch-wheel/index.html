@@ -23,6 +23,13 @@
             <div class="wheel-pointer"></div>
         </div>
         
+        <div class="history-section">
+            <h3>📜 最近吃的（已排除）</h3>
+            <div class="history-list" id="history-list">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+        
         <div class="result-overlay" id="result-overlay" style="display: none;">
             <div class="result-content">
                 <div class="result-icon">🎉</div>
@@ -37,18 +44,10 @@
                 <span class="btn-icon">➕</span>
                 添加选项
             </button>
-            <button id="view-history-btn" class="control-btn">
-                <span class="btn-icon">📜</span>
-                历史记录
+            <button id="record-eating-btn" class="control-btn">
+                <span class="btn-icon">🍽️</span>
+                上次吃了啥
             </button>
-        </div>
-        
-        <div class="history-overlay" id="history-overlay" style="display: none;">
-            <div class="history-content">
-                <h2>📜 最近吃的</h2>
-                <div class="history-list" id="history-list"></div>
-                <button id="close-history" class="close-btn">关闭</button>
-            </div>
         </div>
         
         <div class="add-overlay" id="add-overlay" style="display: none;">
@@ -66,6 +65,26 @@
                 <div class="form-buttons">
                     <button id="submit-option" class="submit-btn">添加</button>
                     <button id="cancel-add" class="cancel-btn">取消</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="record-overlay" id="record-overlay" style="display: none;">
+            <div class="record-content">
+                <h2>🍽️ 上次吃了啥</h2>
+                <div class="form-group">
+                    <label for="record-option">吃了什么：</label>
+                    <input type="text" id="record-option" placeholder="例如：麻辣烫" maxlength="20">
+                    <small>记录后会从轮盘暂时移除该选项</small>
+                </div>
+                <div class="form-group">
+                    <label for="record-token">GitHub Token：</label>
+                    <input type="password" id="record-token" placeholder="ghp_xxxxxx（需要gist权限）">
+                    <small>Token仅用于写入数据，不会被保存</small>
+                </div>
+                <div class="form-buttons">
+                    <button id="submit-record" class="submit-btn">记录</button>
+                    <button id="cancel-record" class="cancel-btn">取消</button>
                 </div>
             </div>
         </div>

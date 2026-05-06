@@ -13,6 +13,12 @@ class GistManager {
         this.cacheExpire = 5000; // 5秒缓存
     }
     
+    // 清除缓存（用于刷新数据）
+    clearCache() {
+        this.cache = null;
+        this.cacheTime = 0;
+    }
+    
     // 读取数据
     async readData() {
         const now = Date.now();

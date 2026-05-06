@@ -18,11 +18,17 @@ class LunchWheel {
     }
     
     async init() {
+        // 清除缓存，确保每次打开/刷新都从gist重新读取
+        this.gistManager.clearCache();
+        
         // 加载选项
         await this.loadOptions();
         
         // 绘制轮盘
         this.drawWheel();
+        
+        // 加载并显示历史记录
+        await this.updateHistoryDisplay();
         
         // 绑定事件
         this.bindEvents();
@@ -40,6 +46,22 @@ class LunchWheel {
         
         // 生成颜色
         this.generateColors();
+    }
+    
+    async updateHistoryDisplay() {
+        const history = await this.gistManager.getHistory();
+        const historyList = document.getElementById('history-list');
+        
+        if (history.length === 0) {
+            historyList.innerHTML = '<div class="no-history">暂无记录</div>';
+        } else {
+            historyList.innerHTML = history.map(item => `
+                <div class="history-item">
+                    <span class="history-name">${item.name}</span>
+                    <span class="history-time">${item.time}</span>
+                </div>
+            `).join('');
+        }
     }
     
     generateColors() {
@@ -155,14 +177,19 @@ class LunchWheel {
             this.hideAddOverlay();
         });
         
-        // 查看历史
-        document.getElementById('view-history-btn').addEventListener('click', () => {
-            this.showHistory();
+        // 上次吃了啥（记录历史）
+        document.getElementById('record-eating-btn').addEventListener('click', () => {
+            this.showRecordOverlay();
         });
         
-        // 关闭历史
-        document.getElementById('close-history').addEventListener('click', () => {
-            this.hideHistory();
+        // 提交记录
+        document.getElementById('submit-record').addEventListener('click', () => {
+            this.submitRecord();
+        });
+        
+        // 取消记录
+        document.getElementById('cancel-record').addEventListener('click', () => {
+            this.hideRecordOverlay();
         });
         
         // 关闭结果
@@ -180,6 +207,8 @@ class LunchWheel {
             // 重新加载选项（更新可用选项）
             await this.loadOptions();
             this.drawWheel();
+            // 更新历史记录显示
+            await this.updateHistoryDisplay();
         });
     }
     
@@ -276,8 +305,8 @@ class LunchWheel {
             if (success) {
                 alert(`"${option}" 已添加成功！`);
                 this.hideAddOverlay();
-                await this.loadOptions();
-                this.drawWheel();
+                // 刷新轮盘和历史记录
+                await this.refreshAll();
                 
                 // 隐藏空状态提示
                 document.getElementById('empty-message').style.display = 'none';
@@ -289,26 +318,52 @@ class LunchWheel {
         }
     }
     
-    async showHistory() {
-        const history = await this.gistManager.getHistory();
-        const historyList = document.getElementById('history-list');
-        
-        if (history.length === 0) {
-            historyList.innerHTML = '<div class="no-history">暂无记录</div>';
-        } else {
-            historyList.innerHTML = history.map(item => `
-                <div class="history-item">
-                    <span class="history-name">${item.name}</span>
-                    <span class="history-time">${item.time}</span>
-                </div>
-            `).join('');
-        }
-        
-        document.getElementById('history-overlay').style.display = 'flex';
+    // 刷新轮盘和历史记录
+    async refreshAll() {
+        await this.loadOptions();
+        this.drawWheel();
+        await this.updateHistoryDisplay();
     }
     
-    hideHistory() {
-        document.getElementById('history-overlay').style.display = 'none';
+    showRecordOverlay() {
+        document.getElementById('record-overlay').style.display = 'flex';
+        document.getElementById('record-option').focus();
+    }
+    
+    hideRecordOverlay() {
+        document.getElementById('record-overlay').style.display = 'none';
+        document.getElementById('record-option').value = '';
+        document.getElementById('record-token').value = '';
+    }
+    
+    async submitRecord() {
+        const option = document.getElementById('record-option').value.trim();
+        const token = document.getElementById('record-token').value.trim();
+        
+        if (!option) {
+            alert('请输入吃了什么');
+            return;
+        }
+        
+        if (!token) {
+            alert('请输入GitHub Token');
+            return;
+        }
+        
+        try {
+            const success = await this.gistManager.recordHistory(option, token);
+            
+            if (success) {
+                alert(`已记录：${option}`);
+                this.hideRecordOverlay();
+                // 刷新轮盘和历史记录
+                await this.refreshAll();
+            } else {
+                alert('记录失败，请检查Token权限');
+            }
+        } catch (e) {
+            alert('记录失败：' + e.message);
+        }
     }
 }
 
