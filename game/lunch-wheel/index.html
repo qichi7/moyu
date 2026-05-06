@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中午吃点啥 🍜</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🍜 中午吃点啥</h1>
+            <p class="subtitle">让命运决定你的午餐</p>
+        </header>
+        
+        <div class="wheel-container">
+            <canvas id="wheel-canvas" width="400" height="400"></canvas>
+            <div class="wheel-center">
+                <button id="spin-btn" class="spin-button">
+                    <span class="btn-text">我要吃</span>
+                </button>
+            </div>
+            <div class="wheel-pointer"></div>
+        </div>
+        
+        <div class="result-overlay" id="result-overlay" style="display: none;">
+            <div class="result-content">
+                <div class="result-icon">🎉</div>
+                <div class="result-text">今天吃：</div>
+                <div class="result-food" id="result-food"></div>
+                <button id="close-result" class="close-btn">好的，就吃这个！</button>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button id="add-option-btn" class="control-btn">
+                <span class="btn-icon">➕</span>
+                添加选项
+            </button>
+            <button id="view-history-btn" class="control-btn">
+                <span class="btn-icon">📜</span>
+                历史记录
+            </button>
+        </div>
+        
+        <div class="history-overlay" id="history-overlay" style="display: none;">
+            <div class="history-content">
+                <h2>📜 最近吃的</h2>
+                <div class="history-list" id="history-list"></div>
+                <button id="close-history" class="close-btn">关闭</button>
+            </div>
+        </div>
+        
+        <div class="add-overlay" id="add-overlay" style="display: none;">
+            <div class="add-content">
+                <h2>➕ 添加新选项</h2>
+                <div class="form-group">
+                    <label for="new-option">选项名称：</label>
+                    <input type="text" id="new-option" placeholder="例如：麻辣烫" maxlength="20">
+                </div>
+                <div class="form-group">
+                    <label for="gist-token">GitHub Token：</label>
+                    <input type="password" id="gist-token" placeholder="ghp_xxxxxx（需要gist权限）">
+                    <small>Token仅用于写入数据，不会被保存</small>
+                </div>
+                <div class="form-buttons">
+                    <button id="submit-option" class="submit-btn">添加</button>
+                    <button id="cancel-add" class="cancel-btn">取消</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="empty-message" id="empty-message" style="display: none;">
+            <div class="empty-content">
+                <div class="empty-icon">🍽️</div>
+                <div class="empty-text">你没饭吃了</div>
+                <button id="add-first-option" class="add-first-btn">添加第一个选项</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="gist-manager.js"></script>
+    <script src="wheel.js"></script>
+</body>
+</html>
