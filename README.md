@@ -12,6 +12,7 @@
 | 2048 | [开始游戏](https://qichi7.github.io/moyu/game/2048-game/) | 经典数字合并游戏 |
 | 吃豆人 | [开始游戏](https://qichi7.github.io/moyu/game/pacman-game/) | 随机地图吃豆人 |
 | GoodMorning | [开始游戏](https://qichi7.github.io/moyu/game/goodmorning-game/) | 基于Gist的多人社交游戏 |
+| 中午吃点啥 | [开始游戏](https://qichi7.github.io/moyu/game/lunch-wheel/) | 午餐选择轮盘抽奖 |
 
 ---
 
