@@ -971,11 +971,11 @@ render() {
         this.ctx.fillText(`键盘: up=${this.keys.up}, down=${this.keys.down}, left=${this.keys.left}, right=${this.keys.right}`, 20, 130);
     }
     
-    // F3键切换调试信息
+    // H键切换调试信息
     setupDebugMode() {
         this.showDebug = false;
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'F3') {
+            if (e.key === 'h' || e.key === 'H') {
                 e.preventDefault();
                 this.showDebug = !this.showDebug;
             }
