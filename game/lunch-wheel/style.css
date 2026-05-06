@@ -270,6 +270,14 @@ header h1 {
     box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
 }
 
+.control-btn.danger-btn {
+    background: linear-gradient(145deg, #ff6b6b, #ee5a5a);
+}
+
+.control-btn.danger-btn:hover {
+    box-shadow: 0 5px 15px rgba(238, 90, 90, 0.4);
+}
+
 .btn-icon {
     font-size: 20px;
 }
@@ -357,6 +365,14 @@ header h1 {
 
 .submit-btn:hover {
     transform: scale(1.05);
+}
+
+.submit-btn.danger-btn {
+    background: linear-gradient(145deg, #ff6b6b, #ee5a5a);
+}
+
+.submit-btn.danger-btn:hover {
+    box-shadow: 0 5px 15px rgba(238, 90, 90, 0.4);
 }
 
 .cancel-btn {

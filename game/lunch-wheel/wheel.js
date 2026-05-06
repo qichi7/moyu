@@ -192,23 +192,14 @@ class LunchWheel {
             this.hideRecordOverlay();
         });
         
-        // 关闭结果
-        document.getElementById('close-result').addEventListener('click', async () => {
-            // 记录到历史
-            const result = document.getElementById('result-food').textContent;
-            if (result !== '你没饭吃了') {
-                const token = document.getElementById('gist-token').value.trim();
-                if (token) {
-                    await this.gistManager.recordHistory(result, token);
-                }
-            }
-            
+        // 清空记录
+        document.getElementById('clear-history-btn').addEventListener('click', () => {
+            this.showClearConfirm();
+        });
+        
+        // 关闭结果（不自动记录）
+        document.getElementById('close-result').addEventListener('click', () => {
             this.hideResult();
-            // 重新加载选项（更新可用选项）
-            await this.loadOptions();
-            this.drawWheel();
-            // 更新历史记录显示
-            await this.updateHistoryDisplay();
         });
     }
     
@@ -375,6 +366,70 @@ class LunchWheel {
             }
         } catch (e) {
             alert('记录失败：' + e.message);
+        }
+    }
+    
+    showClearConfirm() {
+        const confirmed = confirm('确定要清空所有历史记录吗？\n清空后所有选项都会重新加入轮盘。');
+        if (confirmed) {
+            this.showClearOverlay();
+        }
+    }
+    
+    showClearOverlay() {
+        // 创建一个简单的Token输入弹窗
+        const overlay = document.createElement('div');
+        overlay.className = 'record-overlay';
+        overlay.id = 'clear-token-overlay';
+        overlay.innerHTML = `
+            <div class="record-content">
+                <h2>🗑️ 清空记录</h2>
+                <div class="form-group">
+                    <label for="clear-token">GitHub Token：</label>
+                    <input type="password" id="clear-token" placeholder="ghp_xxxxxx（需要gist权限）">
+                    <small>需要Token才能清空记录</small>
+                </div>
+                <div class="form-buttons">
+                    <button id="confirm-clear" class="submit-btn danger-btn">确认清空</button>
+                    <button id="cancel-clear" class="cancel-btn">取消</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        
+        // 绑定事件
+        overlay.querySelector('#confirm-clear').addEventListener('click', async () => {
+            const token = overlay.querySelector('#clear-token').value.trim();
+            if (!token) {
+                alert('请输入GitHub Token');
+                return;
+            }
+            await this.clearHistory(token);
+            overlay.remove();
+        });
+        
+        overlay.querySelector('#cancel-clear').addEventListener('click', () => {
+            overlay.remove();
+        });
+    }
+    
+    async clearHistory(token) {
+        try {
+            // 读取数据并清空历史
+            const data = await this.gistManager.readData();
+            data.history = [];
+            
+            const success = await this.gistManager.writeData(data, token);
+            
+            if (success) {
+                alert('历史记录已清空！');
+                // 刷新轮盘和历史记录
+                await this.refreshAll();
+            } else {
+                alert('清空失败，请检查Token权限');
+            }
+        } catch (e) {
+            alert('清空失败：' + e.message);
         }
     }
 }
