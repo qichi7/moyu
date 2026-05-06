@@ -13,6 +13,7 @@ class LunchWheel {
         this.colors = [];
         this.isSpinning = false;
         this.currentRotation = 0;
+        this.lastSelectedOption = null; // 保存最后选择的选项
         
         this.init();
     }
@@ -197,9 +198,15 @@ class LunchWheel {
             this.showClearConfirm();
         });
         
-        // 关闭结果（不自动记录）
+        // 关闭结果（不记录）
         document.getElementById('close-result').addEventListener('click', () => {
             this.hideResult();
+        });
+        
+        // 记录这次选择
+        document.getElementById('record-result').addEventListener('click', () => {
+            this.hideResult();
+            this.showRecordWithSelected();
         });
     }
     
@@ -258,12 +265,31 @@ class LunchWheel {
     }
     
     showResult(option) {
+        this.lastSelectedOption = option; // 保存选择结果
         document.getElementById('result-food').textContent = option;
         document.getElementById('result-overlay').style.display = 'flex';
     }
     
     hideResult() {
         document.getElementById('result-overlay').style.display = 'none';
+    }
+    
+    // 显示记录界面并自动选择最后抽到的选项
+    async showRecordWithSelected() {
+        // 先显示记录界面
+        await this.showRecordOverlay();
+        
+        // 如果有最后选择的选项，自动选中
+        if (this.lastSelectedOption && this.lastSelectedOption !== '你没饭吃了') {
+            const select = document.getElementById('record-option');
+            // 查找并选中对应的选项
+            for (let i = 0; i < select.options.length; i++) {
+                if (select.options[i].value === this.lastSelectedOption) {
+                    select.selectedIndex = i;
+                    break;
+                }
+            }
+        }
     }
     
     showAddOverlay() {
@@ -311,6 +337,14 @@ class LunchWheel {
     
     // 刷新轮盘和历史记录
     async refreshAll() {
+        // 显示加载状态
+        const historyList = document.getElementById('history-list');
+        historyList.innerHTML = '<div class="loading">加载中...</div>';
+        
+        // 立即清除所有缓存，确保从gist重新读取最新数据
+        this.gistManager.clearCache();
+        
+        // 等待数据读取完成
         await this.loadOptions();
         this.drawWheel();
         await this.updateHistoryDisplay();
@@ -422,6 +456,8 @@ class LunchWheel {
             const success = await this.gistManager.writeData(data, token);
             
             if (success) {
+                // 清除缓存，确保下次读取最新数据
+                this.gistManager.clearCache();
                 alert('历史记录已清空！');
                 // 刷新轮盘和历史记录
                 await this.refreshAll();

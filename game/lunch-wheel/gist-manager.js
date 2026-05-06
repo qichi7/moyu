@@ -22,18 +22,29 @@ class GistManager {
     // 读取数据
     async readData() {
         const now = Date.now();
-        if (this.cache && (now - this.cacheTime) < this.cacheExpire) {
+        
+        // 只有在缓存有效且未被清除时才使用缓存
+        if (this.cache && this.cacheTime > 0 && (now - this.cacheTime) < this.cacheExpire) {
+            console.log('使用缓存数据');
             return this.cache;
         }
+        
+        console.log('从Gist读取最新数据...');
         
         try {
             const apiUrl = `https://api.github.com/gists/${GistManager.GIST_ID}`;
             const response = await fetch(apiUrl);
             
             if (!response.ok) {
-                console.error('读取Gist失败:', response.status);
-                // 修复：返回缓存数据而不是空对象，避免数据丢失
-                return this.cache || { options: [], history: [] };
+                console.error('读取Gist失败:', response.status, response.statusText);
+                // 如果有旧缓存，返回旧缓存；否则返回空对象（但不缓存）
+                if (this.cache) {
+                    console.log('网络失败，使用旧缓存数据');
+                    return this.cache;
+                }
+                console.warn('无缓存数据可用，返回空对象（不缓存）');
+                // 返回空对象但不缓存，避免缓存空数据
+                return { options: [], history: [] };
             }
             
             const gist = await response.json();
@@ -42,21 +53,33 @@ class GistManager {
                 const data = JSON.parse(gist.files[this.filename].content);
                 // 验证数据格式
                 if (!data.options || !Array.isArray(data.options)) {
+                    console.warn('选项数据格式无效，重置为空数组');
                     data.options = [];
                 }
                 if (!data.history || !Array.isArray(data.history)) {
+                    console.warn('历史数据格式无效，重置为空数组');
                     data.history = [];
                 }
+                console.log('成功读取数据:', data);
+                // 只有成功读取到数据后才缓存
                 this.cache = data;
                 this.cacheTime = now;
                 return data;
             }
             
-            // 修复：返回缓存数据而不是空对象
-            return this.cache || { options: [], history: [] };
+            console.error('Gist文件不存在或格式错误');
+            // 如果有旧缓存，返回旧缓存；否则返回空对象（但不缓存）
+            if (this.cache) {
+                return this.cache;
+            }
+            return { options: [], history: [] };
         } catch (e) {
             console.error('读取Gist异常:', e);
-            return this.cache || { options: [], history: [] };
+            // 如果有旧缓存，返回旧缓存；否则返回空对象（但不缓存）
+            if (this.cache) {
+                return this.cache;
+            }
+            return { options: [], history: [] };
         }
     }
     
@@ -109,12 +132,11 @@ class GistManager {
     
     // 添加新选项
     async addOption(option, token) {
-        // 清除缓存，确保读取最新数据
-        this.clearCache();
+        // 先读取数据，确保有有效数据
         const data = await this.readData();
         
-        // 验证数据有效性
-        if (!data || !data.options) {
+        // 验证数据有效性（空数组也算有效）
+        if (!data || !Array.isArray(data.options)) {
             console.error('数据无效，无法添加选项');
             return false;
         }
@@ -123,9 +145,8 @@ class GistManager {
             data.options.push(option);
             const success = await this.writeData(data, token);
             if (success) {
-                // 更新缓存
-                this.cache = data;
-                this.cacheTime = Date.now();
+                // 清除缓存，确保下次读取最新数据
+                this.clearCache();
             }
             return success;
         }
@@ -135,12 +156,11 @@ class GistManager {
     
     // 记录历史（最近三次）
     async recordHistory(option, token) {
-        // 清除缓存，确保读取最新数据
-        this.clearCache();
+        // 先读取数据，确保有有效数据
         const data = await this.readData();
         
-        // 验证数据有效性
-        if (!data || !data.history) {
+        // 验证数据有效性（空数组也算有效）
+        if (!data || !Array.isArray(data.history)) {
             console.error('数据无效，无法记录历史');
             return false;
         }
@@ -161,9 +181,8 @@ class GistManager {
         
         const success = await this.writeData(data, token);
         if (success) {
-            // 更新缓存
-            this.cache = data;
-            this.cacheTime = Date.now();
+            // 清除缓存，确保下次读取最新数据
+            this.clearCache();
         }
         return success;
     }

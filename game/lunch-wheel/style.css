@@ -227,6 +227,12 @@ header h1 {
     animation: bounce 0.5s ease infinite;
 }
 
+.result-buttons {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+}
+
 .close-btn {
     padding: 15px 40px;
     background: linear-gradient(145deg, #667eea, #764ba2);
@@ -241,6 +247,22 @@ header h1 {
 .close-btn:hover {
     transform: scale(1.05);
     box-shadow: 0 5px 15px rgba(102, 126, 234, 0.5);
+}
+
+.record-btn {
+    padding: 15px 30px;
+    background: linear-gradient(145deg, #4CAF50, #45a049);
+    color: white;
+    font-size: 18px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.record-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 5px 15px rgba(76, 175, 80, 0.5);
 }
 
 /* 控制按钮 */
