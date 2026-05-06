@@ -43,16 +43,26 @@ class LunchWheel {
     }
     
     async loadOptions() {
-        // 获取可用选项（排除最近三次）
-        this.availableOptions = await this.gistManager.getAvailableOptions();
-        
-        if (this.availableOptions.length === 0) {
-            this.options = ['你没饭吃了'];
-        } else {
-            this.options = this.availableOptions;
+        const allOptions = await this.gistManager.getAllOptions();
+        const emptyEl = document.getElementById('empty-message');
+
+        // 完全没有选项 → 显示空状态引导
+        if (allOptions.length === 0) {
+            emptyEl.style.display = 'flex';
+            this.availableOptions = [];
+            this.options = [];
+            this.generateColors();
+            return;
         }
-        
-        // 生成颜色
+
+        emptyEl.style.display = 'none';
+
+        // 获取可用选项（排除最近三次；getAvailableOptions 内部已做选项不足降级）
+        this.availableOptions = await this.gistManager.getAvailableOptions();
+        this.options = this.availableOptions.length > 0
+            ? this.availableOptions
+            : ['你没饭吃了']; // 兜底：理论上 getAvailableOptions 已降级，不会到这
+
         this.generateColors();
     }
     
@@ -361,14 +371,35 @@ class LunchWheel {
         }
     }
     
+    // Token 会话缓存（仅 sessionStorage，关闭标签页即清除）
+    static TOKEN_KEY = 'lunch-wheel:token';
+
+    rememberToken(token, checked) {
+        if (checked) {
+            sessionStorage.setItem(LunchWheel.TOKEN_KEY, token);
+        } else {
+            sessionStorage.removeItem(LunchWheel.TOKEN_KEY);
+        }
+    }
+
+    fillCachedToken(inputId, checkboxId) {
+        const cached = sessionStorage.getItem(LunchWheel.TOKEN_KEY);
+        if (!cached) return;
+        document.getElementById(inputId).value = cached;
+        const cb = document.getElementById(checkboxId);
+        if (cb) cb.checked = true;
+    }
+
     showAddOverlay() {
         document.getElementById('add-overlay').style.display = 'flex';
         document.getElementById('new-option').focus();
+        this.fillCachedToken('gist-token', 'remember-token-add');
     }
-    
+
     hideAddOverlay() {
         document.getElementById('add-overlay').style.display = 'none';
         document.getElementById('new-option').value = '';
+        document.getElementById('gist-token').value = '';
     }
     
     async submitNewOption() {
@@ -396,10 +427,13 @@ class LunchWheel {
             return;
         }
 
+        const remember = document.getElementById('remember-token-add').checked;
+
         try {
             const result = await this.gistManager.addOption(option, token);
 
             if (result.status === 'added') {
+                this.rememberToken(token, remember);
                 alert(`"${option}" 已添加成功！`);
                 this.hideAddOverlay();
                 await this.refreshAll();
@@ -432,50 +466,57 @@ class LunchWheel {
     async showRecordOverlay() {
         // 清除缓存，确保获取最新数据
         this.gistManager.clearCache();
-        
-        // 获取所有选项（包括被排除的）
+
         const allOptions = await this.gistManager.getAllOptions();
-        
+
         const select = document.getElementById('record-option');
-        select.innerHTML = '<option value="">-- 请选择 --</option>';
-        
+        select.replaceChildren();
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = '-- 请选择 --';
+        select.appendChild(placeholder);
+
         allOptions.forEach(option => {
             const opt = document.createElement('option');
             opt.value = option;
             opt.textContent = option;
             select.appendChild(opt);
         });
-        
+
         document.getElementById('record-overlay').style.display = 'flex';
+        this.fillCachedToken('record-token', 'remember-token-record');
     }
-    
+
     hideRecordOverlay() {
         document.getElementById('record-overlay').style.display = 'none';
         document.getElementById('record-token').value = '';
+        document.getElementById('record-option').selectedIndex = 0;
     }
     
     async submitRecord() {
         const select = document.getElementById('record-option');
         const option = select.value;
         const token = document.getElementById('record-token').value.trim();
-        
+
         if (!option) {
             alert('请选择吃了什么');
             return;
         }
-        
+
         if (!token) {
             alert('请输入GitHub Token');
             return;
         }
-        
+
+        const remember = document.getElementById('remember-token-record').checked;
+
         try {
             const success = await this.gistManager.recordHistory(option, token);
-            
+
             if (success) {
+                this.rememberToken(token, remember);
                 alert(`已记录：${option}`);
                 this.hideRecordOverlay();
-                // 刷新轮盘和历史记录
                 await this.refreshAll();
             } else {
                 alert('记录失败，请检查Token权限');

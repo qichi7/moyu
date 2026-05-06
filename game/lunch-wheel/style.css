@@ -367,6 +367,23 @@ header h1 {
     display: block;
 }
 
+.remember-token {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    color: #666;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.remember-token input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    cursor: pointer;
+}
+
 .form-buttons {
     display: flex;
     gap: 15px;
