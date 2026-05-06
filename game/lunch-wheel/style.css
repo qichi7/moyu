@@ -106,31 +106,20 @@ header h1 {
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-/* 指针（右侧） */
+/* 指针（右侧）— 三角尖端落在 canvas 右边缘 (right: 0) 处，
+   确保抽奖逻辑里 "0 度方向 = 选中扇形中点" 与视觉一致 */
 .wheel-pointer {
     position: absolute;
-    right: -25px;
+    right: -10px;
     top: 50%;
     transform: translateY(-50%);
     width: 0;
     height: 0;
-    border-top: 15px solid transparent;
-    border-bottom: 15px solid transparent;
-    border-right: 40px solid #ff6b6b;
+    border-top: 14px solid transparent;
+    border-bottom: 14px solid transparent;
+    border-right: 30px solid #ff6b6b;
     z-index: 5;
     filter: drop-shadow(3px 0 5px rgba(0, 0, 0, 0.3));
-}
-
-.wheel-pointer::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    right: -45px;
-    transform: translateY(-50%);
-    width: 10px;
-    height: 10px;
-    background: #ff6b6b;
-    border-radius: 50%;
 }
 
 /* 历史记录区域（主界面） */
@@ -304,7 +293,6 @@ header h1 {
     font-size: 20px;
 }
 
-/* 历史记录弹窗 */
 /* 添加选项弹窗 */
 .add-overlay {
     position: fixed;
@@ -365,6 +353,23 @@ header h1 {
     font-size: 12px;
     margin-top: 5px;
     display: block;
+}
+
+.remember-token {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    color: #666;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.remember-token input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    cursor: pointer;
 }
 
 .form-buttons {
@@ -490,6 +495,98 @@ header h1 {
 
 .add-first-btn:hover {
     transform: scale(1.05);
+}
+
+/* Toast 提示 */
+.toast-stack {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.toast {
+    background: #333;
+    color: white;
+    padding: 12px 24px;
+    border-radius: 8px;
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+    font-size: 14px;
+    max-width: 400px;
+    animation: toastIn 0.25s ease;
+    pointer-events: auto;
+}
+
+.toast.success { background: #4CAF50; }
+.toast.error { background: #ee5a5a; }
+.toast.warn { background: #f8b500; color: #333; }
+
+.toast.fade-out {
+    animation: toastOut 0.3s ease forwards;
+}
+
+@keyframes toastIn {
+    from { opacity: 0; transform: translateY(-12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toastOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-12px); }
+}
+
+/* 管理选项弹窗 */
+.manage-list {
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+
+.manage-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.manage-item:last-child {
+    border-bottom: none;
+}
+
+.manage-item-name {
+    color: #333;
+    font-size: 15px;
+    word-break: break-all;
+    margin-right: 10px;
+}
+
+.manage-item-delete {
+    background: #ee5a5a;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.manage-item-delete:hover {
+    background: #d04848;
+}
+
+.manage-empty {
+    color: #999;
+    text-align: center;
+    padding: 20px;
 }
 
 /* 响应式 */

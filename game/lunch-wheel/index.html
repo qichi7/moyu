@@ -51,10 +51,40 @@
                 <span class="btn-icon">🍽️</span>
                 上次吃了啥
             </button>
+            <button id="manage-options-btn" class="control-btn">
+                <span class="btn-icon">📝</span>
+                管理选项
+            </button>
             <button id="clear-history-btn" class="control-btn danger-btn">
                 <span class="btn-icon">🗑️</span>
                 清空记录
             </button>
+            <button id="settings-btn" class="control-btn">
+                <span class="btn-icon">⚙️</span>
+                设置
+            </button>
+        </div>
+
+        <div class="add-overlay" id="config-overlay" style="display: none;">
+            <div class="add-content">
+                <h2>⚙️ 配置 Gist</h2>
+                <p style="color:#666;font-size:14px;margin-bottom:15px;line-height:1.6;">
+                    数据存储在你自己的 GitHub Gist 中，请按以下步骤创建：<br>
+                    1. 访问 <a href="https://gist.github.com/" target="_blank" rel="noopener">gist.github.com</a><br>
+                    2. 文件名填 <code>lunch-options.json</code><br>
+                    3. 内容填 <code>{"options":[],"history":[]}</code><br>
+                    4. 创建后从 URL 复制 Gist ID 粘贴到下方
+                </p>
+                <div class="form-group">
+                    <label for="gist-id-input">Gist ID：</label>
+                    <input type="text" id="gist-id-input" placeholder="例如 8db89a5ec373b9e93642971d839a8e49">
+                    <small>仅保存在浏览器 localStorage，不会上传到任何后端</small>
+                </div>
+                <div class="form-buttons">
+                    <button id="submit-gist-id" class="submit-btn">保存</button>
+                    <button id="cancel-gist-id" class="cancel-btn">取消</button>
+                </div>
+            </div>
         </div>
         
         <div class="add-overlay" id="add-overlay" style="display: none;">
@@ -68,6 +98,9 @@
                     <label for="gist-token">GitHub Token：</label>
                     <input type="password" id="gist-token" placeholder="ghp_xxxxxx（需要gist权限）">
                     <small>Token仅用于写入数据，不会被保存</small>
+                    <label class="remember-token">
+                        <input type="checkbox" id="remember-token-add"> 本次浏览器标签页内记住 Token
+                    </label>
                 </div>
                 <div class="form-buttons">
                     <button id="submit-option" class="submit-btn">添加</button>
@@ -90,6 +123,9 @@
                     <label for="record-token">GitHub Token：</label>
                     <input type="password" id="record-token" placeholder="ghp_xxxxxx（需要gist权限）">
                     <small>Token仅用于写入数据，不会被保存</small>
+                    <label class="remember-token">
+                        <input type="checkbox" id="remember-token-record"> 本次浏览器标签页内记住 Token
+                    </label>
                 </div>
                 <div class="form-buttons">
                     <button id="submit-record" class="submit-btn">记录</button>
@@ -98,6 +134,28 @@
             </div>
         </div>
         
+        <div class="add-overlay" id="manage-overlay" style="display: none;">
+            <div class="add-content">
+                <h2>📝 管理选项</h2>
+                <div class="manage-list" id="manage-list"></div>
+                <p style="color:#666;font-size:13px;margin-bottom:12px;">
+                    删除选项需要 GitHub Token；删除后需刷新页面同步。
+                </p>
+                <div class="form-group">
+                    <label for="manage-token">GitHub Token：</label>
+                    <input type="password" id="manage-token" placeholder="ghp_xxxxxx（需要gist权限）">
+                    <label class="remember-token">
+                        <input type="checkbox" id="remember-token-manage"> 本次浏览器标签页内记住 Token
+                    </label>
+                </div>
+                <div class="form-buttons">
+                    <button id="close-manage" class="cancel-btn">关闭</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="toast-stack" id="toast-stack"></div>
+
         <div class="empty-message" id="empty-message" style="display: none;">
             <div class="empty-content">
                 <div class="empty-icon">🍽️</div>
