@@ -26,6 +26,7 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
+    overflow-x: hidden;
 }
 
 .container {
@@ -262,23 +263,26 @@ header h1 {
 /* 控制按钮 */
 .controls {
     display: flex;
-    gap: 15px;
+    flex-wrap: wrap;
+    gap: 12px;
     justify-content: center;
     margin-bottom: 20px;
 }
 
 .control-btn {
-    padding: 15px 25px;
+    padding: 12px 18px;
     background: linear-gradient(145deg, #667eea, #764ba2);
     color: white;
-    font-size: 16px;
+    font-size: 15px;
     border: none;
     border-radius: 10px;
     cursor: pointer;
     transition: all 0.3s ease;
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    white-space: nowrap;
+    flex: 0 1 auto;
 }
 
 .control-btn:hover {
@@ -599,23 +603,65 @@ header h1 {
 
 /* 响应式 */
 @media (max-width: 500px) {
+    .container {
+        padding: 20px 16px;
+        border-radius: 20px;
+        width: 94%;
+    }
+
+    header {
+        margin-bottom: 20px;
+    }
+
+    header h1 {
+        font-size: 28px;
+    }
+
     .wheel-container {
-        width: 300px;
-        height: 300px;
+        width: 280px;
+        height: 280px;
+        margin-bottom: 20px;
     }
-    
+
     #wheel-canvas {
-        width: 300px;
-        height: 300px;
+        width: 280px;
+        height: 280px;
     }
-    
+
     .spin-button {
         width: 80px;
         height: 80px;
         font-size: 16px;
     }
-    
+
     .result-food {
         font-size: 36px;
+    }
+
+    .result-content {
+        padding: 30px 20px;
+    }
+
+    .result-buttons {
+        flex-wrap: wrap;
+    }
+
+    .controls {
+        gap: 8px;
+    }
+
+    .control-btn {
+        padding: 10px 14px;
+        font-size: 13px;
+        gap: 4px;
+    }
+
+    .control-btn .btn-icon {
+        font-size: 16px;
+    }
+
+    .add-content,
+    .record-content {
+        padding: 24px 18px;
     }
 }
