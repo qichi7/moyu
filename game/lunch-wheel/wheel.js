@@ -228,12 +228,14 @@ class LunchWheel {
         
         // 计算旋转角度
         const sliceAngle = (Math.PI * 2) / this.options.length;
-        // 指针指向右侧（0度），计算目标扇形的起始角度
+        // 指针指向右侧（0度），计算目标扇形中点的角度
         const targetAngle = selectedIndex * sliceAngle + sliceAngle / 2;
-        // 需要旋转到目标角度指向右侧
-        const baseRotation = -targetAngle;
-        // 加上额外的旋转圈数（5-10圈）
-        const extraRotation = Math.PI * 2 * (5 + Math.random() * 5);
+        // 需要把当前 rotation 修正到 -targetAngle，使该扇形中点指向右侧
+        const TWO_PI = Math.PI * 2;
+        const normalizedStart = ((this.currentRotation % TWO_PI) + TWO_PI) % TWO_PI;
+        const baseRotation = ((-targetAngle - normalizedStart) % TWO_PI + TWO_PI) % TWO_PI;
+        // 必须是 2π 的整数倍额外圈数，否则最终角度会偏离选中扇形
+        const extraRotation = TWO_PI * (5 + Math.floor(Math.random() * 5));
         const totalRotation = baseRotation + extraRotation;
         
         // 动画参数
@@ -255,6 +257,9 @@ class LunchWheel {
             if (progress < 1) {
                 requestAnimationFrame(animate);
             } else {
+                const TWO_PI = Math.PI * 2;
+                this.currentRotation = ((startRotation + totalRotation) % TWO_PI + TWO_PI) % TWO_PI;
+                this.drawWheel();
                 this.isSpinning = false;
                 document.getElementById('spin-btn').disabled = false;
                 this.showResult(selectedOption);
