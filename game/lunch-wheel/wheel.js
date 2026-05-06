@@ -230,10 +230,10 @@ class LunchWheel {
         
         // 计算旋转角度
         const sliceAngle = (Math.PI * 2) / this.options.length;
-        // 指针指向顶部（-90度），计算目标扇形的起始角度
+        // 指针指向右侧（0度），计算目标扇形的起始角度
         const targetAngle = selectedIndex * sliceAngle + sliceAngle / 2;
-        // 需要旋转到目标角度指向顶部
-        const baseRotation = -Math.PI / 2 - targetAngle;
+        // 需要旋转到目标角度指向右侧
+        const baseRotation = -targetAngle;
         // 加上额外的旋转圈数（5-10圈）
         const extraRotation = Math.PI * 2 * (5 + Math.random() * 5);
         const totalRotation = baseRotation + extraRotation;

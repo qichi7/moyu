@@ -106,27 +106,27 @@ header h1 {
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-/* 指针 */
+/* 指针（右侧） */
 .wheel-pointer {
     position: absolute;
-    top: -20px;
-    left: 50%;
-    transform: translateX(-50%);
+    right: -25px;
+    top: 50%;
+    transform: translateY(-50%);
     width: 0;
     height: 0;
-    border-left: 15px solid transparent;
-    border-right: 15px solid transparent;
-    border-top: 40px solid #ff6b6b;
+    border-top: 15px solid transparent;
+    border-bottom: 15px solid transparent;
+    border-left: 40px solid #ff6b6b;
     z-index: 5;
-    filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.3));
+    filter: drop-shadow(-3px 0 5px rgba(0, 0, 0, 0.3));
 }
 
 .wheel-pointer::after {
     content: '';
     position: absolute;
-    top: -45px;
-    left: 50%;
-    transform: translateX(-50%);
+    top: 50%;
+    left: -45px;
+    transform: translateY(-50%);
     width: 10px;
     height: 10px;
     background: #ff6b6b;
