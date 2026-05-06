@@ -125,6 +125,21 @@ class LunchWheel {
         }
     }
     
+    // 自适应字号：在 [MIN, MAX] 范围内取最大的、所有 items 都能完整装下的字号
+    // 由于 maxWidth 本身依赖 fontSize（halfTan/innerLimit），按 1px 步长向下扫描评估
+    _fitFontSize(items, sliceAngle, textRadius, MAX = 18, MIN = 8) {
+        const halfTan = Math.tan(sliceAngle / 2);
+        for (let f = MAX; f >= MIN; f--) {
+            const safeInner = halfTan > 0 ? (f / 2) / halfTan + 4 : 60;
+            const innerLimit = Math.max(55, safeInner);
+            const maxWidth = Math.max(20, textRadius - innerLimit);
+            this.ctx.font = `bold ${f}px Microsoft YaHei, sans-serif`;
+            const allFit = items.every(t => this.ctx.measureText(t).width <= maxWidth);
+            if (allFit) return f;
+        }
+        return MIN;
+    }
+
     drawWheel() {
         const centerX = this.cssSize / 2;
         const centerY = this.cssSize / 2;
@@ -149,54 +164,56 @@ class LunchWheel {
         
         // 绘制扇形
         const sliceAngle = (Math.PI * 2) / this.options.length;
-        
+        const textRadius = radius - 15;
+
+        // 自适应字号：在 [minFontSize, maxFontSize] 内取最大的、能让所有选项完整装下的字号
+        // 注意 maxWidth 与 fontSize 耦合（字号越大→所需 innerLimit 越大→可用宽度越小），
+        // 必须按字号迭代评估，不能简单按最长字符串单次计算。
+        const fontSize = this._fitFontSize(this.options, sliceAngle, textRadius);
+        const halfTan = Math.tan(sliceAngle / 2);
+        const safeInner = halfTan > 0 ? (fontSize / 2) / halfTan + 4 : 60;
+        const innerLimit = Math.max(55, safeInner);
+        const maxWidth = Math.max(20, textRadius - innerLimit);
+
         this.ctx.save();
         this.ctx.translate(centerX, centerY);
         this.ctx.rotate(this.currentRotation);
-        
+
         for (let i = 0; i < this.options.length; i++) {
             const startAngle = i * sliceAngle;
             const endAngle = startAngle + sliceAngle;
-            
+
             // 绘制扇形
             this.ctx.beginPath();
             this.ctx.moveTo(0, 0);
             this.ctx.arc(0, 0, radius - 5, startAngle, endAngle);
             this.ctx.closePath();
-            
+
             this.ctx.fillStyle = this.colors[i];
             this.ctx.fill();
-            
+
             // 绘制边框
             this.ctx.strokeStyle = '#fff';
             this.ctx.lineWidth = 2;
             this.ctx.stroke();
-            
+
             // 绘制文字
             this.ctx.save();
             this.ctx.rotate(startAngle + sliceAngle / 2);
             this.ctx.textAlign = 'right';
             this.ctx.textBaseline = 'middle';
             this.ctx.fillStyle = '#fff';
-            // 字号随选项数动态收缩
-            const fontSize = Math.max(10, Math.min(16, Math.floor(220 / this.options.length)));
             this.ctx.font = `bold ${fontSize}px Microsoft YaHei, sans-serif`;
 
-            const textRadius = radius - 15;
-            // 文字内端 x 必须 ≥ innerLimit，使文字半高 (fontSize/2) 不越过扇形辐边：
-            //   2 * innerLimit * tan(sliceAngle/2) ≥ fontSize → innerLimit = fontSize / (2*tan)
-            // 加 4px 余量。再确保至少留出中心圆 50px + 5px 视觉间距。
-            const halfTan = Math.tan(sliceAngle / 2);
-            const safeInner = halfTan > 0 ? (fontSize / 2) / halfTan + 4 : 60;
-            const innerLimit = Math.max(55, safeInner);
-            const maxWidth = Math.max(20, textRadius - innerLimit);
-
+            // 自适应字号已尽量让所有选项装下；极端兜底：若仍超宽（字号已到下限）则截断 + …
             const original = this.options[i];
             let text = original;
-            while (text.length > 1 && this.ctx.measureText(text).width > maxWidth) {
-                text = text.slice(0, -1);
+            if (this.ctx.measureText(text).width > maxWidth) {
+                while (text.length > 1 && this.ctx.measureText(text + '…').width > maxWidth) {
+                    text = text.slice(0, -1);
+                }
+                text = text + '…';
             }
-            if (text !== original) text = text.slice(0, -1) + '…';
 
             this.ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
             this.ctx.shadowBlur = 3;
@@ -204,7 +221,7 @@ class LunchWheel {
 
             this.ctx.restore();
         }
-        
+
         this.ctx.restore();
         
         // 绘制中心圆
