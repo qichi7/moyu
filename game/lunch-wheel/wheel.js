@@ -325,23 +325,35 @@ class LunchWheel {
         await this.updateHistoryDisplay();
     }
     
-    showRecordOverlay() {
+    async showRecordOverlay() {
+        // 获取所有选项（包括被排除的）
+        const allOptions = await this.gistManager.getAllOptions();
+        
+        const select = document.getElementById('record-option');
+        select.innerHTML = '<option value="">-- 请选择 --</option>';
+        
+        allOptions.forEach(option => {
+            const opt = document.createElement('option');
+            opt.value = option;
+            opt.textContent = option;
+            select.appendChild(opt);
+        });
+        
         document.getElementById('record-overlay').style.display = 'flex';
-        document.getElementById('record-option').focus();
     }
     
     hideRecordOverlay() {
         document.getElementById('record-overlay').style.display = 'none';
-        document.getElementById('record-option').value = '';
         document.getElementById('record-token').value = '';
     }
     
     async submitRecord() {
-        const option = document.getElementById('record-option').value.trim();
+        const select = document.getElementById('record-option');
+        const option = select.value;
         const token = document.getElementById('record-token').value.trim();
         
         if (!option) {
-            alert('请输入吃了什么');
+            alert('请选择吃了什么');
             return;
         }
         

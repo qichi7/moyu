@@ -73,9 +73,11 @@
             <div class="record-content">
                 <h2>🍽️ 上次吃了啥</h2>
                 <div class="form-group">
-                    <label for="record-option">吃了什么：</label>
-                    <input type="text" id="record-option" placeholder="例如：麻辣烫" maxlength="20">
-                    <small>记录后会从轮盘暂时移除该选项</small>
+                    <label for="record-option">选择吃了什么：</label>
+                    <select id="record-option">
+                        <option value="">-- 请选择 --</option>
+                    </select>
+                    <small>从已有选项中选择，记录后会从轮盘暂时移除</small>
                 </div>
                 <div class="form-group">
                     <label for="record-token">GitHub Token：</label>
