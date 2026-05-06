@@ -25,8 +25,21 @@
 
 ## 数据存储
 
-数据存储在GitHub Gist中：
-- **Gist链接**: https://gist.github.com/qichi7/8db89a5ec373b9e93642971d839a8e49
+数据存储在你**自己的** GitHub Gist 中（每个用户独立一份）。
+
+### 接入步骤
+
+1. 访问 [gist.github.com](https://gist.github.com/) 创建一个新的 Gist（建议设为 secret）
+2. 文件名填 `lunch-options.json`
+3. 内容填：
+   ```json
+   {"options": [], "history": []}
+   ```
+4. 创建后从 URL 末尾复制 Gist ID（一串 20–40 位的十六进制）
+5. 打开本页面，点击右下角"⚙️ 设置"按钮，粘贴 Gist ID 保存
+6. 添加/记录/删除时再用一个有 `gist` 权限的 [Personal Access Token](https://github.com/settings/tokens) 写入
+
+> Gist ID 仅保存在浏览器 localStorage；Token 仅在勾选"记住"时存入 sessionStorage（关闭标签页即清除）。两者都不会上传到任何后端。
 
 ## Bug修复记录
 
