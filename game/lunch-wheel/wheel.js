@@ -39,26 +39,13 @@ class LunchWheel {
     }
     
     async init() {
-        // 绑定事件（先于异步加载，避免设置入口不可用）
+        // 绑定事件（先于异步加载）
         this.bindEvents();
 
-        // 未配置 Gist ID 时引导用户配置
-        if (!this.gistManager.isConfigured()) {
-            this.drawWheel();
-            this.showConfigOverlay();
-            return;
-        }
-
-        // 清除缓存，确保每次打开/刷新都从gist重新读取
+        // 默认即可读取（公共 Gist 兜底），不再因"未配置"而阻塞
         this.gistManager.clearCache();
-
-        // 加载选项
         await this.loadOptions();
-
-        // 绘制轮盘
         this.drawWheel();
-
-        // 加载并显示历史记录
         await this.updateHistoryDisplay();
     }
     
@@ -330,19 +317,26 @@ class LunchWheel {
             this.submitGistId();
         });
 
+        document.getElementById('reset-gist-id').addEventListener('click', () => {
+            this.resetGistId();
+        });
+
         document.getElementById('cancel-gist-id').addEventListener('click', () => {
-            // 未配置时不允许直接关闭（否则界面无法工作）
-            if (!this.gistManager.isConfigured()) {
-                this.showToast('需要配置 Gist ID 才能使用', 'warn');
-                return;
-            }
+            // 默认 PUBLIC fallback 总是可用，关闭弹窗无任何阻塞
             this.hideConfigOverlay();
         });
     }
 
     showConfigOverlay() {
         const input = document.getElementById('gist-id-input');
-        input.value = this.gistManager.gistId || '';
+        const userId = GistManager.getUserGistId();
+        input.value = userId || '';
+        const label = document.getElementById('current-gist-label');
+        if (label) {
+            label.textContent = this.gistManager.isUsingPublic()
+                ? `公共默认 (${GistManager.PUBLIC_GIST_ID.slice(0, 8)}…)`
+                : `自定义 (${userId.slice(0, 8)}…)`;
+        }
         document.getElementById('config-overlay').style.display = 'flex';
         input.focus();
     }
@@ -353,11 +347,16 @@ class LunchWheel {
 
     async submitGistId() {
         const id = document.getElementById('gist-id-input').value.trim();
+        if (!id) {
+            // 留空 = 恢复默认（与 reset 等价）
+            this.resetGistId();
+            return;
+        }
         if (!GistManager.GIST_ID_PATTERN.test(id)) {
             this.showToast('Gist ID 格式无效（应为 20-40 位的十六进制字符）', 'warn');
             return;
         }
-        const ok = GistManager.setGistId(id);
+        const ok = GistManager.setUserGistId(id);
         if (!ok) {
             this.showToast('保存失败', 'error');
             return;
@@ -367,7 +366,42 @@ class LunchWheel {
         this.showToast('Gist ID 已保存', 'success');
         await this.refreshAll();
     }
-    
+
+    async resetGistId() {
+        GistManager.clearUserGistId();
+        this.gistManager.clearCache();
+        this.hideConfigOverlay();
+        this.showToast('已恢复为公共默认 Gist', 'success');
+        await this.refreshAll();
+    }
+
+    // 写表单的 Gist ID 输入字段缓存机制（与 fillCachedToken 类似，但用 localStorage）
+    fillCachedGistId(inputId) {
+        const cached = GistManager.getUserGistId();
+        if (cached) {
+            document.getElementById(inputId).value = cached;
+        }
+    }
+
+    // 提交写操作前从表单读取 Gist ID 并校验
+    readGistIdFromForm(inputId, rememberCheckboxId) {
+        const id = document.getElementById(inputId).value.trim();
+        if (!GistManager.GIST_ID_PATTERN.test(id)) {
+            this.showToast('请填写合法的 Gist ID（20-40 位十六进制）', 'warn');
+            return null;
+        }
+        return {
+            id,
+            remember: document.getElementById(rememberCheckboxId)?.checked || false,
+        };
+    }
+
+    persistGistIdIfRemembered(id, remember) {
+        if (remember) {
+            GistManager.setUserGistId(id);
+        }
+    }
+
     async spin() {
         if (this.isSpinning) return;
 
@@ -502,14 +536,16 @@ class LunchWheel {
         document.getElementById('add-overlay').style.display = 'flex';
         document.getElementById('new-option').focus();
         this.fillCachedToken('gist-token', 'remember-token-add');
+        this.fillCachedGistId('gist-id-add');
     }
 
     hideAddOverlay() {
         document.getElementById('add-overlay').style.display = 'none';
         document.getElementById('new-option').value = '';
         document.getElementById('gist-token').value = '';
+        document.getElementById('gist-id-add').value = '';
     }
-    
+
     async submitNewOption() {
         const option = document.getElementById('new-option').value.trim();
         const token = document.getElementById('gist-token').value.trim();
@@ -530,6 +566,9 @@ class LunchWheel {
             return;
         }
 
+        const gist = this.readGistIdFromForm('gist-id-add', 'remember-gist-id-add');
+        if (!gist) return;
+
         if (!token) {
             this.showToast('请输入 GitHub Token', 'warn');
             return;
@@ -538,10 +577,11 @@ class LunchWheel {
         const remember = document.getElementById('remember-token-add').checked;
 
         try {
-            const result = await this.gistManager.addOption(option, token);
+            const result = await this.gistManager.addOption(option, token, gist.id);
 
             if (result.status === 'added') {
                 this.rememberToken(token, remember);
+                this.persistGistIdIfRemembered(gist.id, gist.remember);
                 this.showToast(`"${option}" 已添加`, 'success');
                 this.hideAddOverlay();
                 await this.refreshAll();
@@ -593,14 +633,16 @@ class LunchWheel {
 
         document.getElementById('record-overlay').style.display = 'flex';
         this.fillCachedToken('record-token', 'remember-token-record');
+        this.fillCachedGistId('gist-id-record');
     }
 
     hideRecordOverlay() {
         document.getElementById('record-overlay').style.display = 'none';
         document.getElementById('record-token').value = '';
+        document.getElementById('gist-id-record').value = '';
         document.getElementById('record-option').selectedIndex = 0;
     }
-    
+
     async submitRecord() {
         const select = document.getElementById('record-option');
         const option = select.value;
@@ -611,6 +653,9 @@ class LunchWheel {
             return;
         }
 
+        const gist = this.readGistIdFromForm('gist-id-record', 'remember-gist-id-record');
+        if (!gist) return;
+
         if (!token) {
             this.showToast('请输入 GitHub Token', 'warn');
             return;
@@ -619,15 +664,16 @@ class LunchWheel {
         const remember = document.getElementById('remember-token-record').checked;
 
         try {
-            const success = await this.gistManager.recordHistory(option, token);
+            const success = await this.gistManager.recordHistory(option, token, gist.id);
 
             if (success) {
                 this.rememberToken(token, remember);
+                this.persistGistIdIfRemembered(gist.id, gist.remember);
                 this.showToast(`已记录：${option}`, 'success');
                 this.hideRecordOverlay();
                 await this.refreshAll();
             } else {
-                this.showToast('记录失败，请检查 Token 权限', 'error');
+                this.showToast('记录失败，请检查 Token 权限或 Gist ID', 'error');
             }
         } catch (e) {
             this.showToast('记录失败：' + e.message, 'error');
@@ -653,18 +699,43 @@ class LunchWheel {
         const h2 = document.createElement('h2');
         h2.textContent = '🗑️ 清空记录';
 
-        const formGroup = document.createElement('div');
-        formGroup.className = 'form-group';
-        const label = document.createElement('label');
-        label.htmlFor = 'clear-token';
-        label.textContent = 'GitHub Token：';
+        const hintRow = document.createElement('p');
+        hintRow.className = 'overlay-hint';
+        hintRow.textContent = '💡 写操作需要 Gist ID 与 GitHub Token';
+
+        // Gist ID 字段
+        const gistGroup = document.createElement('div');
+        gistGroup.className = 'form-group';
+        const gistLabel = document.createElement('label');
+        gistLabel.htmlFor = 'clear-gist-id';
+        gistLabel.textContent = 'Gist ID：';
+        const gistInput = document.createElement('input');
+        gistInput.type = 'text';
+        gistInput.id = 'clear-gist-id';
+        gistInput.placeholder = '20-40 位十六进制';
+        const cachedGistId = GistManager.getUserGistId();
+        if (cachedGistId) gistInput.value = cachedGistId;
+        const rememberGistLabel = document.createElement('label');
+        rememberGistLabel.className = 'remember-token';
+        const rememberGistCb = document.createElement('input');
+        rememberGistCb.type = 'checkbox';
+        rememberGistCb.id = 'remember-gist-id-clear';
+        rememberGistLabel.append(rememberGistCb, document.createTextNode(' 在本浏览器记住（同时切换为读取该 Gist）'));
+        gistGroup.append(gistLabel, gistInput, rememberGistLabel);
+
+        // Token 字段
+        const tokenGroup = document.createElement('div');
+        tokenGroup.className = 'form-group';
+        const tokenLabel = document.createElement('label');
+        tokenLabel.htmlFor = 'clear-token';
+        tokenLabel.textContent = 'GitHub Token：';
         const tokenInput = document.createElement('input');
         tokenInput.type = 'password';
         tokenInput.id = 'clear-token';
-        tokenInput.placeholder = 'ghp_xxxxxx（需要gist权限）';
+        tokenInput.placeholder = 'ghp_xxxxxx（需要 gist 权限）';
         const hint = document.createElement('small');
-        hint.textContent = '需要Token才能清空记录';
-        formGroup.append(label, tokenInput, hint);
+        hint.textContent = '需要 Token 才能清空记录';
+        tokenGroup.append(tokenLabel, tokenInput, hint);
 
         const buttons = document.createElement('div');
         buttons.className = 'form-buttons';
@@ -678,22 +749,30 @@ class LunchWheel {
         cancelBtn.textContent = '取消';
         buttons.append(confirmBtn, cancelBtn);
 
-        content.append(h2, formGroup, buttons);
+        content.append(h2, hintRow, gistGroup, tokenGroup, buttons);
         overlay.appendChild(content);
         document.body.appendChild(overlay);
 
         confirmBtn.addEventListener('click', async () => {
+            const gistId = gistInput.value.trim();
+            if (!GistManager.GIST_ID_PATTERN.test(gistId)) {
+                this.showToast('请填写合法的 Gist ID（20-40 位十六进制）', 'warn');
+                return;
+            }
             const token = tokenInput.value.trim();
             if (!token) {
                 this.showToast('请输入 GitHub Token', 'warn');
                 return;
             }
-            await this.clearHistory(token);
+            await this.clearHistory(token, gistId);
+            this.persistGistIdIfRemembered(gistId, rememberGistCb.checked);
             overlay.remove();
+            document.removeEventListener('keydown', onKey);
         });
 
         cancelBtn.addEventListener('click', () => {
             overlay.remove();
+            document.removeEventListener('keydown', onKey);
         });
 
         // Esc 关闭 / Enter 提交
@@ -701,26 +780,26 @@ class LunchWheel {
             if (e.key === 'Escape') {
                 overlay.remove();
                 document.removeEventListener('keydown', onKey);
-            } else if (e.key === 'Enter' && document.activeElement === tokenInput) {
+            } else if (e.key === 'Enter' && (document.activeElement === tokenInput || document.activeElement === gistInput)) {
                 confirmBtn.click();
             }
         };
         document.addEventListener('keydown', onKey);
     }
 
-    async clearHistory(token) {
+    async clearHistory(token, gistId) {
         try {
             const data = await this.gistManager.readData();
             data.history = [];
 
-            const success = await this.gistManager.writeData(data, token);
+            const success = await this.gistManager.writeData(data, token, gistId);
 
             if (success) {
                 this.gistManager.clearCache();
                 this.showToast('历史记录已清空', 'success');
                 await this.refreshAll();
             } else {
-                this.showToast('清空失败，请检查 Token 权限', 'error');
+                this.showToast('清空失败，请检查 Token 权限或 Gist ID', 'error');
             }
         } catch (e) {
             this.showToast('清空失败：' + e.message, 'error');
@@ -732,11 +811,13 @@ class LunchWheel {
         await this.renderManageList();
         document.getElementById('manage-overlay').style.display = 'flex';
         this.fillCachedToken('manage-token', 'remember-token-manage');
+        this.fillCachedGistId('gist-id-manage');
     }
 
     hideManageOverlay() {
         document.getElementById('manage-overlay').style.display = 'none';
         document.getElementById('manage-token').value = '';
+        document.getElementById('gist-id-manage').value = '';
     }
 
     async renderManageList() {
@@ -768,6 +849,9 @@ class LunchWheel {
     }
 
     async deleteOption(name) {
+        const gist = this.readGistIdFromForm('gist-id-manage', 'remember-gist-id-manage');
+        if (!gist) return;
+
         const token = document.getElementById('manage-token').value.trim();
         if (!token) {
             this.showToast('请先填写 Token 再删除', 'warn');
@@ -778,14 +862,15 @@ class LunchWheel {
         const remember = document.getElementById('remember-token-manage').checked;
 
         try {
-            const ok = await this.gistManager.deleteOption(name, token);
+            const ok = await this.gistManager.deleteOption(name, token, gist.id);
             if (ok) {
                 this.rememberToken(token, remember);
+                this.persistGistIdIfRemembered(gist.id, gist.remember);
                 this.showToast(`已删除 "${name}"`, 'success');
                 await this.renderManageList();
                 await this.refreshAll();
             } else {
-                this.showToast('删除失败，请检查 Token 权限', 'error');
+                this.showToast('删除失败，请检查 Token 权限或 Gist ID', 'error');
             }
         } catch (e) {
             this.showToast('删除失败：' + e.message, 'error');

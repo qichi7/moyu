@@ -67,37 +67,48 @@
 
         <div class="add-overlay" id="config-overlay" style="display: none;">
             <div class="add-content">
-                <h2>⚙️ 配置 Gist</h2>
-                <p style="color:#666;font-size:14px;margin-bottom:15px;line-height:1.6;">
-                    数据存储在你自己的 GitHub Gist 中，请按以下步骤创建：<br>
-                    1. 访问 <a href="https://gist.github.com/" target="_blank" rel="noopener">gist.github.com</a><br>
-                    2. 文件名填 <code>lunch-options.json</code><br>
-                    3. 内容填 <code>{"options":[],"history":[]}</code><br>
-                    4. 创建后从 URL 复制 Gist ID 粘贴到下方
+                <h2>⚙️ 切换 Gist</h2>
+                <p class="overlay-hint" style="margin-bottom:12px;">
+                    当前生效：<span id="current-gist-label">公共默认</span>
+                </p>
+                <p style="color:#666;font-size:13px;line-height:1.6;margin-bottom:15px;">
+                    默认从公共 Gist 读取共享菜单。如果你想读取/写入到自己的 Gist：<br>
+                    1. 在 <a href="https://gist.github.com/" target="_blank" rel="noopener">gist.github.com</a> 创建 Gist，文件名 <code>lunch-options.json</code><br>
+                    2. 内容填 <code>{"options":[],"history":[]}</code><br>
+                    3. 把 Gist ID 粘贴到下方并保存
                 </p>
                 <div class="form-group">
                     <label for="gist-id-input">Gist ID：</label>
-                    <input type="text" id="gist-id-input" placeholder="例如 8db89a5ec373b9e93642971d839a8e49">
-                    <small>仅保存在浏览器 localStorage，不会上传到任何后端</small>
+                    <input type="text" id="gist-id-input" placeholder="20-40 位十六进制；留空使用公共默认">
+                    <small>仅保存在浏览器 localStorage，不上传任何后端</small>
                 </div>
                 <div class="form-buttons">
                     <button id="submit-gist-id" class="submit-btn">保存</button>
+                    <button id="reset-gist-id" class="cancel-btn">恢复默认</button>
                     <button id="cancel-gist-id" class="cancel-btn">取消</button>
                 </div>
             </div>
         </div>
-        
+
         <div class="add-overlay" id="add-overlay" style="display: none;">
             <div class="add-content">
                 <h2>➕ 添加新选项</h2>
+                <p class="overlay-hint">💡 写操作需要 Gist ID 与 GitHub Token</p>
                 <div class="form-group">
                     <label for="new-option">选项名称：</label>
                     <input type="text" id="new-option" placeholder="例如：麻辣烫" maxlength="20">
                 </div>
                 <div class="form-group">
+                    <label for="gist-id-add">Gist ID：</label>
+                    <input type="text" id="gist-id-add" placeholder="20-40 位十六进制">
+                    <label class="remember-token">
+                        <input type="checkbox" id="remember-gist-id-add"> 在本浏览器记住（同时切换为读取该 Gist）
+                    </label>
+                </div>
+                <div class="form-group">
                     <label for="gist-token">GitHub Token：</label>
-                    <input type="password" id="gist-token" placeholder="ghp_xxxxxx（需要gist权限）">
-                    <small>Token仅用于写入数据，不会被保存</small>
+                    <input type="password" id="gist-token" placeholder="ghp_xxxxxx（需要 gist 权限）">
+                    <small>Token 仅用于写入数据，不会被保存</small>
                     <label class="remember-token">
                         <input type="checkbox" id="remember-token-add"> 本次浏览器标签页内记住 Token
                     </label>
@@ -108,10 +119,11 @@
                 </div>
             </div>
         </div>
-        
+
         <div class="record-overlay" id="record-overlay" style="display: none;">
             <div class="record-content">
                 <h2>🍽️ 上次吃了啥</h2>
+                <p class="overlay-hint">💡 写操作需要 Gist ID 与 GitHub Token</p>
                 <div class="form-group">
                     <label for="record-option">选择吃了什么：</label>
                     <select id="record-option">
@@ -120,9 +132,16 @@
                     <small>从已有选项中选择，记录后会从轮盘暂时移除</small>
                 </div>
                 <div class="form-group">
+                    <label for="gist-id-record">Gist ID：</label>
+                    <input type="text" id="gist-id-record" placeholder="20-40 位十六进制">
+                    <label class="remember-token">
+                        <input type="checkbox" id="remember-gist-id-record"> 在本浏览器记住（同时切换为读取该 Gist）
+                    </label>
+                </div>
+                <div class="form-group">
                     <label for="record-token">GitHub Token：</label>
-                    <input type="password" id="record-token" placeholder="ghp_xxxxxx（需要gist权限）">
-                    <small>Token仅用于写入数据，不会被保存</small>
+                    <input type="password" id="record-token" placeholder="ghp_xxxxxx（需要 gist 权限）">
+                    <small>Token 仅用于写入数据，不会被保存</small>
                     <label class="remember-token">
                         <input type="checkbox" id="remember-token-record"> 本次浏览器标签页内记住 Token
                     </label>
@@ -133,17 +152,22 @@
                 </div>
             </div>
         </div>
-        
+
         <div class="add-overlay" id="manage-overlay" style="display: none;">
             <div class="add-content">
                 <h2>📝 管理选项</h2>
+                <p class="overlay-hint">💡 删除选项需要 Gist ID 与 GitHub Token</p>
                 <div class="manage-list" id="manage-list"></div>
-                <p style="color:#666;font-size:13px;margin-bottom:12px;">
-                    删除选项需要 GitHub Token；删除后需刷新页面同步。
-                </p>
+                <div class="form-group">
+                    <label for="gist-id-manage">Gist ID：</label>
+                    <input type="text" id="gist-id-manage" placeholder="20-40 位十六进制">
+                    <label class="remember-token">
+                        <input type="checkbox" id="remember-gist-id-manage"> 在本浏览器记住（同时切换为读取该 Gist）
+                    </label>
+                </div>
                 <div class="form-group">
                     <label for="manage-token">GitHub Token：</label>
-                    <input type="password" id="manage-token" placeholder="ghp_xxxxxx（需要gist权限）">
+                    <input type="password" id="manage-token" placeholder="ghp_xxxxxx（需要 gist 权限）">
                     <label class="remember-token">
                         <input type="checkbox" id="remember-token-manage"> 本次浏览器标签页内记住 Token
                     </label>
