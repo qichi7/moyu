@@ -4,32 +4,18 @@
  */
 
 class GistManager {
-    static STORAGE_KEY = 'lunch-wheel:gist-id';
-    static GIST_ID_PATTERN = /^[a-f0-9]{20,40}$/i;
-
-    static getGistId() {
-        return localStorage.getItem(GistManager.STORAGE_KEY) || '';
-    }
-
-    static setGistId(id) {
-        if (!GistManager.GIST_ID_PATTERN.test(id)) return false;
-        localStorage.setItem(GistManager.STORAGE_KEY, id);
-        return true;
-    }
-
+    static HARDCODED_GIST_ID = '8db89a5ec373b9e93642971d839a8e49';
+    
     constructor() {
+        this.gistId = GistManager.HARDCODED_GIST_ID;
         this.filename = 'lunch-options.json';
         this.cache = null;
         this.cacheTime = 0;
         this.cacheExpire = 5000; // 5秒缓存
     }
-
-    get gistId() {
-        return GistManager.getGistId();
-    }
-
+    
     isConfigured() {
-        return GistManager.GIST_ID_PATTERN.test(this.gistId);
+        return true; // 已硬编码，始终配置完成
     }
 
     // 清除缓存（用于刷新数据）
