@@ -4,18 +4,43 @@
  */
 
 class GistManager {
-    static HARDCODED_GIST_ID = '8db89a5ec373b9e93642971d839a8e49';
-    
+    static STORAGE_KEY = 'lunch-wheel:gist-id';
+    // 默认公共 Gist：未填写自定义 Gist ID 时用于读取共享菜单
+    static PUBLIC_GIST_ID = '8db89a5ec373b9e93642971d839a8e49';
+    static GIST_ID_PATTERN = /^[a-f0-9]{20,40}$/i;
+
+    static getUserGistId() {
+        return localStorage.getItem(GistManager.STORAGE_KEY) || '';
+    }
+
+    static setUserGistId(id) {
+        if (!GistManager.GIST_ID_PATTERN.test(id)) return false;
+        localStorage.setItem(GistManager.STORAGE_KEY, id);
+        return true;
+    }
+
+    static clearUserGistId() {
+        localStorage.removeItem(GistManager.STORAGE_KEY);
+    }
+
     constructor() {
-        this.gistId = GistManager.HARDCODED_GIST_ID;
         this.filename = 'lunch-options.json';
         this.cache = null;
         this.cacheTime = 0;
         this.cacheExpire = 5000; // 5秒缓存
     }
-    
-    isConfigured() {
-        return true; // 已硬编码，始终配置完成
+
+    // 当前生效的 Gist ID：用户自定义优先，否则回落公共默认
+    get gistId() {
+        return GistManager.getUserGistId() || GistManager.PUBLIC_GIST_ID;
+    }
+
+    hasUserGistId() {
+        return GistManager.GIST_ID_PATTERN.test(GistManager.getUserGistId());
+    }
+
+    isUsingPublic() {
+        return !this.hasUserGistId();
     }
 
     // 清除缓存（用于刷新数据）
@@ -29,13 +54,10 @@ class GistManager {
         if (typeof structuredClone === 'function') return structuredClone(data);
         return JSON.parse(JSON.stringify(data));
     }
-    
+
     // 读取数据
     async readData() {
-        if (!this.isConfigured()) {
-            console.warn('Gist ID 未配置');
-            return { options: [], history: [] };
-        }
+        // 默认始终用 PUBLIC_GIST_ID，无需"未配置"分支
 
         const now = Date.now();
 
@@ -97,15 +119,15 @@ class GistManager {
         }
     }
     
-    // 写入数据（需要Token）
-    async writeData(data, token) {
-        if (!this.isConfigured()) {
-            console.error('Gist ID 未配置，无法写入');
+    // 写入数据（需要 Token + 显式 Gist ID — 写操作不走默认 PUBLIC，避免误写）
+    async writeData(data, token, gistId) {
+        if (!GistManager.GIST_ID_PATTERN.test(gistId)) {
+            console.error('Gist ID 无效，拒绝写入');
             return false;
         }
 
         if (!token) {
-            console.error('需要Token才能写入');
+            console.error('需要 Token 才能写入');
             return false;
         }
 
@@ -114,9 +136,9 @@ class GistManager {
             console.error('数据格式无效，拒绝写入');
             return false;
         }
-        
+
         try {
-            const apiUrl = `https://api.github.com/gists/${this.gistId}`;
+            const apiUrl = `https://api.github.com/gists/${gistId}`;
             const response = await fetch(apiUrl, {
                 method: 'PATCH',
                 headers: {
@@ -131,26 +153,30 @@ class GistManager {
                     }
                 })
             });
-            
+
             if (!response.ok) {
                 console.error('写入Gist失败:', response.status);
                 const errorText = await response.text();
                 console.error('错误详情:', errorText);
                 return false;
             }
-            
-            // 写入成功后更新缓存（存内部副本，避免外部继续 mutation 影响缓存）
-            this.cache = this._clone(data);
-            this.cacheTime = Date.now();
+
+            // 写入成功后更新缓存（仅当写入到当前生效 Gist 时才更新，否则会与 read 不一致）
+            if (gistId === this.gistId) {
+                this.cache = this._clone(data);
+                this.cacheTime = Date.now();
+            } else {
+                this.clearCache();
+            }
             return true;
         } catch (e) {
             console.error('写入Gist异常:', e);
             return false;
         }
     }
-    
+
     // 添加新选项；返回 { status: 'added' | 'duplicate' | 'failed' }
-    async addOption(option, token) {
+    async addOption(option, token, gistId) {
         const data = await this.readData();
 
         if (!data || !Array.isArray(data.options)) {
@@ -163,51 +189,44 @@ class GistManager {
         }
 
         data.options.push(option);
-        const ok = await this.writeData(data, token);
+        const ok = await this.writeData(data, token, gistId);
         if (ok) this.clearCache();
         return { status: ok ? 'added' : 'failed' };
     }
 
     // 删除选项
-    async deleteOption(option, token) {
+    async deleteOption(option, token, gistId) {
         const data = await this.readData();
         if (!data || !Array.isArray(data.options)) return false;
         data.options = data.options.filter(o => o !== option);
-        const ok = await this.writeData(data, token);
+        const ok = await this.writeData(data, token, gistId);
         if (ok) this.clearCache();
         return ok;
     }
-    
+
     // 记录历史（最近三次）
-    async recordHistory(option, token) {
-        // 先读取数据，确保有有效数据
+    async recordHistory(option, token, gistId) {
         const data = await this.readData();
-        
-        // 验证数据有效性（空数组也算有效）
+
         if (!data || !Array.isArray(data.history)) {
             console.error('数据无效，无法记录历史');
             return false;
         }
-        
+
         const now = new Date();
         const timeStr = now.toLocaleDateString('zh-CN') + ' ' + now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-        
-        // 添加新记录
+
         data.history.unshift({
             name: option,
             time: timeStr
         });
-        
-        // 只保留最近三条
+
         if (data.history.length > 3) {
             data.history = data.history.slice(0, 3);
         }
-        
-        const success = await this.writeData(data, token);
-        if (success) {
-            // 清除缓存，确保下次读取最新数据
-            this.clearCache();
-        }
+
+        const success = await this.writeData(data, token, gistId);
+        if (success) this.clearCache();
         return success;
     }
     
