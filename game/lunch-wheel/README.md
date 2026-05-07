@@ -25,21 +25,26 @@
 
 ## 数据存储
 
-数据存储在你**自己的** GitHub Gist 中（每个用户独立一份）。
+数据存储在 GitHub Gist 中。**默认从公共 Gist 读取一份共享菜单**，开箱即可使用，不需任何配置。
 
-### 接入步骤
+### 默认体验（只读）
 
-1. 访问 [gist.github.com](https://gist.github.com/) 创建一个新的 Gist（建议设为 secret）
-2. 文件名填 `lunch-options.json`
-3. 内容填：
-   ```json
-   {"options": [], "history": []}
-   ```
-4. 创建后从 URL 末尾复制 Gist ID（一串 20–40 位的十六进制）
-5. 打开本页面，点击右下角"⚙️ 设置"按钮，粘贴 Gist ID 保存
-6. 添加/记录/删除时再用一个有 `gist` 权限的 [Personal Access Token](https://github.com/settings/tokens) 写入
+打开网页即可看到共享菜单与最近吃过的记录、点击「我要吃」抽奖。无需登录、无需 Token。
 
-> Gist ID 仅保存在浏览器 localStorage；Token 仅在勾选"记住"时存入 sessionStorage（关闭标签页即清除）。两者都不会上传到任何后端。
+### 写操作（添加 / 记录 / 清空 / 删除）
+
+写操作需要在表单中提供：
+
+1. **Gist ID**（20–40 位十六进制）
+   - 想编辑公共菜单：使用 `8db89a5ec373b9e93642971d839a8e49`
+   - 想自己维护一份：在 [gist.github.com](https://gist.github.com/) 创建文件名为 `lunch-options.json`、内容为 `{"options":[],"history":[]}` 的 Gist，使用其 ID
+2. **GitHub Token**（含 `gist` 权限）
+   - 创建：[Personal Access Token](https://github.com/settings/tokens)
+   - 仅用于一次写入；勾选"记住 Token"时仅存入 sessionStorage（关闭标签页即清除）
+
+勾选"在本浏览器记住 Gist ID"后，下次打开就直接使用该 Gist 读 / 写（一份"私有空间"）。在「⚙️ 设置」中可随时切换或恢复公共默认。
+
+> 所有数据都仅在你的浏览器与 GitHub Gist 之间往返，本项目没有任何后端。
 
 ## Bug修复记录
 
