@@ -364,6 +364,23 @@ header h1 {
     display: block;
 }
 
+.overlay-hint {
+    color: #555;
+    font-size: 13px;
+    line-height: 1.6;
+    background: #f7f5ff;
+    border-left: 3px solid #667eea;
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    text-align: left;
+}
+
+.overlay-hint a {
+    color: #667eea;
+    text-decoration: underline;
+}
+
 .remember-token {
     display: flex;
     align-items: center;
