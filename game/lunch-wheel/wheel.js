@@ -789,10 +789,18 @@ class LunchWheel {
 
     async clearHistory(token, gistId) {
         try {
+            // 清除缓存，确保读取最新数据
+            this.gistManager.clearCache();
+            
             const data = await this.gistManager.readData();
-            data.history = [];
-
-            const success = await this.gistManager.writeData(data, token, gistId);
+            
+            // 修复：明确保留options，只清空history
+            const newData = {
+                options: data.options || [],  // 保留现有选项
+                history: []  // 清空历史记录
+            };
+            
+            const success = await this.gistManager.writeData(newData, token, gistId);
 
             if (success) {
                 this.gistManager.clearCache();
