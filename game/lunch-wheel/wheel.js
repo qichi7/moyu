@@ -495,6 +495,10 @@ class LunchWheel {
     }
 
     showAddOverlay() {
+        // 先隐藏empty-message弹窗（避免两个弹窗同时显示）
+        document.getElementById('empty-message').style.display = 'none';
+        
+        // 然后显示add-overlay弹窗
         document.getElementById('add-overlay').style.display = 'flex';
         document.getElementById('new-option').focus();
         this.fillCachedToken('gist-token', 'remember-token-add');
