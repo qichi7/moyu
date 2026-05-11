@@ -1,0 +1,684 @@
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(var(--spin-deg)); }
+}
+
+@keyframes bounce {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.8); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow-x: hidden;
+}
+
+.container {
+    background: rgba(255, 255, 255, 0.95);
+    padding: 40px;
+    border-radius: 30px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    max-width: 500px;
+    width: 90%;
+    text-align: center;
+}
+
+header {
+    margin-bottom: 30px;
+}
+
+header h1 {
+    font-size: 36px;
+    color: #333;
+    margin-bottom: 10px;
+}
+
+.subtitle {
+    color: #666;
+    font-size: 16px;
+}
+
+/* 轮盘容器 */
+.wheel-container {
+    position: relative;
+    width: 400px;
+    height: 400px;
+    margin: 0 auto 30px;
+}
+
+#wheel-canvas {
+    border-radius: 50%;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.wheel-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10;
+}
+
+.spin-button {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    background: linear-gradient(145deg, #ff6b6b, #ee5a5a);
+    color: white;
+    font-size: 18px;
+    font-weight: bold;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 5px 20px rgba(238, 90, 90, 0.5);
+    transition: all 0.3s ease;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.spin-button:hover:not(:disabled) {
+    transform: scale(1.05);
+    box-shadow: 0 8px 25px rgba(238, 90, 90, 0.6);
+}
+
+.spin-button:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.btn-text {
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* 指针（右侧）— 三角尖端落在 canvas 右边缘 (right: 0) 处，
+   确保抽奖逻辑里 "0 度方向 = 选中扇形中点" 与视觉一致 */
+.wheel-pointer {
+    position: absolute;
+    right: -10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-top: 14px solid transparent;
+    border-bottom: 14px solid transparent;
+    border-right: 30px solid #ff6b6b;
+    z-index: 5;
+    filter: drop-shadow(3px 0 5px rgba(0, 0, 0, 0.3));
+}
+
+/* 历史记录区域（主界面） */
+.history-section {
+    margin: 20px auto 15px;
+    max-width: 380px;
+}
+
+.history-section h3 {
+    color: #333;
+    font-size: 16px;
+    margin-bottom: 10px;
+}
+
+.history-section .history-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.history-section .history-item {
+    padding: 8px 15px;
+    background: #f5f5f5;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.history-section .history-name {
+    font-size: 14px;
+    color: #333;
+    font-weight: bold;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.history-section .history-time {
+    font-size: 12px;
+    color: #999;
+}
+
+.history-section .no-history {
+    color: #999;
+    text-align: center;
+    padding: 15px;
+    background: #f5f5f5;
+    border-radius: 8px;
+}
+
+.history-section .loading {
+    color: #999;
+    text-align: center;
+    padding: 15px;
+}
+
+/* 结果弹窗 */
+.result-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    animation: fadeIn 0.3s ease;
+}
+
+.result-content {
+    background: white;
+    padding: 50px;
+    border-radius: 20px;
+    text-align: center;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+.result-icon {
+    font-size: 60px;
+    margin-bottom: 20px;
+}
+
+.result-text {
+    font-size: 24px;
+    color: #666;
+    margin-bottom: 15px;
+}
+
+.result-food {
+    font-size: 48px;
+    color: #ff6b6b;
+    font-weight: bold;
+    margin-bottom: 30px;
+    animation: bounce 0.5s ease infinite;
+}
+
+.result-buttons {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+}
+
+.close-btn {
+    padding: 15px 40px;
+    background: linear-gradient(145deg, #667eea, #764ba2);
+    color: white;
+    font-size: 18px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.close-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.5);
+}
+
+.record-btn {
+    padding: 15px 30px;
+    background: linear-gradient(145deg, #4CAF50, #45a049);
+    color: white;
+    font-size: 18px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.record-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 5px 15px rgba(76, 175, 80, 0.5);
+}
+
+/* 控制按钮 */
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: center;
+    margin-bottom: 20px;
+}
+
+.control-btn {
+    padding: 12px 18px;
+    background: linear-gradient(145deg, #667eea, #764ba2);
+    color: white;
+    font-size: 15px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    flex: 0 1 auto;
+}
+
+.control-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.control-btn.danger-btn {
+    background: linear-gradient(145deg, #ff6b6b, #ee5a5a);
+}
+
+.control-btn.danger-btn:hover {
+    box-shadow: 0 5px 15px rgba(238, 90, 90, 0.4);
+}
+
+.btn-icon {
+    font-size: 20px;
+}
+
+/* 添加选项弹窗 */
+.add-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 200;
+    animation: fadeIn 0.3s ease;
+}
+
+.add-content {
+    background: white;
+    padding: 40px;
+    border-radius: 20px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+.add-content h2 {
+    color: #333;
+    margin-bottom: 25px;
+    font-size: 24px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    color: #333;
+    font-size: 16px;
+    margin-bottom: 8px;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 12px 15px;
+    border: 2px solid #ddd;
+    border-radius: 10px;
+    font-size: 16px;
+    transition: border-color 0.3s ease;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.form-group small {
+    color: #999;
+    font-size: 12px;
+    margin-top: 5px;
+    display: block;
+}
+
+.overlay-hint {
+    color: #555;
+    font-size: 13px;
+    line-height: 1.6;
+    background: #f7f5ff;
+    border-left: 3px solid #667eea;
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    text-align: left;
+}
+
+.overlay-hint a {
+    color: #667eea;
+    text-decoration: underline;
+}
+
+.remember-token {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    color: #666;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.remember-token input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    cursor: pointer;
+}
+
+.form-buttons {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    margin-top: 25px;
+}
+
+.submit-btn {
+    padding: 12px 30px;
+    background: linear-gradient(145deg, #667eea, #764ba2);
+    color: white;
+    font-size: 16px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.submit-btn:hover {
+    transform: scale(1.05);
+}
+
+.submit-btn.danger-btn {
+    background: linear-gradient(145deg, #ff6b6b, #ee5a5a);
+}
+
+.submit-btn.danger-btn:hover {
+    box-shadow: 0 5px 15px rgba(238, 90, 90, 0.4);
+}
+
+.cancel-btn {
+    padding: 12px 30px;
+    background: #f5f5f5;
+    color: #666;
+    font-size: 16px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.cancel-btn:hover {
+    background: #e0e0e0;
+}
+
+/* 记录吃了啥弹窗 */
+.record-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    animation: fadeIn 0.3s ease;
+}
+
+.record-content {
+    background: white;
+    padding: 40px;
+    border-radius: 20px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+.record-content h2 {
+    color: #333;
+    margin-bottom: 25px;
+    font-size: 24px;
+}
+
+/* 空状态 */
+.empty-message {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    animation: fadeIn 0.3s ease;
+}
+
+.empty-content {
+    background: white;
+    padding: 50px;
+    border-radius: 20px;
+    text-align: center;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+.empty-icon {
+    font-size: 80px;
+    margin-bottom: 20px;
+}
+
+.empty-text {
+    font-size: 36px;
+    color: #333;
+    font-weight: bold;
+    margin-bottom: 30px;
+}
+
+.add-first-btn {
+    padding: 15px 40px;
+    background: linear-gradient(145deg, #667eea, #764ba2);
+    color: white;
+    font-size: 18px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.add-first-btn:hover {
+    transform: scale(1.05);
+}
+
+/* Toast 提示 */
+.toast-stack {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.toast {
+    background: #333;
+    color: white;
+    padding: 12px 24px;
+    border-radius: 8px;
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+    font-size: 14px;
+    max-width: 400px;
+    animation: toastIn 0.25s ease;
+    pointer-events: auto;
+}
+
+.toast.success { background: #4CAF50; }
+.toast.error { background: #ee5a5a; }
+.toast.warn { background: #f8b500; color: #333; }
+
+.toast.fade-out {
+    animation: toastOut 0.3s ease forwards;
+}
+
+@keyframes toastIn {
+    from { opacity: 0; transform: translateY(-12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toastOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-12px); }
+}
+
+/* 管理选项弹窗 */
+.manage-list {
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+
+.manage-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.manage-item:last-child {
+    border-bottom: none;
+}
+
+.manage-item-name {
+    color: #333;
+    font-size: 15px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    margin-right: 10px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.manage-item-delete {
+    background: #ee5a5a;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.manage-item-delete:hover {
+    background: #d04848;
+}
+
+.manage-empty {
+    color: #999;
+    text-align: center;
+    padding: 20px;
+}
+
+/* 响应式 */
+@media (max-width: 500px) {
+    .container {
+        padding: 20px 16px;
+        border-radius: 20px;
+        width: 94%;
+    }
+
+    header {
+        margin-bottom: 20px;
+    }
+
+    header h1 {
+        font-size: 28px;
+    }
+
+    .wheel-container {
+        width: 280px;
+        height: 280px;
+        margin-bottom: 20px;
+    }
+
+    #wheel-canvas {
+        width: 280px;
+        height: 280px;
+    }
+
+    .spin-button {
+        width: 80px;
+        height: 80px;
+        font-size: 16px;
+    }
+
+    .result-food {
+        font-size: 36px;
+    }
+
+    .result-content {
+        padding: 30px 20px;
+    }
+
+    .result-buttons {
+        flex-wrap: wrap;
+    }
+
+    .controls {
+        gap: 8px;
+    }
+
+    .control-btn {
+        padding: 10px 14px;
+        font-size: 13px;
+        gap: 4px;
+    }
+
+    .control-btn .btn-icon {
+        font-size: 16px;
+    }
+
+    .add-content,
+    .record-content {
+        padding: 24px 18px;
+    }
+}
