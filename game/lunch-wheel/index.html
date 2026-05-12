@@ -43,6 +43,10 @@
         </div>
         
         <div class="controls">
+            <button id="menu-manage-btn" class="control-btn">
+                <span class="btn-icon">📋</span>
+                菜单管理
+            </button>
             <button id="add-option-btn" class="control-btn">
                 <span class="btn-icon">➕</span>
                 添加选项
@@ -63,6 +67,31 @@
                 <span class="btn-icon">⚙️</span>
                 设置
             </button>
+        </div>
+
+        <!-- 菜单管理弹窗 -->
+        <div class="add-overlay" id="menu-manage-overlay" style="display: none;">
+            <div class="add-content">
+                <h2>📋 菜单管理</h2>
+                <p class="overlay-hint">💡 当前菜单：<span id="current-menu-name">默认菜单</span></p>
+                <div class="menu-list" id="menu-list"></div>
+                <div class="form-group">
+                    <label for="new-menu-name">创建新菜单：</label>
+                    <input type="text" id="new-menu-name" placeholder="菜单名称（例如：晚餐菜单）" maxlength="20">
+                </div>
+                <div class="form-group">
+                    <label for="menu-gist-id">Gist ID：</label>
+                    <input type="text" id="menu-gist-id" placeholder="20-40 位十六进制">
+                </div>
+                <div class="form-group">
+                    <label for="menu-token">GitHub Token：</label>
+                    <input type="password" id="menu-token" placeholder="ghp_xxxxxx（需要 gist 权限）">
+                </div>
+                <div class="form-buttons">
+                    <button id="create-menu-btn" class="submit-btn">创建菜单</button>
+                    <button id="close-menu-manage" class="cancel-btn">关闭</button>
+                </div>
+            </div>
         </div>
 
         <div class="add-overlay" id="config-overlay" style="display: none;">

@@ -612,10 +612,93 @@ header h1 {
     background: #d04848;
 }
 
+.manage-item-like {
+    background: #4CAF50;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    flex-shrink: 0;
+    margin-right: 8px;
+}
+
+.manage-item-like:hover {
+    background: #45a049;
+}
+
 .manage-empty {
     color: #999;
     text-align: center;
     padding: 20px;
+}
+
+/* 菜单管理样式 */
+.menu-list {
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+
+.menu-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.menu-item:last-child {
+    border-bottom: none;
+}
+
+.menu-item.active {
+    background: #f7f5ff;
+    border-left: 3px solid #667eea;
+}
+
+.menu-item-name {
+    color: #333;
+    font-size: 15px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    margin-right: 10px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.menu-item-switch {
+    background: #667eea;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    flex-shrink: 0;
+    margin-right: 8px;
+}
+
+.menu-item-switch:hover {
+    background: #5568d3;
+}
+
+.menu-item-delete {
+    background: #ee5a5a;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.menu-item-delete:hover {
+    background: #d04848;
 }
 
 /* 响应式 */

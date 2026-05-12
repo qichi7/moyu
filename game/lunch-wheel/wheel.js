@@ -1,5 +1,5 @@
 /**
- * 轮盘抽奖逻辑
+ * 轮盘抽奖逻辑 - 支持点赞和多菜单
  */
 
 class LunchWheel {
@@ -8,7 +8,7 @@ class LunchWheel {
         this.ctx = this.canvas.getContext('2d');
         this.gistManager = new GistManager();
 
-        this.options = [];
+        this.options = []; // 格式: [{name, likes, score}]
         this.availableOptions = [];
         this.colors = [];
         this.isSpinning = false;
@@ -27,33 +27,28 @@ class LunchWheel {
 
     setupCanvas() {
         const dpr = window.devicePixelRatio || 1;
-        // 优先用 CSS 实际宽度（响应式 + 移动端缩放后）
         const cssSize = this.canvas.clientWidth || 400;
         this.canvas.width = cssSize * dpr;
         this.canvas.height = cssSize * dpr;
         this.canvas.style.width = cssSize + 'px';
         this.canvas.style.height = cssSize + 'px';
-        // setTransform 使后续绘制全部以 CSS 像素为单位
         this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         this.cssSize = cssSize;
     }
     
     async init() {
-        // 绑定事件（先于异步加载）
         this.bindEvents();
-
-        // 默认即可读取（公共 Gist 兜底），不再因"未配置"而阻塞
         this.gistManager.clearCache();
         await this.loadOptions();
         this.drawWheel();
         await this.updateHistoryDisplay();
+        await this.updateMenuDisplay();
     }
     
     async loadOptions() {
         const allOptions = await this.gistManager.getAllOptions();
         const emptyEl = document.getElementById('empty-message');
 
-        // 完全没有选项 → 显示空状态引导
         if (allOptions.length === 0) {
             emptyEl.style.display = 'flex';
             this.availableOptions = [];
@@ -64,11 +59,14 @@ class LunchWheel {
 
         emptyEl.style.display = 'none';
 
-        // 获取可用选项（排除最近三次；getAvailableOptions 内部已做选项不足降级）
         this.availableOptions = await this.gistManager.getAvailableOptions();
         this.options = this.availableOptions.length > 0
             ? this.availableOptions
-            : ['你没饭吃了']; // 兜底：理论上 getAvailableOptions 已降级，不会到这
+            : [];
+
+        if (this.options.length === 0) {
+            emptyEl.style.display = 'flex';
+        }
 
         this.generateColors();
     }
@@ -91,7 +89,6 @@ class LunchWheel {
             wrap.className = 'history-item';
             const name = document.createElement('span');
             name.className = 'history-name';
-            // textContent 而非 innerHTML：Gist 数据不可信，防 XSS
             name.textContent = item.name;
             const time = document.createElement('span');
             time.className = 'history-time';
@@ -101,19 +98,41 @@ class LunchWheel {
         }
     }
     
+    async updateMenuDisplay() {
+        const menuNameEl = document.getElementById('current-menu-name');
+        if (menuNameEl) {
+            const menu = await this.gistManager.getCurrentMenu();
+            menuNameEl.textContent = menu.name || '默认菜单';
+        }
+    }
+    
+    // 根据分数比例生成颜色
     generateColors() {
-        // HSL 等距色环，避免大量选项时相邻同色
         this.colors = [];
         const N = this.options.length;
         if (N === 0) return;
+        
+        // 计算总分
+        const totalScore = this.options.reduce((sum, opt) => sum + (opt.score || 100), 0);
+        
+        // 根据分数占比分配颜色色相范围
+        // 分数高的选项使用暖色调（红、橙、黄），分数低的使用冷色调（蓝、绿）
+        let hueOffset = 0;
         for (let i = 0; i < N; i++) {
-            const hue = (i * 360 / N).toFixed(1);
+            const score = this.options[i].score || 100;
+            const proportion = score / totalScore;
+            // 分数越高，色相越偏暖色调（0-60度：红橙黄）
+            // 分数越低，色相越偏冷色调（180-240度：蓝绿）
+            const hue = score > totalScore / N 
+                ? (30 + hueOffset) % 60  // 暖色调
+                : (180 + hueOffset) % 240; // 冷色调
+            
+            hueOffset += proportion * 360;
             this.colors.push(`hsl(${hue}, 65%, 60%)`);
         }
     }
     
-    // 自适应字号：在 [MIN, MAX] 范围内取最大的、所有 items 都能完整装下的字号
-    // 由于 maxWidth 本身依赖 fontSize（halfTan/innerLimit），按 1px 步长向下扫描评估
+    // 自适应字号
     _fitFontSize(items, sliceAngle, textRadius, MAX = 18, MIN = 8) {
         const halfTan = Math.tan(sliceAngle / 2);
         for (let f = MAX; f >= MIN; f--) {
@@ -121,18 +140,18 @@ class LunchWheel {
             const innerLimit = Math.max(55, safeInner);
             const maxWidth = Math.max(20, textRadius - innerLimit);
             this.ctx.font = `bold ${f}px Microsoft YaHei, sans-serif`;
-            const allFit = items.every(t => this.ctx.measureText(t).width <= maxWidth);
+            const allFit = items.every(t => this.ctx.measureText(t.name || t).width <= maxWidth);
             if (allFit) return f;
         }
         return MIN;
     }
 
+    // 绘制轮盘 - 按分数比例显示扇形面积
     drawWheel() {
         const centerX = this.cssSize / 2;
         const centerY = this.cssSize / 2;
         const radius = Math.min(centerX, centerY) - 10;
 
-        // 清除画布（按 CSS 像素清，不会受 DPR 影响）
         this.ctx.clearRect(0, 0, this.cssSize, this.cssSize);
         
         // 绘制外圈阴影
@@ -149,26 +168,26 @@ class LunchWheel {
             return;
         }
         
-        // 绘制扇形
-        const sliceAngle = (Math.PI * 2) / this.options.length;
+        // 计算总分和每个选项的角度占比
+        const totalScore = this.options.reduce((sum, opt) => sum + (opt.score || 100), 0);
+        const TWO_PI = Math.PI * 2;
+        
+        // 绘制扇形（按分数比例）
+        let currentAngle = 0;
         const textRadius = radius - 15;
-
-        // 自适应字号：在 [minFontSize, maxFontSize] 内取最大的、能让所有选项完整装下的字号
-        // 注意 maxWidth 与 fontSize 耦合（字号越大→所需 innerLimit 越大→可用宽度越小），
-        // 必须按字号迭代评估，不能简单按最长字符串单次计算。
-        const fontSize = this._fitFontSize(this.options, sliceAngle, textRadius);
-        const halfTan = Math.tan(sliceAngle / 2);
-        const safeInner = halfTan > 0 ? (fontSize / 2) / halfTan + 4 : 60;
-        const innerLimit = Math.max(55, safeInner);
-        const maxWidth = Math.max(20, textRadius - innerLimit);
 
         this.ctx.save();
         this.ctx.translate(centerX, centerY);
         this.ctx.rotate(this.currentRotation);
 
         for (let i = 0; i < this.options.length; i++) {
-            const startAngle = i * sliceAngle;
-            const endAngle = startAngle + sliceAngle;
+            const option = this.options[i];
+            const score = option.score || 100;
+            const proportion = score / totalScore;
+            const sliceAngle = TWO_PI * proportion;
+            
+            const startAngle = currentAngle;
+            const endAngle = currentAngle + sliceAngle;
 
             // 绘制扇形
             this.ctx.beginPath();
@@ -184,29 +203,45 @@ class LunchWheel {
             this.ctx.lineWidth = 2;
             this.ctx.stroke();
 
-            // 绘制文字
-            this.ctx.save();
-            this.ctx.rotate(startAngle + sliceAngle / 2);
-            this.ctx.textAlign = 'right';
-            this.ctx.textBaseline = 'middle';
-            this.ctx.fillStyle = '#fff';
-            this.ctx.font = `bold ${fontSize}px Microsoft YaHei, sans-serif`;
+            // 绘制文字（在扇形中央）
+            if (sliceAngle > 0.1) { // 角度足够大才显示文字
+                this.ctx.save();
+                this.ctx.rotate(startAngle + sliceAngle / 2);
+                this.ctx.textAlign = 'right';
+                this.ctx.textBaseline = 'middle';
+                this.ctx.fillStyle = '#fff';
+                
+                // 自适应字号
+                const fontSize = this._fitFontSize([option], sliceAngle, textRadius);
+                this.ctx.font = `bold ${fontSize}px Microsoft YaHei, sans-serif`;
 
-            // 自适应字号已尽量让所有选项装下；极端兜底：若仍超宽（字号已到下限）则截断 + …
-            const original = this.options[i];
-            let text = original;
-            if (this.ctx.measureText(text).width > maxWidth) {
-                while (text.length > 1 && this.ctx.measureText(text + '…').width > maxWidth) {
-                    text = text.slice(0, -1);
+                const halfTan = Math.tan(sliceAngle / 2);
+                const safeInner = halfTan > 0 ? (fontSize / 2) / halfTan + 4 : 60;
+                const innerLimit = Math.max(55, safeInner);
+                const maxWidth = Math.max(20, textRadius - innerLimit);
+
+                // 显示选项名称 + 点赞数
+                let displayText = option.name;
+                if (option.likes > 0) {
+                    displayText += ` (${option.likes}赞)`;
                 }
-                text = text + '…';
+                
+                if (this.ctx.measureText(displayText).width > maxWidth) {
+                    // 截断处理
+                    while (displayText.length > 1 && this.ctx.measureText(displayText + '…').width > maxWidth) {
+                        displayText = displayText.slice(0, -1);
+                    }
+                    displayText = displayText + '…';
+                }
+
+                this.ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+                this.ctx.shadowBlur = 3;
+                this.ctx.fillText(displayText, textRadius, 0);
+
+                this.ctx.restore();
             }
 
-            this.ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-            this.ctx.shadowBlur = 3;
-            this.ctx.fillText(text, textRadius, 0);
-
-            this.ctx.restore();
+            currentAngle = endAngle;
         }
 
         this.ctx.restore();
@@ -288,13 +323,19 @@ class LunchWheel {
             this.hideManageOverlay();
         });
 
-        // 全局键盘：Esc 关闭顶部弹窗 / Enter 在 input 中提交对应表单
+        // 菜单管理
+        document.getElementById('menu-manage-btn')?.addEventListener('click', () => {
+            this.showMenuManageOverlay();
+        });
+
+        // 全局键盘：Esc 关闭顶部弹窗
         const overlayMap = [
             { id: 'config-overlay', submit: 'submit-gist-id', cancel: 'cancel-gist-id' },
             { id: 'add-overlay', submit: 'submit-option', cancel: 'cancel-add' },
             { id: 'record-overlay', submit: 'submit-record', cancel: 'cancel-record' },
             { id: 'manage-overlay', submit: null, cancel: 'close-manage' },
             { id: 'result-overlay', submit: null, cancel: 'close-result' },
+            { id: 'menu-manage-overlay', submit: null, cancel: 'close-menu-manage' },
         ];
 
         document.addEventListener('keydown', (e) => {
@@ -322,7 +363,6 @@ class LunchWheel {
         });
 
         document.getElementById('cancel-gist-id').addEventListener('click', () => {
-            // 默认 PUBLIC fallback 总是可用，关闭弹窗无任何阻塞
             this.hideConfigOverlay();
         });
     }
@@ -348,7 +388,6 @@ class LunchWheel {
     async submitGistId() {
         const id = document.getElementById('gist-id-input').value.trim();
         if (!id) {
-            // 留空 = 恢复默认（与 reset 等价）
             this.resetGistId();
             return;
         }
@@ -375,7 +414,6 @@ class LunchWheel {
         await this.refreshAll();
     }
 
-    // 写表单的 Gist ID 输入字段缓存机制（与 fillCachedToken 类似，但用 localStorage）
     fillCachedGistId(inputId) {
         const cached = GistManager.getUserGistId();
         if (cached) {
@@ -383,7 +421,6 @@ class LunchWheel {
         }
     }
 
-    // 提交写操作前从表单读取 Gist ID 并校验
     readGistIdFromForm(inputId, rememberCheckboxId) {
         const id = document.getElementById(inputId).value.trim();
         if (!GistManager.GIST_ID_PATTERN.test(id)) {
@@ -406,7 +443,6 @@ class LunchWheel {
         if (this.isSpinning) return;
 
         if (this.availableOptions.length === 0) {
-            // 没有选项，直接显示结果
             this.showResult('你没饭吃了');
             return;
         }
@@ -415,20 +451,40 @@ class LunchWheel {
         document.getElementById('spin-btn').disabled = true;
 
         const TWO_PI = Math.PI * 2;
-        const N = this.options.length;
-        const sliceAngle = TWO_PI / N;
+        const totalScore = this.options.reduce((sum, opt) => sum + (opt.score || 100), 0);
+        
+        // 按分数权重随机选择（分数越高，中奖概率越高）
+        let randomValue = Math.random() * totalScore;
+        let selectedIndex = 0;
+        let accumulatedScore = 0;
+        
+        for (let i = 0; i < this.options.length; i++) {
+            accumulatedScore += this.options[i].score || 100;
+            if (randomValue <= accumulatedScore) {
+                selectedIndex = i;
+                break;
+            }
+        }
 
-        // 不预先选定 index，只生成一个随机最终偏移：5-9 整圈 + 任意单圈内偏移
+        // 计算目标角度
+        let targetAngleStart = 0;
+        for (let i = 0; i < selectedIndex; i++) {
+            const proportion = (this.options[i].score || 100) / totalScore;
+            targetAngleStart += TWO_PI * proportion;
+        }
+        
+        const proportion = (this.options[selectedIndex].score || 100) / totalScore;
+        const sliceAngle = TWO_PI * proportion;
+        const targetAngleMid = targetAngleStart + sliceAngle / 2;
+
+        // 旋转动画：5-9整圈 + 目标角度
         const extraTurns = 5 + Math.floor(Math.random() * 5);
-        const targetOffset = Math.random() * TWO_PI;
-        const totalRotation = TWO_PI * extraTurns + targetOffset;
+        const totalRotation = TWO_PI * extraTurns + (TWO_PI - targetAngleMid);
 
-        // 动画参数
-        const duration = 5000; // 5秒
+        const duration = 5000;
         const startTime = Date.now();
         const startRotation = this.currentRotation;
 
-        // 缓动函数（缓入缓出）
         const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 
         const animate = () => {
@@ -442,21 +498,12 @@ class LunchWheel {
             if (progress < 1) {
                 requestAnimationFrame(animate);
             } else {
-                // 归一化到 [0, 2π)
-                const finalRotation = ((startRotation + totalRotation) % TWO_PI + TWO_PI) % TWO_PI;
-                this.currentRotation = finalRotation;
+                this.currentRotation = ((startRotation + totalRotation) % TWO_PI + TWO_PI) % TWO_PI;
                 this.drawWheel();
-
-                // 反推：指针指向 0°（canvas 右侧），扇形 i 的全局起始角 = i*sliceAngle + currentRotation
-                // 找 i 使 0° 落在 [i*sliceAngle + currentRotation, (i+1)*sliceAngle + currentRotation) (mod 2π)
-                // 等价于 (-currentRotation mod 2π) 落在 [i*sliceAngle, (i+1)*sliceAngle)
-                const pointerLocal = ((TWO_PI - finalRotation) % TWO_PI + TWO_PI) % TWO_PI;
-                const finalIndex = Math.floor(pointerLocal / sliceAngle) % N;
-                const finalOption = this.options[finalIndex];
 
                 this.isSpinning = false;
                 document.getElementById('spin-btn').disabled = false;
-                this.showResult(finalOption);
+                this.showResult(this.options[selectedIndex].name);
             }
         };
 
@@ -464,7 +511,7 @@ class LunchWheel {
     }
     
     showResult(option) {
-        this.lastSelectedOption = option; // 保存选择结果
+        this.lastSelectedOption = option;
         document.getElementById('result-food').textContent = option;
         document.getElementById('result-overlay').style.display = 'flex';
     }
@@ -473,15 +520,11 @@ class LunchWheel {
         document.getElementById('result-overlay').style.display = 'none';
     }
     
-    // 显示记录界面并自动选择最后抽到的选项
     async showRecordWithSelected() {
-        // 先显示记录界面
         await this.showRecordOverlay();
         
-        // 如果有最后选择的选项，自动选中
         if (this.lastSelectedOption && this.lastSelectedOption !== '你没饭吃了') {
             const select = document.getElementById('record-option');
-            // 查找并选中对应的选项
             for (let i = 0; i < select.options.length; i++) {
                 if (select.options[i].value === this.lastSelectedOption) {
                     select.selectedIndex = i;
@@ -491,11 +534,9 @@ class LunchWheel {
         }
     }
     
-    // 顶部 toast，3 秒自动消失
     showToast(msg, type = 'info') {
         const stack = document.getElementById('toast-stack');
         if (!stack) {
-            // 兜底：DOM 还未就绪
             console.log(`[toast/${type}] ${msg}`);
             return;
         }
@@ -509,7 +550,6 @@ class LunchWheel {
         }, 2700);
     }
 
-    // Token 会话缓存（仅 sessionStorage，关闭标签页即清除）
     static TOKEN_KEY = 'lunch-wheel:token';
 
     rememberToken(token, checked) {
@@ -529,10 +569,7 @@ class LunchWheel {
     }
 
     showAddOverlay() {
-        // 先隐藏empty-message弹窗（避免两个弹窗同时显示）
         document.getElementById('empty-message').style.display = 'none';
-        
-        // 然后显示add-overlay弹窗
         document.getElementById('add-overlay').style.display = 'flex';
         document.getElementById('new-option').focus();
         this.fillCachedToken('gist-token', 'remember-token-add');
@@ -555,9 +592,8 @@ class LunchWheel {
             return;
         }
 
-        // 拒绝可能产生意外渲染的字符（防御性，配合 textContent）
         if (/[<>&"']/.test(option)) {
-            this.showToast('选项名包含非法字符（<, >, &, ", \')', 'warn');
+            this.showToast('选项名包含非法字符（<, >, &, ", \'）', 'warn');
             return;
         }
 
@@ -596,23 +632,19 @@ class LunchWheel {
         }
     }
     
-    // 刷新轮盘和历史记录
     async refreshAll() {
-        // 显示加载状态
         const historyList = document.getElementById('history-list');
         historyList.innerHTML = '<div class="loading">加载中...</div>';
         
-        // 立即清除所有缓存，确保从gist重新读取最新数据
         this.gistManager.clearCache();
         
-        // 等待数据读取完成
         await this.loadOptions();
         this.drawWheel();
         await this.updateHistoryDisplay();
+        await this.updateMenuDisplay();
     }
     
     async showRecordOverlay() {
-        // 清除缓存，确保获取最新数据
         this.gistManager.clearCache();
 
         const allOptions = await this.gistManager.getAllOptions();
@@ -624,11 +656,11 @@ class LunchWheel {
         placeholder.textContent = '-- 请选择 --';
         select.appendChild(placeholder);
 
-        allOptions.forEach(option => {
-            const opt = document.createElement('option');
-            opt.value = option;
-            opt.textContent = option;
-            select.appendChild(opt);
+        allOptions.forEach(opt => {
+            const optEl = document.createElement('option');
+            optEl.value = opt.name;
+            optEl.textContent = opt.name;
+            select.appendChild(optEl);
         });
 
         document.getElementById('record-overlay').style.display = 'flex';
@@ -681,7 +713,7 @@ class LunchWheel {
     }
     
     showClearConfirm() {
-        const confirmed = confirm('确定要清空所有历史记录吗？\n清空后所有选项都会重新加入轮盘。');
+        const confirmed = confirm('确定要清空当前菜单的所有历史记录吗？\n清空后所有选项都会重新加入轮盘。');
         if (confirmed) {
             this.showClearOverlay();
         }
@@ -703,7 +735,6 @@ class LunchWheel {
         hintRow.className = 'overlay-hint';
         hintRow.textContent = '💡 写操作需要 Gist ID 与 GitHub Token';
 
-        // Gist ID 字段
         const gistGroup = document.createElement('div');
         gistGroup.className = 'form-group';
         const gistLabel = document.createElement('label');
@@ -715,15 +746,8 @@ class LunchWheel {
         gistInput.placeholder = '20-40 位十六进制';
         const cachedGistId = GistManager.getUserGistId();
         if (cachedGistId) gistInput.value = cachedGistId;
-        const rememberGistLabel = document.createElement('label');
-        rememberGistLabel.className = 'remember-token';
-        const rememberGistCb = document.createElement('input');
-        rememberGistCb.type = 'checkbox';
-        rememberGistCb.id = 'remember-gist-id-clear';
-        rememberGistLabel.append(rememberGistCb, document.createTextNode(' 在本浏览器记住（同时切换为读取该 Gist）'));
-        gistGroup.append(gistLabel, gistInput, rememberGistLabel);
+        gistGroup.append(gistLabel, gistInput);
 
-        // Token 字段
         const tokenGroup = document.createElement('div');
         tokenGroup.className = 'form-group';
         const tokenLabel = document.createElement('label');
@@ -756,7 +780,7 @@ class LunchWheel {
         confirmBtn.addEventListener('click', async () => {
             const gistId = gistInput.value.trim();
             if (!GistManager.GIST_ID_PATTERN.test(gistId)) {
-                this.showToast('请填写合法的 Gist ID（20-40 位十六进制）', 'warn');
+                this.showToast('请填写合法的 Gist ID', 'warn');
                 return;
             }
             const token = tokenInput.value.trim();
@@ -765,7 +789,6 @@ class LunchWheel {
                 return;
             }
             await this.clearHistory(token, gistId);
-            this.persistGistIdIfRemembered(gistId, rememberGistCb.checked);
             overlay.remove();
             document.removeEventListener('keydown', onKey);
         });
@@ -775,7 +798,6 @@ class LunchWheel {
             document.removeEventListener('keydown', onKey);
         });
 
-        // Esc 关闭 / Enter 提交
         const onKey = (e) => {
             if (e.key === 'Escape') {
                 overlay.remove();
@@ -789,18 +811,17 @@ class LunchWheel {
 
     async clearHistory(token, gistId) {
         try {
-            // 清除缓存，确保读取最新数据
             this.gistManager.clearCache();
             
             const data = await this.gistManager.readData();
+            const menuId = this.gistManager.getCurrentMenuId();
             
-            // 修复：明确保留options，只清空history
-            const newData = {
-                options: data.options || [],  // 保留现有选项
-                history: []  // 清空历史记录
-            };
+            // 清空当前菜单的历史
+            if (data.menus[menuId]) {
+                data.menus[menuId].history = [];
+            }
             
-            const success = await this.gistManager.writeData(newData, token, gistId);
+            const success = await this.gistManager.writeData(data, token, gistId);
 
             if (success) {
                 this.gistManager.clearCache();
@@ -814,7 +835,6 @@ class LunchWheel {
         }
     }
 
-    // 管理选项弹窗：列出所有选项 + 删除
     async showManageOverlay() {
         await this.renderManageList();
         document.getElementById('manage-overlay').style.display = 'flex';
@@ -841,19 +861,53 @@ class LunchWheel {
             return;
         }
 
-        allOptions.forEach(name => {
+        allOptions.forEach(opt => {
             const item = document.createElement('div');
             item.className = 'manage-item';
+            
             const nameEl = document.createElement('span');
             nameEl.className = 'manage-item-name';
-            nameEl.textContent = name; // textContent 防 XSS
+            nameEl.textContent = `${opt.name} (${opt.likes}赞, 分数${opt.score})`;
+            
+            // 点赞按钮
+            const likeBtn = document.createElement('button');
+            likeBtn.className = 'manage-item-like';
+            likeBtn.textContent = '👍';
+            likeBtn.addEventListener('click', () => this.likeOptionHandler(opt.name));
+            
+            // 删除按钮
             const del = document.createElement('button');
             del.className = 'manage-item-delete';
             del.textContent = '删除';
-            del.addEventListener('click', () => this.deleteOption(name));
-            item.append(nameEl, del);
+            del.addEventListener('click', () => this.deleteOption(opt.name));
+            
+            item.append(nameEl, likeBtn, del);
             list.appendChild(item);
         });
+    }
+
+    async likeOptionHandler(name) {
+        const gist = this.readGistIdFromForm('gist-id-manage', 'remember-gist-id-manage');
+        if (!gist) return;
+
+        const token = document.getElementById('manage-token').value.trim();
+        if (!token) {
+            this.showToast('请先填写 Token 再点赞', 'warn');
+            return;
+        }
+
+        try {
+            const ok = await this.gistManager.likeOption(name, token, gist.id);
+            if (ok) {
+                this.showToast(`已为 "${name}" 点赞 (+5分)`, 'success');
+                await this.renderManageList();
+                await this.refreshAll();
+            } else {
+                this.showToast('点赞失败，请检查 Token 权限或 Gist ID', 'error');
+            }
+        } catch (e) {
+            this.showToast('点赞失败：' + e.message, 'error');
+        }
     }
 
     async deleteOption(name) {
@@ -867,13 +921,9 @@ class LunchWheel {
         }
         if (!confirm(`确定删除选项 "${name}" 吗？`)) return;
 
-        const remember = document.getElementById('remember-token-manage').checked;
-
         try {
             const ok = await this.gistManager.deleteOption(name, token, gist.id);
             if (ok) {
-                this.rememberToken(token, remember);
-                this.persistGistIdIfRemembered(gist.id, gist.remember);
                 this.showToast(`已删除 "${name}"`, 'success');
                 await this.renderManageList();
                 await this.refreshAll();
@@ -883,6 +933,199 @@ class LunchWheel {
         } catch (e) {
             this.showToast('删除失败：' + e.message, 'error');
         }
+    }
+
+    // 菜单管理相关方法
+    async showMenuManageOverlay() {
+        await this.renderMenuList();
+        this.fillCachedToken('menu-token', null);
+        this.fillCachedGistId('menu-gist-id');
+        document.getElementById('menu-manage-overlay').style.display = 'flex';
+        
+        // 添加创建菜单按钮事件
+        document.getElementById('create-menu-btn')?.addEventListener('click', () => {
+            this.createMenuHandler();
+        });
+        
+        document.getElementById('close-menu-manage')?.addEventListener('click', () => {
+            this.hideMenuManageOverlay();
+        });
+    }
+
+    hideMenuManageOverlay() {
+        document.getElementById('menu-manage-overlay').style.display = 'none';
+    }
+
+    async createMenuHandler() {
+        const name = document.getElementById('new-menu-name').value.trim();
+        const gistId = document.getElementById('menu-gist-id').value.trim();
+        const token = document.getElementById('menu-token').value.trim();
+        
+        if (!name) {
+            this.showToast('请输入菜单名称', 'warn');
+            return;
+        }
+        
+        if (!GistManager.GIST_ID_PATTERN.test(gistId)) {
+            this.showToast('请填写合法的 Gist ID', 'warn');
+            return;
+        }
+        
+        if (!token) {
+            this.showToast('请输入 GitHub Token', 'warn');
+            return;
+        }
+        
+        const menuId = await this.gistManager.createMenu(name, token, gistId);
+        if (menuId) {
+            this.showToast(`菜单 "${name}" 已创建`, 'success');
+            document.getElementById('new-menu-name').value = '';
+            await this.renderMenuList();
+            await this.refreshAll();
+        } else {
+            this.showToast('创建失败，请检查 Token 权限或 Gist ID', 'error');
+        }
+    }
+
+    async renderMenuList() {
+        const list = document.getElementById('menu-list');
+        if (!list) return;
+        
+        list.replaceChildren();
+        const allMenus = await this.gistManager.getAllMenus();
+        const currentMenuId = this.gistManager.getCurrentMenuId();
+
+        if (allMenus.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'manage-empty';
+            empty.textContent = '暂无菜单';
+            list.appendChild(empty);
+            return;
+        }
+
+        allMenus.forEach(menu => {
+            const item = document.createElement('div');
+            item.className = 'menu-item';
+            if (menu.id === currentMenuId) {
+                item.classList.add('active');
+            }
+            
+            const nameEl = document.createElement('span');
+            nameEl.className = 'menu-item-name';
+            nameEl.textContent = `${menu.name} (${menu.optionCount}个选项)`;
+            
+            const switchBtn = document.createElement('button');
+            switchBtn.className = 'menu-item-switch';
+            switchBtn.textContent = menu.id === currentMenuId ? '当前' : '切换';
+            if (menu.id !== currentMenuId) {
+                switchBtn.addEventListener('click', () => this.switchMenu(menu.id));
+            }
+            
+            // 不能删除默认菜单
+            if (menu.id !== GistManager.DEFAULT_MENU_ID) {
+                const delBtn = document.createElement('button');
+                delBtn.className = 'menu-item-delete';
+                delBtn.textContent = '删除';
+                delBtn.addEventListener('click', () => this.deleteMenu(menu.id));
+                item.append(nameEl, switchBtn, delBtn);
+            } else {
+                item.append(nameEl, switchBtn);
+            }
+            
+            list.appendChild(item);
+        });
+    }
+
+    async switchMenu(menuId) {
+        this.gistManager.setCurrentMenuId(menuId);
+        this.showToast('已切换菜单', 'success');
+        await this.refreshAll();
+        await this.renderMenuList();
+    }
+
+    async deleteMenu(menuId) {
+        if (!confirm('确定删除此菜单吗？')) return;
+        
+        // 需要输入Token和Gist ID
+        this.showDeleteMenuOverlay(menuId);
+    }
+
+    showDeleteMenuOverlay(menuId) {
+        const overlay = document.createElement('div');
+        overlay.className = 'record-overlay';
+        overlay.id = 'delete-menu-overlay';
+        overlay.style.display = 'flex';
+
+        const content = document.createElement('div');
+        content.className = 'record-content';
+
+        const h2 = document.createElement('h2');
+        h2.textContent = '🗑️ 删除菜单';
+
+        const hintRow = document.createElement('p');
+        hintRow.className = 'overlay-hint';
+        hintRow.textContent = '💡 删除菜单需要 Gist ID 与 GitHub Token';
+
+        const gistGroup = document.createElement('div');
+        gistGroup.className = 'form-group';
+        const gistLabel = document.createElement('label');
+        gistLabel.textContent = 'Gist ID：';
+        const gistInput = document.createElement('input');
+        gistInput.type = 'text';
+        gistInput.placeholder = '20-40 位十六进制';
+        const cachedGistId = GistManager.getUserGistId();
+        if (cachedGistId) gistInput.value = cachedGistId;
+        gistGroup.append(gistLabel, gistInput);
+
+        const tokenGroup = document.createElement('div');
+        tokenGroup.className = 'form-group';
+        const tokenLabel = document.createElement('label');
+        tokenLabel.textContent = 'GitHub Token：';
+        const tokenInput = document.createElement('input');
+        tokenInput.type = 'password';
+        tokenInput.placeholder = 'ghp_xxxxxx';
+        tokenGroup.append(tokenLabel, tokenInput);
+
+        const buttons = document.createElement('div');
+        buttons.className = 'form-buttons';
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'submit-btn danger-btn';
+        confirmBtn.textContent = '确认删除';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'cancel-btn';
+        cancelBtn.textContent = '取消';
+        buttons.append(confirmBtn, cancelBtn);
+
+        content.append(h2, hintRow, gistGroup, tokenGroup, buttons);
+        overlay.appendChild(content);
+        document.body.appendChild(overlay);
+
+        confirmBtn.addEventListener('click', async () => {
+            const gistId = gistInput.value.trim();
+            if (!GistManager.GIST_ID_PATTERN.test(gistId)) {
+                this.showToast('请填写合法的 Gist ID', 'warn');
+                return;
+            }
+            const token = tokenInput.value.trim();
+            if (!token) {
+                this.showToast('请输入 GitHub Token', 'warn');
+                return;
+            }
+
+            const ok = await this.gistManager.deleteMenu(menuId, token, gistId);
+            if (ok) {
+                this.showToast('菜单已删除', 'success');
+                overlay.remove();
+                await this.refreshAll();
+                await this.renderMenuList();
+            } else {
+                this.showToast('删除失败', 'error');
+            }
+        });
+
+        cancelBtn.addEventListener('click', () => {
+            overlay.remove();
+        });
     }
 }
 
