@@ -49,25 +49,23 @@ class LunchWheel {
         const allOptions = await this.gistManager.getAllOptions();
         const emptyEl = document.getElementById('empty-message');
 
+        // 隐藏空状态提示（将在点击转盘时根据情况显示）
+        emptyEl.style.display = 'none';
+
         if (allOptions.length === 0) {
-            emptyEl.style.display = 'flex';
+            // 没有任何选项，不显示提示，等待用户点击转盘
             this.availableOptions = [];
             this.options = [];
             this.generateColors();
             return;
         }
 
-        emptyEl.style.display = 'none';
-
         this.availableOptions = await this.gistManager.getAvailableOptions();
         this.options = this.availableOptions.length > 0
             ? this.availableOptions
             : [];
 
-        if (this.options.length === 0) {
-            emptyEl.style.display = 'flex';
-        }
-
+        // 即使可用选项为空，也不显示提示，等待用户点击转盘
         this.generateColors();
     }
     
@@ -165,6 +163,18 @@ class LunchWheel {
         this.ctx.restore();
         
         if (this.options.length === 0) {
+            // 没有选项时，绘制一个空轮盘，显示提示文字
+            this.ctx.save();
+            this.ctx.fillStyle = '#999';
+            this.ctx.font = 'bold 20px Microsoft YaHei, sans-serif';
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'middle';
+            
+            // 在轮盘中心显示提示
+            this.ctx.fillText('点击下方按钮', centerX, centerY - 20);
+            this.ctx.fillText('开始选择', centerX, centerY + 20);
+            
+            this.ctx.restore();
             return;
         }
         
@@ -442,7 +452,9 @@ class LunchWheel {
     async spin() {
         if (this.isSpinning) return;
 
+        // 只有在点击转盘时才检查并提示
         if (this.availableOptions.length === 0) {
+            // 没有可用选项，显示提示
             this.showResult('你没饭吃了');
             return;
         }
