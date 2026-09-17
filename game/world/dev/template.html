@@ -2,12 +2,14 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>小世界 · __BUILD_ID__</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #07090e; }
   body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; }
-  #cv { display: block; cursor: grab; }
+  #cv { display: block; cursor: grab; touch-action: none; }
+  #cv:active { cursor: grabbing; }
   #cv:active { cursor: grabbing; }
 
   #ui-top {
@@ -49,6 +51,21 @@
     background: rgba(10, 13, 20, 0.6); padding: 4px 10px; border-radius: 4px; z-index: 10;
   }
   #build-id { color: #56617a; font-size: 11px; }
+
+  /* 手机端适配：窄屏两行顶栏、面板收窄、隐藏提示 */
+  @media (max-width: 700px) {
+    #ui-top { flex-wrap: wrap; height: auto; padding: 4px 8px; gap: 8px 12px; font-size: 11px; row-gap: 2px; }
+    #ui-top .title, #build-id, #hint { display: none; }
+    .stat { gap: 3px; }
+    #zoom-ctl { gap: 5px; }
+    #zoom-slider { width: 72px; }
+    #speed-ctl button { padding: 3px 6px; font-size: 11px; }
+    #right-ctl { gap: 8px; }
+    #roster-panel { left: 6px; top: 92px; width: 46vw; max-height: 38vh; font-size: 11px; }
+    #log-panel { left: auto; right: 6px; bottom: 8px; width: 52vw; max-height: 18vh; }
+    #logs { max-height: 12vh; }
+    #info-panel { max-width: 46vw; font-size: 11px; }
+  }
 
   #info-panel {
     position: fixed; min-width: 175px; max-width: 250px;

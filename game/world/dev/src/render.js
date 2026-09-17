@@ -89,7 +89,7 @@ function chunkThumb(cx, cy, c) {
   return cv;
 }
 
-function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod) {
+function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
   // 背景为虚空深渊色：未生成区域（VOID）露出此色，探索到后显现海与岛屿
   ctx.fillStyle = "#05070c";
   ctx.fillRect(0, 0, cw, ch);
@@ -146,8 +146,8 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod) {
         eTier = elevTierOf(cHere.elev[cIdx(x, y)]);
       }
       let variant = TILE_ELEV_VARIANTS[tile][eTier][(h * 4) | 0];
-      // 水面波光：相位用真实渲染时钟（时间加速不改变闪动频率），高亮更柔和
-      if ((tile === T.WATER || tile === T.DEEP) && ((h * 7 + performance.now() / 1000 * 0.35) % 1) < 0.08) {
+      // 水面波光：相位用波光时钟（暂停即静止，倍速不影响频率），高亮更柔和
+      if ((tile === T.WATER || tile === T.DEEP) && ((h * 7 + waveT) % 1) < 0.08) {
         variant = TILE_GLEAM[tile];
       }
       const px = ox + x * s, py = oy + y * s;
@@ -316,6 +316,15 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod) {
         ctx.beginPath(); ctx.arc(px + s * 0.4, py + s * 0.55, s * 0.3, 0, 7); ctx.fill();
         ctx.fillStyle = "#efe2b0";
         ctx.beginPath(); ctx.arc(px + s * 0.55, py + s * 0.4, s * 0.18, 0, 7); ctx.fill();
+      } else if (tile === T.DOCK) {
+        ctx.fillStyle = "#8a6a42";
+        ctx.fillRect(px, py, s + 0.5, s + 0.5);
+        ctx.fillStyle = "#6e5232";   // 木板
+        ctx.fillRect(px, py + s * 0.1, s + 0.5, s * 0.16);
+        ctx.fillRect(px, py + s * 0.42, s + 0.5, s * 0.16);
+        ctx.fillRect(px, py + s * 0.74, s + 0.5, s * 0.16);
+        ctx.fillStyle = "#4a3520";   // 系船桩
+        ctx.fillRect(px + s * 0.42, py + s * 0.38, s * 0.16, s * 0.24);
       } else if (tile === T.BERRY) {
         if (s >= 8) {
           ctx.fillStyle = "#2e5a28";
@@ -448,8 +457,60 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod) {
     }
   }
 
+  // 远景：显示各地区名字（缩小到看不清小人时，地图上标注地区名）
+  if (camera.zoom < 0.8) {
+    ctx.textAlign = "center";
+    ctx.font = "bold 13px 'PingFang SC', sans-serif";
+    const SETTLE_L = ["定居点", "村庄", "城镇", "城市"];
+    const label = (x, y, text) => {
+      const px = ox + x * s, py = oy + y * s - s * 0.6;
+      const w = ctx.measureText(text).width + 10;
+      ctx.fillStyle = "rgba(8,10,16,0.72)";
+      ctx.fillRect(px - w / 2, py - 14, w, 18);
+      ctx.fillStyle = "#e8d9a0";
+      ctx.fillText(text, px, py);
+    };
+    for (const o of world.islands) {
+      if (!o.name) continue;
+      if (world.settlements.some(st => Math.hypot(st.x - o.x, st.y - o.y) < o.r + 5)) continue;   // 有聚落的岛显示聚落名
+      label(o.x, o.y, o.name);
+    }
+    for (const st of world.settlements) {
+      label(st.x, st.y, `${st.name} · ${SETTLE_L[st.level]}`);
+    }
+    ctx.textAlign = "left";
+  }
+
+  // 远航船（航海家在船上时不单独绘制小人）
+  for (const s of world.ships) {
+    const px = ox + s.x * s, py = oy + s.y * s;
+    const r = Math.max(3, s * 0.55);
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(s.ang);
+    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    ctx.beginPath(); ctx.ellipse(0, r * 0.4, r * 1.1, r * 0.4, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#7a5a30";   // 船身
+    ctx.beginPath();
+    ctx.moveTo(r * 1.3, 0);
+    ctx.quadraticCurveTo(0, r * 0.85, -r * 1.1, r * 0.45);
+    ctx.lineTo(-r * 1.1, -r * 0.45);
+    ctx.quadraticCurveTo(0, -r * 0.85, r * 1.3, 0);
+    ctx.closePath(); ctx.fill();
+    if (s.state === "sailing") {   // 白帆
+      ctx.fillStyle = "#f0ead8";
+      ctx.beginPath();
+      ctx.moveTo(r * 0.1, -r * 0.15);
+      ctx.lineTo(r * 0.1, -r * 1.1);
+      ctx.lineTo(r * 0.75, -r * 0.2);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+
   // 小人：头 + 身两段式 + 深色描边，任何底色上一眼可辨
   for (const a of agents) {
+    if (a.state === "voyage") continue;   // 航海中的人在船上
     const px = ox + a.x * s, py = oy + a.y * s;
     let c = "#f2ede0";
     if (a.state === "work") c = "#ff9f43";

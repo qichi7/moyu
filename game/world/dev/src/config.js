@@ -7,7 +7,7 @@ const T = {
   VOID: 0, DEEP: 1, WATER: 2, SAND: 3, GRASS: 4, TREE: 5,
   MOUNTAIN: 6, FARM: 7, HOUSE: 8, PATH: 9, SITE: 10, BRIDGE: 11,
   BERRY: 12, FRUIT: 13, PASTURE: 14, CAVE: 15, CLIFF: 16, FENCE: 17,
-  QUARRY: 18, SANDPIT: 19,
+  QUARRY: 18, SANDPIT: 19, DOCK: 20,
 };
 
 const TILE_META = {
@@ -31,6 +31,7 @@ const TILE_META = {
   [T.FENCE]:    { name: "围栏", color: "#7a5a2e", walk: false, h: 0 },
   [T.QUARRY]:   { name: "采石场", color: "#8d8478", walk: true, h: 0 },
   [T.SANDPIT]:  { name: "沙场", color: "#d8c890", walk: true, h: 0 },
+  [T.DOCK]:     { name: "码头", color: "#8a6a42", walk: true, h: 0 },
 };
 
 const WORLD_W = 240, WORLD_H = 180;
@@ -48,9 +49,9 @@ const SIM = {
   WORK_EFFORT: 1.3,     // 每个工人每秒任务进度
   FARM_MATURITY: 55,    // 农田成熟秒数
   FARM_YIELD: 4,        // 每次成熟产粮
-  BIRTH_CHECK: 0.015,   // 每秒出生判定概率
-  EXPAND_POP_CAP: 22,   // 人口达到此值触发扩张（每次扩张 +22）
-  SETTLEMENT_SCORE: [24, 70, 150],   // 聚落升级分数线：村庄/城镇/城市
+  BIRTH_CHECK: 0.05,    // 出生概率（规划器内按 4 秒窗口换算）
+  // EXPAND_POP_CAP 已废弃：人口不设上限，扩张由住房饱和与选址失败驱动
+  SETTLEMENT_SCORE: [12, 60, 140],   // 聚落升级分数线：村庄/城镇/城市
   SETTLEMENT_RADIUS: 14,             // 聚落繁荣度统计半径
   BRIDGE_HP: 3,         // 架一座桥所需工时（比填海快得多）
   EXPLORE_CHANCE: 0.06, // 探索欲 1.0 的小人每次决策触发探索的概率
@@ -66,6 +67,10 @@ const SIM = {
   PASTURE_CAP: 6,       // 单牧场圈养上限
   BREED_CHANCE: 0.1,    // 繁殖概率（每 120 秒判定）
   WILD_BREED_CAP: 60,   // 野生动物总量上限
+  // ---- 航海 ----
+  SHIP_COST: 10,        // 造一艘远航船耗木材（联合库存）
+  SHIP_SPEED: 3,        // 船速（格/秒）
+  SHIP_MAX_DIST: 220,   // 单次远航最大航程
   // ---- 历法与年龄 ----
   YEAR_DAYS: 12,        // 1 昼夜 = 1 个月，12 昼夜 = 1 年（1 岁）
 };

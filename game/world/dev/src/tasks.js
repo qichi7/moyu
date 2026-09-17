@@ -6,14 +6,15 @@ const tasks = {
   list: [],
 };
 
-const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 6, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3 };
+const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 4, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3, FILL: 10 };
 // 工程资源消耗：架桥耗木材、造陆耗沙土（完工时从最近聚落库存扣除）
-const TASK_RESOURCE_COST = { BRIDGE: { wood: 1 }, FILL: { sand: 2 } };
+const TASK_RESOURCE_COST = { BRIDGE: { wood: 1 }, FILL: { sand: 1 } };
 
 function tasksAdd(t) {
   t.id = _taskId++;
   t.progress = 0;
   t.need = t.need !== undefined ? t.need : (TASK_DEFAULT_NEED[t.type] || 0); // 兜底：漏设 need 的任务永不完工、占死名额
+  t.born = world.time;   // 立项时间：任务老化防饥饿（越久越优先被领取）
   t.workers = new Set();
   if (t.type === "BUILD" || t.type === "FARM" || t.type === "PASTURE") setTile(t.x, t.y, T.SITE); // 立项即圈地
   tasks.list.push(t);
@@ -55,7 +56,8 @@ function tasksTake(agent) {
     if (t.workers.size >= cap) continue;
     const d = Math.abs(t.x - ax) + Math.abs(t.y - ay);
     const jobMatch = myJob && taskJobPref(t) === myJob ? 1 : 0;
-    const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000;
+    const age = world.time - (t.born || world.time);   // 任务老化：立项越久越优先，远任务不饿死
+    const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000 - age * 3;
     if (score < bestScore) { bestScore = score; best = t; }
   }
   return best;
@@ -103,8 +105,8 @@ function tasksFinish(t) {
       const was = tileAt(t.x, t.y);
       setTile(t.x, t.y, T.GRASS);
       // 产出由工人搬运回仓：伐木得木材、采石得石材
-      if (was === T.TREE) return { res: "wood", amount: 4 };
-      if (was === T.MOUNTAIN) return { res: "stone", amount: 5 };
+      if (was === T.TREE) return { res: "wood", amount: 6 };
+      if (was === T.MOUNTAIN) return { res: "stone", amount: 7 };
       break;
     }
     case "FILL": {
@@ -136,15 +138,22 @@ function tasksFinish(t) {
     }
     case "GATHER": {
       // 采集：浆果/果树 → 粮；沙滩 → 沙土（产出由工人搬运回仓）
-      if (t.res === "sand") return { res: "sand", amount: 2 };
+      if (t.res === "sand") return { res: "sand", amount: 3 };
       if (gatherBerry(t.x, t.y)) return { res: "food", amount: SIM.GATHER_YIELD };
       break;
     }
     case "HUNT": {
-      // 狩猎：猎物从世界移除，肉由猎手搬运回仓
+      // 狩猎：猎物从世界移除，肉由猎手搬运回仓；同时撤销绑同一猎物的捕获任务
       const c = t.creature;
       if (c && !c.dead) {
         c.dead = true;
+        for (let i = tasks.list.length - 1; i >= 0; i--) {
+          const k = tasks.list[i];
+          if (k !== t && k.creature === c && !k.done) {
+            for (const w of k.workers) { if (w.task === k) { w.task = null; if (w.state === "walk" || w.state === "work") w.state = "idle"; } }
+            tasks.list.splice(i, 1);
+          }
+        }
         return { res: "food", amount: huntReward(c) };
       }
       break;
@@ -173,6 +182,18 @@ function tasksFinish(t) {
       setTile(t.x, t.y, T.SANDPIT);
       world.sandpits.push({ x: t.x, y: t.y });
       logMsg(`河滩沙场开工，沙土供给稳定了。`);
+      break;
+    }
+    case "DOCK": {
+      setTile(t.x, t.y, T.DOCK);
+      world.docks.push({ x: t.x, y: t.y });
+      logMsg(`码头建成，航海家们开始筹划远航。`);
+      break;
+    }
+    case "DOCK": {
+      setTile(t.x, t.y, T.DOCK);
+      world.docks.push({ x: t.x, y: t.y });
+      logMsg(`码头建成，航海家们开始筹划远航。`);
       break;
     }
     case "CAPTURE": {

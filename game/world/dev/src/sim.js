@@ -52,7 +52,8 @@ function centroidOf(list) {
 }
 
 // 给无房小人分配房屋（一房三户，与"房屋容量 = 房数×3"的口径一致）
-// 评分 = 离人距离×0.3 + 离食物距离×1：住得离吃的太远的房子会被强烈劝退
+// 评分 = 离人距离×0.3 + 离食物距离 + 地区人口密度倾向：
+//   探索型居民（先锋者）偏好人口少的地区（向往边疆），恋家者偏好人口多的成熟社区
 function assignHomes() {
   const count = {};
   const key = h => `${h.x},${h.y}`;
@@ -61,12 +62,16 @@ function assignHomes() {
   }
   for (const a of agents) {
     if (a.home) continue;
+    const pioneer = a.hobby === "explore" || a.adventure > 0.6;
     let best = null, bestScore = Infinity, bestKey = null;
     for (const h of world.houses) {
       const k = key(h);
       if ((count[k] || 0) >= 3) continue;
       const food = nearestFoodTo(h.x, h.y).dist;
-      const score = (Math.abs(h.x - a.x) + Math.abs(h.y - a.y)) * 0.3 + food;
+      // 该房的当前住户数即拥挤度信号
+      const crowd = count[k] || 0;
+      const crowdTerm = pioneer ? -crowd * 1.2 : crowd * 0.5;
+      const score = (Math.abs(h.x - a.x) + Math.abs(h.y - a.y)) * 0.3 + food + crowdTerm;
       if (score < bestScore) { bestScore = score; best = h; bestKey = k; }
     }
     if (best) {
@@ -155,7 +160,7 @@ function plannerTick() {
       }
     }
   }
-  // 2c. 狩猎：附近有野生牛羊 → 猎队
+  // 2c. 狩猎：附近有野生牛羊 → 猎队（立项前确认动物存活，且未被捕获任务占用）
   if (world.food < 60 + pop * 3 && tasksPending("HUNT", true).length < 1) {
     const a = pickAnchor();
     const wild = creatures.filter(c => c.isWild() && !c.dead &&
@@ -165,8 +170,16 @@ function plannerTick() {
       tasksAdd({ type: "HUNT", x: Math.round(c.x - 0.5), y: Math.round(c.y - 0.5), creature: c });
     }
   }
-  // 2d. 畜牧（定居时代解锁：驯化早于城市文明）：无牧场 → 建牧场；有牧场有空位且附近有野生牲畜 → 捕获
-  if (world.era >= 1) {
+  // 兜底清理：猎物已死的 HUNT/CAPTURE 任务立即移除（否则永久占位阻塞该物种新立项）
+  for (let i = tasks.list.length - 1; i >= 0; i--) {
+    const t = tasks.list[i];
+    if ((t.type === "HUNT" || t.type === "CAPTURE") && t.creature && t.creature.dead) {
+      for (const w of t.workers) { if (w.task === t) { w.task = null; if (w.state === "walk" || w.state === "work") w.state = "idle"; } }
+      tasks.list.splice(i, 1);
+    }
+  }
+  // 2d. 畜牧（开局解锁：驯化早于定居文明）：无牧场 → 建牧场；有牧场有空位且附近有野生牲畜 → 捕获
+  if (world.era >= 0) {
     if (world.pastures.length === 0 && tasksPending("PASTURE", true).length < 1) {
       const a = pickAnchor();
       const s = findSpot(a.x, a.y, 4, 14, T.GRASS);
@@ -186,8 +199,8 @@ function plannerTick() {
   for (const s of world.settlements) {
     const stock = ensureStock(s);
     const digPending = type => tasksPending("DIG", true).filter(t => t.res === type).length;
-    if (stock.wood < 10 && digPending("wood") < 2) {
-      const t = findSpot(s.x, s.y, 2, 16, T.TREE);
+    if (stock.wood < 10 && digPending("wood") < 6) {
+      const t = findSpot(s.x, s.y, 2, 30, T.TREE);
       if (t) tasksAdd({ type: "DIG", x: t.x, y: t.y, res: "wood" });
     }
     if (stock.stone < 8 && digPending("stone") < 1) {
@@ -198,12 +211,35 @@ function plannerTick() {
       const t = findSpot(s.x, s.y, 2, 18, T.SAND);
       if (t) tasksAdd({ type: "GATHER", x: t.x, y: t.y, need: 4, res: "sand" });
     }
-    if (stock.wood < 15 && tasksPending("PLANT", true).length < 1) {
+    if (stock.wood < 15 && tasksPending("PLANT", true).length < 2) {
       const t = findSpot(s.x, s.y, 3, 12, T.GRASS);
-      if (t) tasksAdd({ type: "PLANT", x: t.x, y: t.y, need: 6 });
+      if (t) tasksAdd({ type: "PLANT", x: t.x, y: t.y, need: 4 });
     }
-    // 不可再生资源的替代渠道（城邦解锁）：洞穴旁建采石场、河滩建沙场
-    if (world.era >= 2) {
+  }
+  // 2e2. 码头（定居时代解锁）：临水草地建码头，开启航海时代
+  if (world.era >= 1 && world.docks.length === 0 && tasksPending("DOCK", true).length < 1) {
+    for (const s of world.settlements) {
+      const shore = findSpot(s.x, s.y, 3, 26, T.GRASS, [T.DOCK]);
+      if (shore && neighborsOf(shore.x, shore.y).some(p => tileAt(p.x, p.y) === T.WATER)) {
+        tasksAdd({ type: "DOCK", x: shore.x, y: shore.y, need: 20 });
+        break;
+      }
+      // 找不到临水格 → 聚落 30 格内找浅水邻格的草地
+      let placed = false;
+      for (let tries = 0; tries < 100 && !placed; tries++) {
+        const cx = s.x + randInt(-30, 30), cy = s.y + randInt(-30, 30);
+        if (tileAt(cx, cy) !== T.GRASS) continue;
+        if (neighborsOf(cx, cy).some(p => tileAt(p.x, p.y) === T.WATER)) {
+          tasksAdd({ type: "DOCK", x: cx, y: cy, need: 20 });
+          placed = true;
+        }
+      }
+      if (placed) break;
+    }
+  }
+  // 不可再生资源的替代渠道（城邦解锁）：洞穴旁建采石场、河滩建沙场
+  if (world.era >= 2) {
+    for (const s of world.settlements) {
       if (world.quarries.length < 2 && tasksPending("QUARRY", true).length < 1) {
         const cave = world.caves.find(cv => Math.abs(cv.x - s.x) + Math.abs(cv.y - s.y) < 60 &&
           !world.quarries.some(q => Math.abs(q.x - cv.x) + Math.abs(q.y - cv.y) < 8));
@@ -260,7 +296,7 @@ function plannerTick() {
   //    出生安全垫随人口放大（food > 100 + 人口×4），防止出生率超过承载力引发饿死潮
   //    BIRTH_CHECK 是每秒概率，规划器每 PLANNER_INTERVAL 秒才判一次，需换算成窗口概率
   const hasRoom = world.houses.length * 3 > pop;
-  if (pop > 0 && pop < world.popCap && world.food > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
+  if (pop > 0 && world.food > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
     const near = findBirthSpot();
     if (near) {
       const baby = spawnAgent(near.x, near.y);
@@ -270,8 +306,8 @@ function plannerTick() {
     }
   }
 
-  // 5. 人口触顶 → 世界扩张
-  if (pop >= world.popCap) {
+  // 5. 疆土随人口生长：每增长约 25 人，规划署主动开辟一片新疆土（无人口上限）
+  if (pop >= (world.expansions + 1) * 25) {
     expand();
   }
 
@@ -447,6 +483,7 @@ function simUpdate(dt) {
 
   for (const a of agents) a.update(dt);
   for (const c of creatures) c.update(dt);
+  shipTick(dt);
   // 死者退场（名册/住房/任务引用同步释放）
   for (let i = agents.length - 1; i >= 0; i--) {
     if (agents[i].dead) agents.splice(i, 1);

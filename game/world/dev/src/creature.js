@@ -51,12 +51,16 @@ class Creature {
       if (c.type === "dog" && !c.dead && Math.hypot(c.x - this.x, c.y - this.y) < 4) { dogNear = true; break; }
     }
     if (threat) {
-      const sp = (dogNear ? 0.55 : CREATURE_META[this.type].flee) * dt;
+      // 逃跑疲劳：被追 8 秒后精疲力尽，速度大减（保证猎手追得上）
+      this.fleeT = (this.fleeT || 0) + dt;
+      const tired = this.fleeT > 8 ? 0.4 : 1;
+      const sp = (dogNear ? 0.55 : CREATURE_META[this.type].flee) * tired * dt;
       const dx = this.x - threat.x, dy = this.y - threat.y;
       const d = Math.hypot(dx, dy) || 1;
       this.moveBy((dx / d) * sp, (dy / d) * sp);
       return;
     }
+    this.fleeT = 0;
     // 游荡
     this.moveCd -= dt;
     if (this.moveCd <= 0) {

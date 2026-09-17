@@ -79,7 +79,10 @@ class Agent {
     // 年龄：1 游戏年（12 昼夜）长 1 岁，寿命封顶
     this.age = Math.min(SPECIES_AGE.human.lifespan, this.age + dt / (SIM.DAY_LEN * SIM.YEAR_DAYS));
 
-    // ---- 登岛命名：第一个踏上未知岛屿的人为它取名 ----
+    // 航海中：一切需求冻结（船上有补给），坐标由船携带
+    if (this.state === "voyage") return;
+
+    // ---- 登岛命名：第一个踏上未知岛屿的人为它取名，并就地升格为定居点 ----
     this.islandCheckCd = (this.islandCheckCd || 0) - dt;
     if (this.islandCheckCd <= 0) {
       this.islandCheckCd = 1;
@@ -90,8 +93,28 @@ class Agent {
           if (o.name) continue;   // 已有名字的岛跳过
           if (Math.hypot(o.x - tx, o.y - ty) <= o.r + 1) {
             o.name = pickName(false);
+            o.claimed = true;
             logMsg(`${this.name} 第一个登上未知岛屿，将它命名为「${o.name}」。`);
-            emit("island-named", o);
+            // 命名即定居化：面积足够的岛立即立城（粮仓+建房+开荒），纳入版图
+            if (o.r >= 5 && !world.settlements.some(s => Math.hypot(s.x - o.x, s.y - o.y) < o.r + 5)) {
+              const sc = findSpot(o.x, o.y, 0, Math.max(4, o.r * 0.6), T.GRASS);
+              if (sc) {
+                setTile(sc.x, sc.y, T.HOUSE);
+                world.houses.push({ x: sc.x, y: sc.y, granary: true });
+                world.settlements.push({ x: sc.x, y: sc.y, name: o.name, level: 0, stock: { wood: 15, stone: 5, sand: 10 } });
+                for (let i = 0; i < 3; i++) {
+                  const b = findSpot(sc.x, sc.y, 2, Math.max(6, o.r * 0.8), T.GRASS);
+                  if (b) tasksAdd({ type: "BUILD", x: b.x, y: b.y, need: 10 });
+                }
+                for (let i = 0; i < 2; i++) {
+                  const f = findSpot(sc.x, sc.y, 3, Math.max(8, o.r), T.GRASS, [T.HOUSE, T.SITE]);
+                  if (f) tasksAdd({ type: "FARM", x: f.x, y: f.y, need: 9 });
+                }
+                logMsg(`「${o.name}」升格为定居点，先民渡海建设，粮仓落成。`);
+                emit("expand");
+                emit("island-settled", o);
+              }
+            }
             break;
           }
         }
@@ -217,6 +240,19 @@ class Agent {
       this.deposit();   // 仓库不可达的兜底（就地登记入库）
     }
 
+    // 3.8 航海：探险家/向往远方的居民从码头坐船出海开拓（消耗联合木材造船）
+    if (!this.task && !this.voyaging && world.docks.length &&
+        (this.job === "explorer" || this.hobby === "explore") && this.adventure > 0.4 &&
+        rand() < 0.08) {
+      const dock = world.docks.reduce((b, d) =>
+        !b || Math.abs(d.x - this.x) + Math.abs(d.y - this.y) < Math.abs(b.x - this.x) + Math.abs(b.y - this.y) ? d : b, null);
+      if (dock && this.goTo(dock.x, dock.y)) {
+        this.state = "walk";
+        this.onArrive = () => this.startVoyage(dock);
+        return;
+      }
+    }
+
     // 4. 探索欲：高探索欲的居民会主动向未知远方进发（点亮虚空、发现新岛）
     if (!this.task) {
       if (this.exploring) {
@@ -280,6 +316,26 @@ class Agent {
     this.home = null;
     logMsg(`${this.name} ${reason}，享年 ${Math.floor(this.age)} 岁。`);
     emit("agent-death", this);
+  }
+
+  // 出海远航：造船消耗联合木材，登船后航向未知海域（船逻辑见 world.shipTick）
+  startVoyage(dock) {
+    if (jointStock("wood") < SIM.SHIP_COST) {
+      logThrottled("木材不足，无法造船远航。", 40);
+      return;
+    }
+    jointConsume("wood", SIM.SHIP_COST);
+    const water = neighborsOf(dock.x, dock.y).find(p => tileAt(p.x, p.y) === T.WATER);
+    if (!water) { logThrottled("码头旁没有足够的水域停船。", 40); return; }
+    world.ships.push({
+      x: water.x + 0.5, y: water.y + 0.5,
+      ang: rand() * Math.PI * 2, sailor: this, state: "sailing",
+      dist: 0, revealCd: 0,
+    });
+    this.state = "voyage";
+    this.voyaging = true;
+    this.task = null;
+    logMsg(`航海家 ${this.name} 从码头扬帆出海，驶向未知的海域。`);
   }
 
   // 探索延伸一腿：从小人当前位置贴身向前点亮（斑块与脚下接壤），然后走向点亮区
@@ -402,9 +458,9 @@ class Agent {
     if (t.creature) {
       if (t.creature.dead) { this.abandonTask(); return; }
       gx = t.creature.x - 0.5; gy = t.creature.y - 0.5;
-      chaseR = 1.4;
+      chaseR = 5;
       const d = Math.hypot(gx + 0.5 - this.x, gy + 0.5 - this.y);
-      if (d > 3.5) {
+      if (d > 6) {
         if (this.goTo(Math.round(gx), Math.round(gy))) { this.state = "walk"; this.onArrive = () => { this.state = "work"; }; }
         else this.abandonTask();
         return;

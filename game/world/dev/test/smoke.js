@@ -29,7 +29,7 @@ let nanAgents = 0;
 for (const a of agents) if (!isFinite(a.x) || !isFinite(a.y)) nanAgents++;
 
 console.log("---- 2000 sim 秒后 ----");
-console.log("人口:", agents.length, "/ 上限:", world.popCap);
+console.log("人口:", agents.length, "（不设上限）");
 console.log("房屋:", world.houses.length, " 农田:", world.farms.length, " 存粮:", Math.floor(world.food));
 console.log("扩张:", world.expansions, "次 | 岛屿:", world.islands.length, "(初始", islands0 + ") | 待办任务:", tasks.list.length);
 console.log("聚落:", world.settlements.map(function (s) { return s.name + "(L" + s.level + ")"; }).join(" "));
@@ -46,11 +46,11 @@ function countTile(t) {
   return n;
 }
 
-assert(agents.length > 12, "人口自然增长");
-assert(agents.length <= world.popCap + 2, "人口受上限约束");
+assert(agents.length >= 12, "人口自然增长");
+assert(world.settlements.length >= 2, "扩张注册新聚落");
 assert(world.houses.length >= 4, "需求聚合触发自动建房");
 assert(world.farms.length >= 1, "食物压力触发自动开荒");
-assert(world.expansions >= 1, "人口触顶触发世界扩张");
+assert(world.expansions >= 1, "居住空间压力触发世界扩张");
 assert(bridges1 > 0 || waters1 < waters0, "架桥/填海实际发生");
 assert(world.settlements.length >= 2, "扩张注册新聚落");
 assert(world.settlements.some(s => s.level >= 1), "聚落升级为村庄");

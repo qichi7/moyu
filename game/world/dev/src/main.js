@@ -14,26 +14,61 @@
   window.addEventListener("resize", resize);
   resize();
 
-  // ---- 相机输入 ----
+  // ---- 相机输入（Pointer Events：统一鼠标与触摸；单指拖拽/点按拾取，双指捏合缩放） ----
   let dragging = false, lastMX = 0, lastMY = 0;
-  let downX = 0, downY = 0;   // 用于区分拖拽与点击
+  let downX = 0, downY = 0, downT = 0;   // 用于区分拖拽与点按
   let camTween = null;        // 回原点的平滑飞行
-  canvas.addEventListener("mousedown", e => {
-    dragging = true; lastMX = e.clientX; lastMY = e.clientY;
-    downX = e.clientX; downY = e.clientY;
+  const pointers = new Map(); // 活动指针表（多指捏合）
+  let pinchDist = 0;
+
+  canvas.addEventListener("pointerdown", e => {
+    canvas.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     camTween = null;
+    if (pointers.size === 1) {
+      dragging = true; lastMX = e.clientX; lastMY = e.clientY;
+      downX = e.clientX; downY = e.clientY; downT = performance.now();
+    } else if (pointers.size === 2) {
+      dragging = false;
+      const pts = [...pointers.values()];
+      pinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    }
   });
-  window.addEventListener("mouseup", e => {
-    if (dragging && Math.hypot(e.clientX - downX, e.clientY - downY) < 5) handlePick(e);
+  canvas.addEventListener("pointermove", e => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) {
+      // 双指捏合缩放：以两指中点为锚
+      const pts = [...pointers.values()];
+      const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      if (pinchDist > 0) applyZoom(camera.zoom * (d / pinchDist), (pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2);
+      pinchDist = d;
+      return;
+    }
+    if (dragging) {
+      const s = TILE_PX * camera.zoom;
+      camera.x -= (e.clientX - lastMX) / s;
+      camera.y -= (e.clientY - lastMY) / s;
+      lastMX = e.clientX; lastMY = e.clientY;
+      clampCam();
+    }
+  });
+  window.addEventListener("pointerup", e => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.delete(e.pointerId);
+    if (pointers.size === 0 && dragging) {
+      dragging = false;
+      // 点按拾取：位移小 + 时间短（防长按拖拽误触）
+      if (Math.hypot(e.clientX - downX, e.clientY - downY) < 8 && performance.now() - downT < 600) handlePick(e);
+    }
+    if (pointers.size === 1) {   // 双指抬起一指 → 回到单指拖拽
+      const p = [...pointers.values()][0];
+      dragging = true; lastMX = p.x; lastMY = p.y;
+    }
+  });
+  canvas.addEventListener("pointercancel", e => {
+    pointers.delete(e.pointerId);
     dragging = false;
-  });
-  window.addEventListener("mousemove", e => {
-    if (!dragging) return;
-    const s = TILE_PX * camera.zoom;
-    camera.x -= (e.clientX - lastMX) / s;
-    camera.y -= (e.clientY - lastMY) / s;
-    lastMX = e.clientX; lastMY = e.clientY;
-    clampCam();
   });
   canvas.addEventListener("wheel", e => {
     e.preventDefault();
@@ -130,6 +165,8 @@
   let lastPhase = "day";
   // 视觉昼夜时钟：与模拟逻辑分离——速度 ≤10× 时与模拟时间一致，超过后封顶 10×（明暗不随加速飙升）
   let visualTod = 0.3;
+  // 波光时钟：暂停时海面停止流动，播放时匀速（与倍速无关）
+  let waveT = 0;
   function frame(now) {
     const realDt = Math.min(0.1, (now - lastT) / 1000);
     lastT = now;
@@ -142,6 +179,8 @@
 
     // 视觉昼夜：增速封顶 10×
     visualTod = (visualTod + realDt * Math.min(speed, 10) / SIM.DAY_LEN) % 1;
+    // 波光：暂停即静止
+    if (speed > 0) waveT += realDt * 0.35;
 
     // 昼夜切换提示音
     const phase = isDaytime() ? "day" : "night";
@@ -159,7 +198,7 @@
       if (camTween.t >= 1) camTween = null;
     }
 
-    drawScene(ctx, CW, CH, selectedAgent, selectedCreature, visualTod);
+    drawScene(ctx, CW, CH, selectedAgent, selectedCreature, visualTod, waveT);
     updateHud(realDt);
     updateInfoPanel(realDt);
     updateRoster(realDt);
@@ -290,6 +329,10 @@
     const t = tileAt(tx, ty);
     const meta = TILE_META[t];
     const lines = [];
+    // 所属地区：岛屿归属 + 聚落辖区
+    for (const o of world.islands) {
+      if (o.name && Math.hypot(o.x - tx, o.y - ty) <= o.r + 1) { lines.push("岛屿：" + o.name); break; }
+    }
     const sett = settleOf(tx, ty);
     if (sett) lines.push("辖区：" + sett.name + "（" + SETTLE_CN[sett.level] + "）");
     if (t === T.HOUSE) {

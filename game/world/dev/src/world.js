@@ -14,7 +14,6 @@ const world = {
   houses: [],        // [{x,y}]
   farms: [],         // [{x,y}]
   store: { x: 0, y: 0 },  // 主粮仓（原点附近）
-  popCap: SIM.EXPAND_POP_CAP,
   expansions: 0,
   era: 0,            // 时代索引（见 config.ERAS）
   zonesVersion: 0,   // 分区变化标记（渲染缓存重建用）
@@ -26,6 +25,8 @@ const world = {
   berryStock: new Map(),// 浆果/果树果量 "x,y" → 份数
   fishStock: new Map(), // 浅海鱼群 "x,y" → 份数
   pastures: [],         // [{x,y}] 牧场
+  docks: [],            // [{x,y}] 码头
+  ships: [],            // 远航船实体
   caves: [],            // [{x,y}] 洞穴（采石场选址）
   quarries: [],         // [{x,y}] 采石场（定期产石材）
   sandpits: [],         // [{x,y}] 沙场（定期产沙土）
@@ -199,16 +200,70 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
   return discovered;
 }
 
+// 远航船：航海家坐船出海开拓地图——沿途点亮大片虚空，遇陆地靠岸（命名/定居化自然触发）
+const ships = [];
+
+function shipTick(dt) {
+  for (const s of ships) {
+    if (s.state !== "sailing") continue;
+    s.ang += (rand() - 0.5) * 0.25;   // 轻微偏航，航线自然弯曲
+    const nx = s.x + Math.cos(s.ang) * SIM.SHIP_SPEED * dt;
+    const ny = s.y + Math.sin(s.ang) * SIM.SHIP_SPEED * dt;
+    // 航行沿途大面积点亮虚空（航海开拓的核心价值）
+    s.revealCd -= dt;
+    if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 10); }
+    const aheadX = Math.round(nx + Math.cos(s.ang) * 2.5), aheadY = Math.round(ny + Math.sin(s.ang) * 2.5);
+    const ahead = tileAt(aheadX, aheadY);
+    if (ahead !== T.VOID && ahead !== T.DEEP && ahead !== T.WATER) {
+      // 发现陆地：靠岸下船（登岛命名/定居化由小人自身逻辑触发）
+      s.state = "docked";
+      s.dockedAt = world.time;
+      const sailor = s.sailor;
+      const shore = [{ x: aheadX, y: aheadY }, ...neighborsOf(aheadX, aheadY)].find(p => walkable(p.x, p.y));
+      if (shore && sailor) {
+        sailor.x = shore.x + 0.5; sailor.y = shore.y + 0.5;
+        sailor.state = "idle"; sailor.voyaging = false;
+        logMsg(`航海家 ${sailor.name} 的船靠岸了，新的土地已在眼前。`);
+      }
+      continue;
+    }
+    s.x = nx; s.y = ny;
+    if (s.sailor) { s.sailor.x = s.x; s.sailor.y = s.y; }
+    s.dist += SIM.SHIP_SPEED * dt;
+    if (s.dist > SIM.SHIP_MAX_DIST) s.state = "return";   // 航程尽头：调头返航
+  }
+  for (const s of ships) {
+    if (s.state !== "return") continue;
+    const dx = world.store.x - s.x, dy = world.store.y - s.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const nx = s.x + (dx / d) * SIM.SHIP_SPEED * dt, ny = s.y + (dy / d) * SIM.SHIP_SPEED * dt;
+    s.revealCd -= dt;
+    if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 10); }
+    const aheadT = tileAt(Math.round(nx), Math.round(ny));
+    if (walkable(Math.round(nx), Math.round(ny)) && aheadT !== T.WATER && aheadT !== T.DEEP) {
+      s.state = "docked"; s.dockedAt = world.time;
+      if (s.sailor) { s.sailor.x = nx; s.sailor.y = ny; s.sailor.state = "idle"; s.sailor.voyaging = false; }
+      continue;
+    }
+    s.x = nx; s.y = ny;
+    if (s.sailor) { s.sailor.x = s.x; s.sailor.y = s.y; }
+  }
+  // 长期停靠的船清理（远航需另造新船）
+  for (let i = ships.length - 1; i >= 0; i--) {
+    if (ships[i].state === "docked" && world.time - ships[i].dockedAt > 600) ships.splice(i, 1);
+  }
+}
+
 // 采石场/沙场产出（sim 每秒调用一次）：不可再生资源的稳定获取渠道
 function quarryTick() {
-  if (world.time % 80 > 1) return;
+  if (world.time % 60 > 1) return;
   for (const q of world.quarries) {
     const s = nearestSettlement(q.x, q.y);
-    if (s) ensureStock(s).stone += 3;
+    if (s) ensureStock(s).stone += 4;
   }
   for (const p of world.sandpits) {
     const s = nearestSettlement(p.x, p.y);
-    if (s) ensureStock(s).sand += 2;
+    if (s) ensureStock(s).sand += 3;
   }
 }
 
@@ -358,6 +413,8 @@ function genWorld(seed) {
   world.berryStock = new Map();
   world.fishStock = new Map();
   world.pastures = [];
+  world.docks = [];
+  world.ships = [];
   world.caves = [];
   world.quarries = [];
   world.sandpits = [];
@@ -365,7 +422,7 @@ function genWorld(seed) {
   world.islands.push({ x: 0, y: 0, r: 14, claimed: true });
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2 + rand() * 0.6;
-    const d = 34 + rand() * 10;
+    const d = 28 + rand() * 8;
     world.islands.push({
       x: Math.round(Math.cos(a) * d),
       y: Math.round(Math.sin(a) * d),
@@ -422,7 +479,7 @@ function nearAny(x, y, types, r) {
 
 // ---- 世界扩张：优先渡海激活无人岛；没有就向远海造新岛 ----
 function expand() {
-  if (world.islands.length >= 40) { world.popCap += 20; return; } // 岛屿上限，仅放宽人口
+  if (world.islands.length >= 500) return;   // 防极端内存保护，实际无限扩张
   world.expansions++;
   const acx = (world.active.x0 + world.active.x1) / 2;
   const acy = (world.active.y0 + world.active.y1) / 2;
@@ -445,11 +502,11 @@ function expand() {
     nx = ny = 0;
     for (let tries = 0; tries < 20; tries++) {
       const a = rand() * Math.PI * 2;
-      const dist = maxD + 45 + rand() * 30;
+      const dist = maxD + 35 + rand() * 25;
       const cx2 = Math.round(sx + Math.cos(a) * dist), cy2 = Math.round(sy + Math.sin(a) * dist);
       if (world.islands.every(o => Math.hypot(o.x - cx2, o.y - cy2) > 50)) { nx = cx2; ny = cy2; break; }
     }
-    if (nx === 0 && ny === 0) { world.popCap += 20; world.expansions--; return; }
+    if (nx === 0 && ny === 0) { world.expansions--; return; }
     const r = 14 + randInt(0, 5);
     world.islands.push({ x: nx, y: ny, r, claimed: true });
     d = { name: pickName(false) };
@@ -484,7 +541,7 @@ function expand() {
   };
   for (let i = 0; i <= steps; i++) {
     const x = Math.round(sx0 + dxs * i), y = Math.round(sy0 + dys * i);
-    for (const w of [-3, -2, -1, 0, 1, 2, 3]) addWork(Math.round(x + pxv * w), Math.round(y + pyv * w));
+    for (const w of [-2, -1, 0, 1, 2]) addWork(Math.round(x + pxv * w), Math.round(y + pyv * w));
     if (i % 7 === 0 && tileAt(x, y) === T.GRASS) {
       const roadSettle = nearestSettlement(x, y);
       if (roadSettle) {
@@ -513,8 +570,8 @@ function expand() {
     if (s) tasksAdd({ type: "FARM", x: s.x, y: s.y });
   }
 
-  world.popCap += SIM.EXPAND_POP_CAP;
-  logMsg(`国土工程：航线上需架桥 ${bridges} 座、填海 ${fills} 处、开山伐林 ${digs} 处（人口上限 → ${world.popCap}）。`);
+
+  logMsg(`国土工程：航线上需架桥 ${bridges} 座、填海 ${fills} 处、开山伐林 ${digs} 处（航线已纳入疆域图）。`);
   populateIslandCreatures(nx, ny, 16);   // 新岛屿也有野生动物
   emit("expand");
 }
