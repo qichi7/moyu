@@ -165,8 +165,8 @@ function plannerTick() {
       tasksAdd({ type: "HUNT", x: Math.round(c.x - 0.5), y: Math.round(c.y - 0.5), creature: c });
     }
   }
-  // 2d. 畜牧（城邦时代解锁）：无牧场 → 建牧场；有牧场有空位且附近有野生牲畜 → 捕获
-  if (world.era >= 2) {
+  // 2d. 畜牧（定居时代解锁：驯化早于城市文明）：无牧场 → 建牧场；有牧场有空位且附近有野生牲畜 → 捕获
+  if (world.era >= 1) {
     if (world.pastures.length === 0 && tasksPending("PASTURE", true).length < 1) {
       const a = pickAnchor();
       const s = findSpot(a.x, a.y, 4, 14, T.GRASS);
@@ -257,9 +257,10 @@ function plannerTick() {
   if (days < 1 && pop > 0) { logThrottled(`饥荒告警：存粮仅够 ${days.toFixed(1)} 天！`, SIM.DAY_LEN); emit("famine"); }
 
   // 4. 人口自然增长：由农田承载余量驱动（田先于人到位），饥荒期停止生育
+  //    出生安全垫随人口放大（food > 100 + 人口×4），防止出生率超过承载力引发饿死潮
   //    BIRTH_CHECK 是每秒概率，规划器每 PLANNER_INTERVAL 秒才判一次，需换算成窗口概率
   const hasRoom = world.houses.length * 3 > pop;
-  if (pop > 0 && pop < world.popCap && world.food > 100 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
+  if (pop > 0 && pop < world.popCap && world.food > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
     const near = findBirthSpot();
     if (near) {
       const baby = spawnAgent(near.x, near.y);

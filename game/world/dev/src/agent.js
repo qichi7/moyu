@@ -428,19 +428,17 @@ class Agent {
         }
       }
     }
-    // 工程资源检查：架桥耗木材、造陆耗沙土，库存不足则挂起等补给
+    // 工程资源检查：架桥耗木材、造陆耗沙土（联合库存，跨聚落汇总），不足则挂起等补给
     if (t.type === "BRIDGE" || t.type === "FILL") {
-      const s = nearestSettlement(t.x, t.y);
       const cost = TASK_RESOURCE_COST[t.type];
-      const stock = s ? ensureStock(s) : null;
-      const lack = !stock || Object.keys(cost).some(k => stock[k] < cost[k]);
-      if (lack) {
-        logThrottled(`${t.type === "BRIDGE" ? "木材" : "沙土"}不足，工程暂停等待补给。`, 30);
+      const res = Object.keys(cost)[0];
+      if (jointStock(res) < cost[res]) {
+        logThrottled(`${res === "wood" ? "木材" : "沙土"}不足，工程暂停等待补给。`, 30);
         return;
       }
       t.progress += effort;
       if (t.progress >= (t.need || 0)) {
-        for (const k in cost) stock[k] -= cost[k];   // 完工结算资源
+        jointConsume(res, cost[res]);   // 完工结算资源
         this.task = null;
         tasksFinish(t);
         this.state = "idle";
@@ -448,10 +446,9 @@ class Agent {
       this.energy -= SIM.ENERGY_DECAY * dt * 0.5;
       return;
     }
-    if (t.type === "BUILD" || t.type === "FARM" || t.type === "HUNT" ||
-        t.type === "GATHER" || t.type === "FISH" || t.type === "CAPTURE" || t.type === "PLANT") {
-      t.progress += effort;
-      if (t.progress >= t.need) {
+    if (t.type === "DIG") {
+      // 伐木/采石：磨 tile 血量，产出由工人搬运回仓
+      if (workTile(t, effort)) {
         const y = tasksFinish(t, this);   // 完成任务，取得搬运产出
         this.task = null;
         this.state = "idle";
@@ -461,10 +458,16 @@ class Agent {
         }
       }
     } else {
-      if (workTile(t, effort)) {
+      // 其余任务一律进度制（建造/农牧/畜牧/采集/狩猎等），防止无出口的假 workTile 卡死
+      t.progress += effort;
+      if (t.progress >= t.need) {
+        const y = tasksFinish(t, this);   // 完成任务，取得搬运产出
         this.task = null;
-        tasksFinish(t);
         this.state = "idle";
+        if (y) {
+          this.carrying = y;
+          this.state = "idle";           // 下一轮决策将回仓入库
+        }
       }
     }
     this.energy -= SIM.ENERGY_DECAY * dt * 0.5;

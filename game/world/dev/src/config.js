@@ -13,7 +13,7 @@ const T = {
 const TILE_META = {
   [T.VOID]:     { name: "虚空", color: "#0a0d13", walk: false, h: 0 },
   [T.DEEP]:     { name: "深海", color: "#123a5e", walk: false, fillable: true, fillTo: T.SAND, hp: 14 },
-  [T.WATER]:    { name: "浅海", color: "#2b6ea8", walk: false, fillable: true, bridgeable: true, fillTo: T.SAND, hp: 8 },
+  [T.WATER]:    { name: "浅海", color: "#235d96", walk: false, fillable: true, bridgeable: true, fillTo: T.SAND, hp: 8 },
   [T.SAND]:     { name: "沙滩", color: "#cfc08a", walk: true, h: 0 },
   [T.GRASS]:    { name: "草地", color: "#5e8c4f", walk: true, h: 0 },
   [T.TREE]:     { name: "森林", color: "#2f5e33", walk: false, diggable: true, digTo: T.GRASS, hp: 4 },
@@ -48,7 +48,7 @@ const SIM = {
   WORK_EFFORT: 1.3,     // 每个工人每秒任务进度
   FARM_MATURITY: 55,    // 农田成熟秒数
   FARM_YIELD: 4,        // 每次成熟产粮
-  BIRTH_CHECK: 0.025,   // 每秒出生判定概率
+  BIRTH_CHECK: 0.015,   // 每秒出生判定概率
   EXPAND_POP_CAP: 22,   // 人口达到此值触发扩张（每次扩张 +22）
   SETTLEMENT_SCORE: [24, 70, 150],   // 聚落升级分数线：村庄/城镇/城市
   SETTLEMENT_RADIUS: 14,             // 聚落繁荣度统计半径

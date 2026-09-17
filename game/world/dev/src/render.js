@@ -12,14 +12,22 @@ function shade(hex, f) {
   return `rgb(${r},${g},${b})`;
 }
 const TILE_VARIANTS = {};
-const TILE_GLEAM = {};   // 波光高亮色，预计算（无限深海下逐帧 parseInt 会卡）
+const TILE_ELEV_VARIANTS = {};  // 按海拔 5 档预调亮度：地势差用坐标海拔直接体现在底色明暗上
+const TILE_GLEAM = {};          // 波光高亮色，预计算（无限深海下逐帧 parseInt 会卡）
+const ELEV_TIERS = [0.76, 0.88, 1.0, 1.12, 1.24];  // 各海拔档的亮度系数
 (function initVariants() {
   for (const k in TILE_META) {
     const base = TILE_META[k].color;
     TILE_VARIANTS[k] = [0.92, 0.97, 1.0, 1.05].map(f => shade(base, f));
-    TILE_GLEAM[k] = shade(base, 1.25);
+    TILE_ELEV_VARIANTS[k] = ELEV_TIERS.map(f =>
+      [0.92, 0.97, 1.0, 1.05].map(g => shade(base, f * g)));
+    TILE_GLEAM[k] = shade(base, 1.08);
   }
 })();
+function elevTierOf(e) {
+  if (!(e >= 0.28)) return 2;
+  return Math.max(0, Math.min(4, Math.floor((e - 0.28) / (0.92 - 0.28) * 5)));
+}
 
 // 房屋信息缓存（granary/floors；houses 只增不减，用长度做缓存标记）
 let _hCache = null, _hCacheLen = -1;
@@ -71,7 +79,8 @@ function chunkThumb(cx, cy, c) {
     for (let y = 0; y < CHUNK; y++) {
       for (let x = 0; x < CHUNK; x++) {
         const t = c.tiles[y * CHUNK + x];
-        c2.fillStyle = t === T.VOID ? "#05070c" : TILE_VARIANTS[t][(hash2(cx * CHUNK + x, cy * CHUNK + y) * 4) | 0];
+        const eT = c.elev ? elevTierOf(c.elev[y * CHUNK + x]) : 2;
+        c2.fillStyle = t === T.VOID ? "#05070c" : TILE_ELEV_VARIANTS[t][eT][(hash2(cx * CHUNK + x, cy * CHUNK + y) * 4) | 0];
         c2.fillRect(x, y, 1, 1);
       }
     }
@@ -80,7 +89,7 @@ function chunkThumb(cx, cy, c) {
   return cv;
 }
 
-function drawScene(ctx, cw, ch, selected, selectedCreature) {
+function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod) {
   // 背景为虚空深渊色：未生成区域（VOID）露出此色，探索到后显现海与岛屿
   ctx.fillStyle = "#05070c";
   ctx.fillRect(0, 0, cw, ch);
@@ -95,7 +104,8 @@ function drawScene(ctx, cw, ch, selected, selectedCreature) {
   const t = world.time;
 
   // 昼夜强度（窗光/遮罩都要用）
-  const tod = world.timeOfDay;
+  // 昼夜强度（视觉时钟 visualTod：与模拟速度分离，封顶 10×）
+  const tod = visualTod;
   let night = 0;
   if (tod < SIM.NIGHT_END) night = 1 - tod / SIM.NIGHT_END;
   else if (tod > SIM.NIGHT_START) night = (tod - SIM.NIGHT_START) / (1 - SIM.NIGHT_START);
@@ -129,9 +139,15 @@ function drawScene(ctx, cw, ch, selected, selectedCreature) {
       const tile = tileAt(x, y);
       if (tile === T.VOID) continue;   // 虚空：未被探索的深渊
       const h = hash2(x, y);
-      let variant = TILE_VARIANTS[tile][(h * 4) | 0];
-      // 水面波光：相位随时间流动
-      if ((tile === T.WATER || tile === T.DEEP) && ((h * 7 + t * 0.7) % 1) < 0.12) {
+      // 海拔档位：地势差通过坐标海拔直接体现在底色明暗（高地亮、洼地暗）
+      const cHere = world.chunks.get(chunkKey(x >> 5, y >> 5));
+      let eTier = 2;
+      if (cHere && cHere.elev) {
+        eTier = elevTierOf(cHere.elev[cIdx(x, y)]);
+      }
+      let variant = TILE_ELEV_VARIANTS[tile][eTier][(h * 4) | 0];
+      // 水面波光：相位用真实渲染时钟（时间加速不改变闪动频率），高亮更柔和
+      if ((tile === T.WATER || tile === T.DEEP) && ((h * 7 + performance.now() / 1000 * 0.35) % 1) < 0.08) {
         variant = TILE_GLEAM[tile];
       }
       const px = ox + x * s, py = oy + y * s;
@@ -151,16 +167,6 @@ function drawScene(ctx, cw, ch, selected, selectedCreature) {
             ctx.fillRect(px + s * (0.15 + i * 0.28), py + s * ((ph2 + i * 0.3) % 0.7), s * 0.14, s * 0.3);
           }
         }
-      }
-
-      // 地势差：北邻海拔更高 → 本格受山体阴影；更高地形画亮脊
-      const cHere = world.chunks.get(chunkKey(x >> 5, y >> 5));
-      if (cHere && cHere.elev) {
-        const eN = cHere.elev[cIdx(x, y - 1)];
-        const eS = cHere.elev[cIdx(x, y + 1)];
-        const eC = cHere.elev[cIdx(x, y)];
-        if (eN > eC + 0.05) { ctx.fillStyle = "rgba(0,0,25,0.22)"; ctx.fillRect(px, py, s + 0.5, s * 0.4); }        // 北高南低 → 北侧阴影
-        else if (eC > eS + 0.05) { ctx.fillStyle = "rgba(255,250,220,0.10)"; ctx.fillRect(px, py + s * 0.6, s + 0.5, s * 0.4); } // 南侧低 → 亮边
       }
 
       // 功能分区底纹（城邦时代后划定）

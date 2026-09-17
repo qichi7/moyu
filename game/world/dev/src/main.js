@@ -75,7 +75,7 @@
     speed = v;
     for (const k in speedBtns) speedBtns[k].classList.toggle("active", +k === v);
   }
-  ["pause", "s1", "s2", "s4", "s100"].forEach(id => {
+  ["pause", "s1", "s2", "s4", "s100", "s1000"].forEach(id => {
     const b = document.getElementById(id);
     if (!b) return;
     speedBtns[b.dataset.v] = b;
@@ -87,6 +87,7 @@
     if (e.key === "2") setSpeed(2);
     if (e.key === "3") setSpeed(4);
     if (e.key === "4") setSpeed(100);
+    if (e.key === "5") setSpeed(1000);
   });
 
   // ---- 音效：首次手势解锁 AudioContext（浏览器自动播放策略） ----
@@ -123,18 +124,24 @@
   syncZoomUI();
 
   // ---- 主循环：固定步长模拟 ----
-  // 高倍速（100×）时允许更多步进/帧，同时截断积压防止螺旋卡死
+  // 步进上限按速度分档：1000× 允许每帧千步（帧率下降换取模拟吞吐），同时截断积压防螺旋
   const STEP = 1 / 30;
   let acc = 0, lastT = performance.now();
   let lastPhase = "day";
+  // 视觉昼夜时钟：与模拟逻辑分离——速度 ≤10× 时与模拟时间一致，超过后封顶 10×（明暗不随加速飙升）
+  let visualTod = 0.3;
   function frame(now) {
     const realDt = Math.min(0.1, (now - lastT) / 1000);
     lastT = now;
     acc += realDt * speed;
-    const maxSteps = speed > 10 ? 240 : 12;
+    // 步进上限按速度分档：1000× 允许每帧千步（帧率下降换取模拟吞吐），同时截断积压防螺旋
+    const maxSteps = speed > 100 ? 1200 : speed > 10 ? 240 : 12;
     let n = 0;
     while (acc >= STEP && n < maxSteps) { simUpdate(STEP); acc -= STEP; n++; }
     if (acc > STEP * maxSteps) acc = STEP * maxSteps;
+
+    // 视觉昼夜：增速封顶 10×
+    visualTod = (visualTod + realDt * Math.min(speed, 10) / SIM.DAY_LEN) % 1;
 
     // 昼夜切换提示音
     const phase = isDaytime() ? "day" : "night";
@@ -152,7 +159,7 @@
       if (camTween.t >= 1) camTween = null;
     }
 
-    drawScene(ctx, CW, CH, selectedAgent, selectedCreature);
+    drawScene(ctx, CW, CH, selectedAgent, selectedCreature, visualTod);
     updateHud(realDt);
     updateInfoPanel(realDt);
     updateRoster(realDt);
@@ -336,18 +343,21 @@
 
   function creaturePanelHtml(c) {
     const meta = CREATURE_META[c.type];
-    const status = c.pasture ? "圈养于牧场" : c.type === "dog"
-      ? (c.owner ? "陪伴着 " + c.owner.name : "四处溜达") : "在野";
+    let status;
+    if (c.type === "dog") status = c.tamed && c.owner ? "陪伴着 " + c.owner.name : "野生 · 靠近可驯化";
+    else if (c.pasture) status = "圈养于牧场";
+    else status = "在野";
     return `物种：${meta.name}<br>` +
       `年龄：${Math.floor(c.age)} 岁 · ${ageTier(c.age, c.type)}<br>` +
-      `状态：${status}${c.isWild() && !c.dead ? "<br>· 可狩猎/可捕获" : ""}`;
+      `状态：${status}${c.isWild() && !c.dead && c.type !== "dog" ? "<br>· 可狩猎/可捕获" : ""}`;
   }
 
   function showCreaturePanel(c) {
     const s = TILE_PX * camera.zoom;
     const px = CW / 2 + (c.x - camera.x) * s;
     const py = CH / 2 + (c.y - camera.y) * s;
-    showPanel(`${meta2name(c.type)} · ${c.pasture ? "圈养" : c.type === "dog" ? "伙伴" : "野生"}`, creaturePanelHtml(c), px, py);
+    const title = c.type === "dog" ? "狗 · " + (c.tamed ? "家犬" : "野犬") : meta2name(c.type) + " · " + (c.pasture ? "圈养" : "野生");
+    showPanel(title, creaturePanelHtml(c), px, py);
   }
 
   function meta2name(type) { return CREATURE_META[type].name; }
@@ -449,7 +459,7 @@
 
     let html = "";
 
-    // ---- 地区段（唯一分组）：聚落（资源+居民）/ 未知岛屿 / 无归属居民 ----
+    // ---- 地区段（唯一分组）：聚落 / 已命名岛屿 / 未知岛屿 / 无归属居民 ----
     html += `<div class="roster-sec">地区</div>`;
     for (const s of world.settlements) {
       const stock = s.stock || { wood: 0, stone: 0, sand: 0 };
@@ -458,18 +468,41 @@
         `<span>${open ? "▾" : "▸"} ${s.name} <span class="lv">L${s.level}</span></span>${flyBtn(s.x, s.y)}</div>`;
       if (open) {
         const residents = agents.filter(a => a.home && settleOf(a.home.x, a.home.y) === s);
+        const livestock = creatures.filter(c => !c.dead && c.pasture && c.type !== "dog" &&
+          nearestSettlement(Math.round(c.x), Math.round(c.y)) === s);
+        const cows = livestock.filter(c => c.type === "cow").length;
+        const goats = livestock.length - cows;
         html += `<div class="roster-names">` +
           `<div class="roster-res">木<b>${stock.wood}</b> 石<b>${stock.stone}</b> 沙<b>${stock.sand}</b> 粮<b>${Math.floor(world.food)}</b></div>` +
+          `<div class="roster-res">圈养牲畜<b>${livestock.length}</b>（牛 ${cows} · 羊 ${goats}）</div>` +
           (residents.length ? residents.map(nameLine).join("") : `<div class="roster-res">（尚无居民定居）</div>`) +
           `</div>`;
       }
     }
-    const wild = world.islands.filter(o => !o.claimed && islandVisible(o));
-    html += `<div class="roster-group-head" data-g="__wild"><span>${expandedGroups.has("__wild") ? "▾" : "▸"} 未知岛屿</span><span class="cnt">×${wild.length}</span></div>`;
-    if (expandedGroups.has("__wild") && wild.length) {
-      html += `<div class="roster-names">` + wild.map(o =>
-        `<div class="roster-name" data-fly="1" data-fx="${o.x}" data-fy="${o.y}">${o.name ? o.name : "无名岛"} (${o.x},${o.y}) ${flyBtn(o.x, o.y)}</div>`
-      ).join("") + `</div>`;
+    // 已命名的岛屿（居民登岛命名后即成为地区，可展开查看岛上居民）
+    const namedIsles = world.islands.filter(o => !o.claimed && o.name && islandVisible(o));
+    for (const o of namedIsles) {
+      const gk = "isle:" + o.name;
+      const open = expandedGroups.has(gk);
+      html += `<div class="roster-group-head" data-g="${gk}">` +
+        `<span>${open ? "▾" : "▸"} ${o.name} <span class="lv">岛屿</span></span>${flyBtn(o.x, o.y)}</div>`;
+      if (open) {
+        const residents = agents.filter(a => !a.dead && Math.hypot(a.x - o.x, a.y - o.y) <= o.r + 2);
+        html += `<div class="roster-names">` +
+          `<div class="roster-res">待定居的疆土（范围 ${Math.ceil(o.r)} 格）</div>` +
+          (residents.length ? residents.map(nameLine).join("") : `<div class="roster-res">（岛上暂无居民驻留）</div>`) +
+          `</div>`;
+      }
+    }
+    // 未命名的已显现岛屿（仍是未知之地）
+    const wild = world.islands.filter(o => !o.claimed && !o.name && islandVisible(o));
+    if (wild.length) {
+      html += `<div class="roster-group-head" data-g="__wild"><span>${expandedGroups.has("__wild") ? "▾" : "▸"} 未知岛屿</span><span class="cnt">×${wild.length}</span></div>`;
+      if (expandedGroups.has("__wild")) {
+        html += `<div class="roster-names">` + wild.map(o =>
+          `<div class="roster-name" data-fly="1" data-fx="${o.x}" data-fy="${o.y}">无名岛 (${o.x},${o.y}) ${flyBtn(o.x, o.y)}</div>`
+        ).join("") + `</div>`;
+      }
     }
     // 无归属居民组（无房者按身份分组）
     for (const key of ["无家可归", "原住民部落", "散居"]) {

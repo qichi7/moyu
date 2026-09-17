@@ -567,6 +567,19 @@ function ensureStock(s) {
   return s.stock;
 }
 
+// 联合库存：国家级工程（架桥/造陆）跨聚落汇总与扣费
+function jointStock(res) {
+  return world.settlements.reduce((sum, s) => sum + (s.stock ? s.stock[res] || 0 : 0), 0);
+}
+function jointConsume(res, n) {
+  for (const s of world.settlements) {
+    const st = ensureStock(s);
+    const take = Math.min(st[res] || 0, n);
+    if (take > 0) { st[res] -= take; n -= take; }
+    if (n <= 0) return;
+  }
+}
+
 // ---- tile 改造：按任务类型决定成果 ----
 function workTile(task, amount) {
   const x = task.x, y = task.y;

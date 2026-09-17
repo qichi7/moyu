@@ -6,7 +6,7 @@ const tasks = {
   list: [],
 };
 
-const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 6, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5 };
+const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 6, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3 };
 // 工程资源消耗：架桥耗木材、造陆耗沙土（完工时从最近聚落库存扣除）
 const TASK_RESOURCE_COST = { BRIDGE: { wood: 1 }, FILL: { sand: 2 } };
 
@@ -29,7 +29,7 @@ function taskJobPref(t) {
   switch (t.type) {
     case "FARM": return "FARM";
     case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT": return "BUILD";
-    case "HUNT": return "HUNT";
+    case "HUNT": case "CAPTURE": return "HUNT";
     case "FISH": return "FISH";
     case "DIG": return t.res === "stone" ? "DIG_STONE" : "DIG_WOOD";
     default: return null;
@@ -47,10 +47,9 @@ function tasksTake(agent) {
     if (t.done) continue;
     if ((t.blockedCount || 0) >= 3) continue;
     if (t.type === "BRIDGE" || t.type === "FILL") {
-      const s = nearestSettlement(t.x, t.y);
-      const stock = s ? ensureStock(s) : null;
       const cost = TASK_RESOURCE_COST[t.type];
-      if (!stock || Object.keys(cost).some(k => stock[k] < cost[k])) continue;   // 库存不够一格的 → 不领
+      const lack = Object.keys(cost).some(k => jointStock(k) < cost[k]);
+      if (lack) continue;   // 库存不够一格的 → 不领
     }
     const cap = t.type === "BUILD" || t.type === "FARM" ? 2 : 4;
     if (t.workers.size >= cap) continue;

@@ -120,6 +120,7 @@
       <button id="s2" data-v="2">2×</button>
       <button id="s4" data-v="4">4×</button>
       <button id="s100" data-v="100">100×</button>
+      <button id="s1000" data-v="1000">1000×</button>
       <button id="sfx-toggle">音效:开</button>
     </div>
   </div>
@@ -174,7 +175,7 @@ const T = {
 const TILE_META = {
   [T.VOID]:     { name: "虚空", color: "#0a0d13", walk: false, h: 0 },
   [T.DEEP]:     { name: "深海", color: "#123a5e", walk: false, fillable: true, fillTo: T.SAND, hp: 14 },
-  [T.WATER]:    { name: "浅海", color: "#2b6ea8", walk: false, fillable: true, bridgeable: true, fillTo: T.SAND, hp: 8 },
+  [T.WATER]:    { name: "浅海", color: "#235d96", walk: false, fillable: true, bridgeable: true, fillTo: T.SAND, hp: 8 },
   [T.SAND]:     { name: "沙滩", color: "#cfc08a", walk: true, h: 0 },
   [T.GRASS]:    { name: "草地", color: "#5e8c4f", walk: true, h: 0 },
   [T.TREE]:     { name: "森林", color: "#2f5e33", walk: false, diggable: true, digTo: T.GRASS, hp: 4 },
@@ -209,7 +210,7 @@ const SIM = {
   WORK_EFFORT: 1.3,     // 每个工人每秒任务进度
   FARM_MATURITY: 55,    // 农田成熟秒数
   FARM_YIELD: 4,        // 每次成熟产粮
-  BIRTH_CHECK: 0.025,   // 每秒出生判定概率
+  BIRTH_CHECK: 0.015,   // 每秒出生判定概率
   EXPAND_POP_CAP: 22,   // 人口达到此值触发扩张（每次扩张 +22）
   SETTLEMENT_SCORE: [24, 70, 150],   // 聚落升级分数线：村庄/城镇/城市
   SETTLEMENT_RADIUS: 14,             // 聚落繁荣度统计半径
@@ -958,6 +959,19 @@ function ensureStock(s) {
   return s.stock;
 }
 
+// 联合库存：国家级工程（架桥/造陆）跨聚落汇总与扣费
+function jointStock(res) {
+  return world.settlements.reduce((sum, s) => sum + (s.stock ? s.stock[res] || 0 : 0), 0);
+}
+function jointConsume(res, n) {
+  for (const s of world.settlements) {
+    const st = ensureStock(s);
+    const take = Math.min(st[res] || 0, n);
+    if (take > 0) { st[res] -= take; n -= take; }
+    if (n <= 0) return;
+  }
+}
+
 // ---- tile 改造：按任务类型决定成果 ----
 function workTile(task, amount) {
   const x = task.x, y = task.y;
@@ -990,7 +1004,7 @@ const tasks = {
   list: [],
 };
 
-const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 6, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5 };
+const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 6, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3 };
 // 工程资源消耗：架桥耗木材、造陆耗沙土（完工时从最近聚落库存扣除）
 const TASK_RESOURCE_COST = { BRIDGE: { wood: 1 }, FILL: { sand: 2 } };
 
@@ -1013,7 +1027,7 @@ function taskJobPref(t) {
   switch (t.type) {
     case "FARM": return "FARM";
     case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT": return "BUILD";
-    case "HUNT": return "HUNT";
+    case "HUNT": case "CAPTURE": return "HUNT";
     case "FISH": return "FISH";
     case "DIG": return t.res === "stone" ? "DIG_STONE" : "DIG_WOOD";
     default: return null;
@@ -1031,10 +1045,9 @@ function tasksTake(agent) {
     if (t.done) continue;
     if ((t.blockedCount || 0) >= 3) continue;
     if (t.type === "BRIDGE" || t.type === "FILL") {
-      const s = nearestSettlement(t.x, t.y);
-      const stock = s ? ensureStock(s) : null;
       const cost = TASK_RESOURCE_COST[t.type];
-      if (!stock || Object.keys(cost).some(k => stock[k] < cost[k])) continue;   // 库存不够一格的 → 不领
+      const lack = Object.keys(cost).some(k => jointStock(k) < cost[k]);
+      if (lack) continue;   // 库存不够一格的 → 不领
     }
     const cap = t.type === "BUILD" || t.type === "FARM" ? 2 : 4;
     if (t.workers.size >= cap) continue;
@@ -1244,19 +1257,37 @@ class Creature {
     if (this.target) this.stepToward(this.target, this.speed * dt);
   }
 
-  // 狗：跟随最近的小人（4 格内不贴脸）
+  // 狗：认定了固定主人就一生跟随（主人去世后才重新认主）
+  // 狗：野生幼犬需要被驯化——有人靠近停留累计驯化进度，成功后一生认定固定主人
   updateDog(dt) {
-    this.ownerCd = (this.ownerCd || 0) - dt;
-    if (!this.owner || this.ownerCd <= 0) {
-      this.ownerCd = 2;
-      let best = null, bestD = 1e9;
+    if (!this.tamed || !this.owner || this.owner.dead) {
+      // 未驯化（或主人去世重新待驯）：游荡 + 驯化检测
+      this.tamed = false;
+      this.owner = null;
+      this.moveCd -= dt;
+      if (this.moveCd <= 0) {
+        this.moveCd = 1.5 + rand() * 2;
+        const a = rand() * Math.PI * 2;
+        const nx = Math.round(this.x + Math.cos(a) * 2), ny = Math.round(this.y + Math.sin(a) * 2);
+        if (walkable(nx, ny)) this.target = { x: nx + 0.5, y: ny + 0.5 };
+      }
+      if (this.target) this.stepToward(this.target, this.speed * dt);
+      // 驯化：有小人靠近（1.5 格内）累计驯化度，喜爱牲畜的人在旁进度翻倍
+      let tamer = null, tamerD = 1.5;
       for (const a of agents) {
         const d = Math.hypot(a.x - this.x, a.y - this.y);
-        if (d < bestD) { bestD = d; best = a; }
+        if (d < tamerD) { tamerD = d; tamer = a; }
       }
-      this.owner = best;
+      if (tamer) {
+        this.tameness += dt * (tamer.hobby === "animal" ? 2 : 1);
+        if (this.tameness >= 3) {
+          this.tamed = true;
+          this.owner = tamer;
+          logThrottled(`${tamer.name} 驯服了一条狗，狗认定他为主人。`, 15);
+        }
+      }
+      return;
     }
-    if (!this.owner) return;
     const d = Math.hypot(this.owner.x - this.x, this.owner.y - this.y);
     if (d > 4) this.stepToward(this.owner, this.speed * dt);
   }
@@ -1305,6 +1336,7 @@ class Creature {
 function spawnCreature(x, y, type, captured) {
   const c = new Creature(x, y, type);
   if (captured) c.pasture = { x, y };
+  // 狗出生时是野生的，需要有人靠近驯化后才会认主
   creatures.push(c);
   return c;
 }
@@ -1775,19 +1807,17 @@ class Agent {
         }
       }
     }
-    // 工程资源检查：架桥耗木材、造陆耗沙土，库存不足则挂起等补给
+    // 工程资源检查：架桥耗木材、造陆耗沙土（联合库存，跨聚落汇总），不足则挂起等补给
     if (t.type === "BRIDGE" || t.type === "FILL") {
-      const s = nearestSettlement(t.x, t.y);
       const cost = TASK_RESOURCE_COST[t.type];
-      const stock = s ? ensureStock(s) : null;
-      const lack = !stock || Object.keys(cost).some(k => stock[k] < cost[k]);
-      if (lack) {
-        logThrottled(`${t.type === "BRIDGE" ? "木材" : "沙土"}不足，工程暂停等待补给。`, 30);
+      const res = Object.keys(cost)[0];
+      if (jointStock(res) < cost[res]) {
+        logThrottled(`${res === "wood" ? "木材" : "沙土"}不足，工程暂停等待补给。`, 30);
         return;
       }
       t.progress += effort;
       if (t.progress >= (t.need || 0)) {
-        for (const k in cost) stock[k] -= cost[k];   // 完工结算资源
+        jointConsume(res, cost[res]);   // 完工结算资源
         this.task = null;
         tasksFinish(t);
         this.state = "idle";
@@ -1795,10 +1825,9 @@ class Agent {
       this.energy -= SIM.ENERGY_DECAY * dt * 0.5;
       return;
     }
-    if (t.type === "BUILD" || t.type === "FARM" || t.type === "HUNT" ||
-        t.type === "GATHER" || t.type === "FISH" || t.type === "CAPTURE" || t.type === "PLANT") {
-      t.progress += effort;
-      if (t.progress >= t.need) {
+    if (t.type === "DIG") {
+      // 伐木/采石：磨 tile 血量，产出由工人搬运回仓
+      if (workTile(t, effort)) {
         const y = tasksFinish(t, this);   // 完成任务，取得搬运产出
         this.task = null;
         this.state = "idle";
@@ -1808,10 +1837,16 @@ class Agent {
         }
       }
     } else {
-      if (workTile(t, effort)) {
+      // 其余任务一律进度制（建造/农牧/畜牧/采集/狩猎等），防止无出口的假 workTile 卡死
+      t.progress += effort;
+      if (t.progress >= t.need) {
+        const y = tasksFinish(t, this);   // 完成任务，取得搬运产出
         this.task = null;
-        tasksFinish(t);
         this.state = "idle";
+        if (y) {
+          this.carrying = y;
+          this.state = "idle";           // 下一轮决策将回仓入库
+        }
       }
     }
     this.energy -= SIM.ENERGY_DECAY * dt * 0.5;
@@ -2000,8 +2035,8 @@ function plannerTick() {
       tasksAdd({ type: "HUNT", x: Math.round(c.x - 0.5), y: Math.round(c.y - 0.5), creature: c });
     }
   }
-  // 2d. 畜牧（城邦时代解锁）：无牧场 → 建牧场；有牧场有空位且附近有野生牲畜 → 捕获
-  if (world.era >= 2) {
+  // 2d. 畜牧（定居时代解锁：驯化早于城市文明）：无牧场 → 建牧场；有牧场有空位且附近有野生牲畜 → 捕获
+  if (world.era >= 1) {
     if (world.pastures.length === 0 && tasksPending("PASTURE", true).length < 1) {
       const a = pickAnchor();
       const s = findSpot(a.x, a.y, 4, 14, T.GRASS);
@@ -2092,9 +2127,10 @@ function plannerTick() {
   if (days < 1 && pop > 0) { logThrottled(`饥荒告警：存粮仅够 ${days.toFixed(1)} 天！`, SIM.DAY_LEN); emit("famine"); }
 
   // 4. 人口自然增长：由农田承载余量驱动（田先于人到位），饥荒期停止生育
+  //    出生安全垫随人口放大（food > 100 + 人口×4），防止出生率超过承载力引发饿死潮
   //    BIRTH_CHECK 是每秒概率，规划器每 PLANNER_INTERVAL 秒才判一次，需换算成窗口概率
   const hasRoom = world.houses.length * 3 > pop;
-  if (pop > 0 && pop < world.popCap && world.food > 100 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
+  if (pop > 0 && pop < world.popCap && world.food > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
     const near = findBirthSpot();
     if (near) {
       const baby = spawnAgent(near.x, near.y);
@@ -2464,14 +2500,22 @@ function shade(hex, f) {
   return `rgb(${r},${g},${b})`;
 }
 const TILE_VARIANTS = {};
-const TILE_GLEAM = {};   // 波光高亮色，预计算（无限深海下逐帧 parseInt 会卡）
+const TILE_ELEV_VARIANTS = {};  // 按海拔 5 档预调亮度：地势差用坐标海拔直接体现在底色明暗上
+const TILE_GLEAM = {};          // 波光高亮色，预计算（无限深海下逐帧 parseInt 会卡）
+const ELEV_TIERS = [0.76, 0.88, 1.0, 1.12, 1.24];  // 各海拔档的亮度系数
 (function initVariants() {
   for (const k in TILE_META) {
     const base = TILE_META[k].color;
     TILE_VARIANTS[k] = [0.92, 0.97, 1.0, 1.05].map(f => shade(base, f));
-    TILE_GLEAM[k] = shade(base, 1.25);
+    TILE_ELEV_VARIANTS[k] = ELEV_TIERS.map(f =>
+      [0.92, 0.97, 1.0, 1.05].map(g => shade(base, f * g)));
+    TILE_GLEAM[k] = shade(base, 1.08);
   }
 })();
+function elevTierOf(e) {
+  if (!(e >= 0.28)) return 2;
+  return Math.max(0, Math.min(4, Math.floor((e - 0.28) / (0.92 - 0.28) * 5)));
+}
 
 // 房屋信息缓存（granary/floors；houses 只增不减，用长度做缓存标记）
 let _hCache = null, _hCacheLen = -1;
@@ -2523,7 +2567,8 @@ function chunkThumb(cx, cy, c) {
     for (let y = 0; y < CHUNK; y++) {
       for (let x = 0; x < CHUNK; x++) {
         const t = c.tiles[y * CHUNK + x];
-        c2.fillStyle = t === T.VOID ? "#05070c" : TILE_VARIANTS[t][(hash2(cx * CHUNK + x, cy * CHUNK + y) * 4) | 0];
+        const eT = c.elev ? elevTierOf(c.elev[y * CHUNK + x]) : 2;
+        c2.fillStyle = t === T.VOID ? "#05070c" : TILE_ELEV_VARIANTS[t][eT][(hash2(cx * CHUNK + x, cy * CHUNK + y) * 4) | 0];
         c2.fillRect(x, y, 1, 1);
       }
     }
@@ -2532,7 +2577,7 @@ function chunkThumb(cx, cy, c) {
   return cv;
 }
 
-function drawScene(ctx, cw, ch, selected, selectedCreature) {
+function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod) {
   // 背景为虚空深渊色：未生成区域（VOID）露出此色，探索到后显现海与岛屿
   ctx.fillStyle = "#05070c";
   ctx.fillRect(0, 0, cw, ch);
@@ -2547,7 +2592,8 @@ function drawScene(ctx, cw, ch, selected, selectedCreature) {
   const t = world.time;
 
   // 昼夜强度（窗光/遮罩都要用）
-  const tod = world.timeOfDay;
+  // 昼夜强度（视觉时钟 visualTod：与模拟速度分离，封顶 10×）
+  const tod = visualTod;
   let night = 0;
   if (tod < SIM.NIGHT_END) night = 1 - tod / SIM.NIGHT_END;
   else if (tod > SIM.NIGHT_START) night = (tod - SIM.NIGHT_START) / (1 - SIM.NIGHT_START);
@@ -2581,9 +2627,15 @@ function drawScene(ctx, cw, ch, selected, selectedCreature) {
       const tile = tileAt(x, y);
       if (tile === T.VOID) continue;   // 虚空：未被探索的深渊
       const h = hash2(x, y);
-      let variant = TILE_VARIANTS[tile][(h * 4) | 0];
-      // 水面波光：相位随时间流动
-      if ((tile === T.WATER || tile === T.DEEP) && ((h * 7 + t * 0.7) % 1) < 0.12) {
+      // 海拔档位：地势差通过坐标海拔直接体现在底色明暗（高地亮、洼地暗）
+      const cHere = world.chunks.get(chunkKey(x >> 5, y >> 5));
+      let eTier = 2;
+      if (cHere && cHere.elev) {
+        eTier = elevTierOf(cHere.elev[cIdx(x, y)]);
+      }
+      let variant = TILE_ELEV_VARIANTS[tile][eTier][(h * 4) | 0];
+      // 水面波光：相位用真实渲染时钟（时间加速不改变闪动频率），高亮更柔和
+      if ((tile === T.WATER || tile === T.DEEP) && ((h * 7 + performance.now() / 1000 * 0.35) % 1) < 0.08) {
         variant = TILE_GLEAM[tile];
       }
       const px = ox + x * s, py = oy + y * s;
@@ -2603,16 +2655,6 @@ function drawScene(ctx, cw, ch, selected, selectedCreature) {
             ctx.fillRect(px + s * (0.15 + i * 0.28), py + s * ((ph2 + i * 0.3) % 0.7), s * 0.14, s * 0.3);
           }
         }
-      }
-
-      // 地势差：北邻海拔更高 → 本格受山体阴影；更高地形画亮脊
-      const cHere = world.chunks.get(chunkKey(x >> 5, y >> 5));
-      if (cHere && cHere.elev) {
-        const eN = cHere.elev[cIdx(x, y - 1)];
-        const eS = cHere.elev[cIdx(x, y + 1)];
-        const eC = cHere.elev[cIdx(x, y)];
-        if (eN > eC + 0.05) { ctx.fillStyle = "rgba(0,0,25,0.22)"; ctx.fillRect(px, py, s + 0.5, s * 0.4); }        // 北高南低 → 北侧阴影
-        else if (eC > eS + 0.05) { ctx.fillStyle = "rgba(255,250,220,0.10)"; ctx.fillRect(px, py + s * 0.6, s + 0.5, s * 0.4); } // 南侧低 → 亮边
       }
 
       // 功能分区底纹（城邦时代后划定）
@@ -3044,7 +3086,7 @@ function drawScene(ctx, cw, ch, selected, selectedCreature) {
     speed = v;
     for (const k in speedBtns) speedBtns[k].classList.toggle("active", +k === v);
   }
-  ["pause", "s1", "s2", "s4", "s100"].forEach(id => {
+  ["pause", "s1", "s2", "s4", "s100", "s1000"].forEach(id => {
     const b = document.getElementById(id);
     if (!b) return;
     speedBtns[b.dataset.v] = b;
@@ -3056,6 +3098,7 @@ function drawScene(ctx, cw, ch, selected, selectedCreature) {
     if (e.key === "2") setSpeed(2);
     if (e.key === "3") setSpeed(4);
     if (e.key === "4") setSpeed(100);
+    if (e.key === "5") setSpeed(1000);
   });
 
   // ---- 音效：首次手势解锁 AudioContext（浏览器自动播放策略） ----
@@ -3092,18 +3135,24 @@ function drawScene(ctx, cw, ch, selected, selectedCreature) {
   syncZoomUI();
 
   // ---- 主循环：固定步长模拟 ----
-  // 高倍速（100×）时允许更多步进/帧，同时截断积压防止螺旋卡死
+  // 步进上限按速度分档：1000× 允许每帧千步（帧率下降换取模拟吞吐），同时截断积压防螺旋
   const STEP = 1 / 30;
   let acc = 0, lastT = performance.now();
   let lastPhase = "day";
+  // 视觉昼夜时钟：与模拟逻辑分离——速度 ≤10× 时与模拟时间一致，超过后封顶 10×（明暗不随加速飙升）
+  let visualTod = 0.3;
   function frame(now) {
     const realDt = Math.min(0.1, (now - lastT) / 1000);
     lastT = now;
     acc += realDt * speed;
-    const maxSteps = speed > 10 ? 240 : 12;
+    // 步进上限按速度分档：1000× 允许每帧千步（帧率下降换取模拟吞吐），同时截断积压防螺旋
+    const maxSteps = speed > 100 ? 1200 : speed > 10 ? 240 : 12;
     let n = 0;
     while (acc >= STEP && n < maxSteps) { simUpdate(STEP); acc -= STEP; n++; }
     if (acc > STEP * maxSteps) acc = STEP * maxSteps;
+
+    // 视觉昼夜：增速封顶 10×
+    visualTod = (visualTod + realDt * Math.min(speed, 10) / SIM.DAY_LEN) % 1;
 
     // 昼夜切换提示音
     const phase = isDaytime() ? "day" : "night";
@@ -3121,7 +3170,7 @@ function drawScene(ctx, cw, ch, selected, selectedCreature) {
       if (camTween.t >= 1) camTween = null;
     }
 
-    drawScene(ctx, CW, CH, selectedAgent, selectedCreature);
+    drawScene(ctx, CW, CH, selectedAgent, selectedCreature, visualTod);
     updateHud(realDt);
     updateInfoPanel(realDt);
     updateRoster(realDt);
@@ -3305,18 +3354,21 @@ function drawScene(ctx, cw, ch, selected, selectedCreature) {
 
   function creaturePanelHtml(c) {
     const meta = CREATURE_META[c.type];
-    const status = c.pasture ? "圈养于牧场" : c.type === "dog"
-      ? (c.owner ? "陪伴着 " + c.owner.name : "四处溜达") : "在野";
+    let status;
+    if (c.type === "dog") status = c.tamed && c.owner ? "陪伴着 " + c.owner.name : "野生 · 靠近可驯化";
+    else if (c.pasture) status = "圈养于牧场";
+    else status = "在野";
     return `物种：${meta.name}<br>` +
       `年龄：${Math.floor(c.age)} 岁 · ${ageTier(c.age, c.type)}<br>` +
-      `状态：${status}${c.isWild() && !c.dead ? "<br>· 可狩猎/可捕获" : ""}`;
+      `状态：${status}${c.isWild() && !c.dead && c.type !== "dog" ? "<br>· 可狩猎/可捕获" : ""}`;
   }
 
   function showCreaturePanel(c) {
     const s = TILE_PX * camera.zoom;
     const px = CW / 2 + (c.x - camera.x) * s;
     const py = CH / 2 + (c.y - camera.y) * s;
-    showPanel(`${meta2name(c.type)} · ${c.pasture ? "圈养" : c.type === "dog" ? "伙伴" : "野生"}`, creaturePanelHtml(c), px, py);
+    const title = c.type === "dog" ? "狗 · " + (c.tamed ? "家犬" : "野犬") : meta2name(c.type) + " · " + (c.pasture ? "圈养" : "野生");
+    showPanel(title, creaturePanelHtml(c), px, py);
   }
 
   function meta2name(type) { return CREATURE_META[type].name; }
@@ -3418,7 +3470,7 @@ function drawScene(ctx, cw, ch, selected, selectedCreature) {
 
     let html = "";
 
-    // ---- 地区段（唯一分组）：聚落（资源+居民）/ 未知岛屿 / 无归属居民 ----
+    // ---- 地区段（唯一分组）：聚落 / 已命名岛屿 / 未知岛屿 / 无归属居民 ----
     html += `<div class="roster-sec">地区</div>`;
     for (const s of world.settlements) {
       const stock = s.stock || { wood: 0, stone: 0, sand: 0 };
@@ -3427,18 +3479,41 @@ function drawScene(ctx, cw, ch, selected, selectedCreature) {
         `<span>${open ? "▾" : "▸"} ${s.name} <span class="lv">L${s.level}</span></span>${flyBtn(s.x, s.y)}</div>`;
       if (open) {
         const residents = agents.filter(a => a.home && settleOf(a.home.x, a.home.y) === s);
+        const livestock = creatures.filter(c => !c.dead && c.pasture && c.type !== "dog" &&
+          nearestSettlement(Math.round(c.x), Math.round(c.y)) === s);
+        const cows = livestock.filter(c => c.type === "cow").length;
+        const goats = livestock.length - cows;
         html += `<div class="roster-names">` +
           `<div class="roster-res">木<b>${stock.wood}</b> 石<b>${stock.stone}</b> 沙<b>${stock.sand}</b> 粮<b>${Math.floor(world.food)}</b></div>` +
+          `<div class="roster-res">圈养牲畜<b>${livestock.length}</b>（牛 ${cows} · 羊 ${goats}）</div>` +
           (residents.length ? residents.map(nameLine).join("") : `<div class="roster-res">（尚无居民定居）</div>`) +
           `</div>`;
       }
     }
-    const wild = world.islands.filter(o => !o.claimed && islandVisible(o));
-    html += `<div class="roster-group-head" data-g="__wild"><span>${expandedGroups.has("__wild") ? "▾" : "▸"} 未知岛屿</span><span class="cnt">×${wild.length}</span></div>`;
-    if (expandedGroups.has("__wild") && wild.length) {
-      html += `<div class="roster-names">` + wild.map(o =>
-        `<div class="roster-name" data-fly="1" data-fx="${o.x}" data-fy="${o.y}">${o.name ? o.name : "无名岛"} (${o.x},${o.y}) ${flyBtn(o.x, o.y)}</div>`
-      ).join("") + `</div>`;
+    // 已命名的岛屿（居民登岛命名后即成为地区，可展开查看岛上居民）
+    const namedIsles = world.islands.filter(o => !o.claimed && o.name && islandVisible(o));
+    for (const o of namedIsles) {
+      const gk = "isle:" + o.name;
+      const open = expandedGroups.has(gk);
+      html += `<div class="roster-group-head" data-g="${gk}">` +
+        `<span>${open ? "▾" : "▸"} ${o.name} <span class="lv">岛屿</span></span>${flyBtn(o.x, o.y)}</div>`;
+      if (open) {
+        const residents = agents.filter(a => !a.dead && Math.hypot(a.x - o.x, a.y - o.y) <= o.r + 2);
+        html += `<div class="roster-names">` +
+          `<div class="roster-res">待定居的疆土（范围 ${Math.ceil(o.r)} 格）</div>` +
+          (residents.length ? residents.map(nameLine).join("") : `<div class="roster-res">（岛上暂无居民驻留）</div>`) +
+          `</div>`;
+      }
+    }
+    // 未命名的已显现岛屿（仍是未知之地）
+    const wild = world.islands.filter(o => !o.claimed && !o.name && islandVisible(o));
+    if (wild.length) {
+      html += `<div class="roster-group-head" data-g="__wild"><span>${expandedGroups.has("__wild") ? "▾" : "▸"} 未知岛屿</span><span class="cnt">×${wild.length}</span></div>`;
+      if (expandedGroups.has("__wild")) {
+        html += `<div class="roster-names">` + wild.map(o =>
+          `<div class="roster-name" data-fly="1" data-fx="${o.x}" data-fy="${o.y}">无名岛 (${o.x},${o.y}) ${flyBtn(o.x, o.y)}</div>`
+        ).join("") + `</div>`;
+      }
     }
     // 无归属居民组（无房者按身份分组）
     for (const key of ["无家可归", "原住民部落", "散居"]) {

@@ -68,19 +68,37 @@ class Creature {
     if (this.target) this.stepToward(this.target, this.speed * dt);
   }
 
-  // 狗：跟随最近的小人（4 格内不贴脸）
+  // 狗：认定了固定主人就一生跟随（主人去世后才重新认主）
+  // 狗：野生幼犬需要被驯化——有人靠近停留累计驯化进度，成功后一生认定固定主人
   updateDog(dt) {
-    this.ownerCd = (this.ownerCd || 0) - dt;
-    if (!this.owner || this.ownerCd <= 0) {
-      this.ownerCd = 2;
-      let best = null, bestD = 1e9;
+    if (!this.tamed || !this.owner || this.owner.dead) {
+      // 未驯化（或主人去世重新待驯）：游荡 + 驯化检测
+      this.tamed = false;
+      this.owner = null;
+      this.moveCd -= dt;
+      if (this.moveCd <= 0) {
+        this.moveCd = 1.5 + rand() * 2;
+        const a = rand() * Math.PI * 2;
+        const nx = Math.round(this.x + Math.cos(a) * 2), ny = Math.round(this.y + Math.sin(a) * 2);
+        if (walkable(nx, ny)) this.target = { x: nx + 0.5, y: ny + 0.5 };
+      }
+      if (this.target) this.stepToward(this.target, this.speed * dt);
+      // 驯化：有小人靠近（1.5 格内）累计驯化度，喜爱牲畜的人在旁进度翻倍
+      let tamer = null, tamerD = 1.5;
       for (const a of agents) {
         const d = Math.hypot(a.x - this.x, a.y - this.y);
-        if (d < bestD) { bestD = d; best = a; }
+        if (d < tamerD) { tamerD = d; tamer = a; }
       }
-      this.owner = best;
+      if (tamer) {
+        this.tameness += dt * (tamer.hobby === "animal" ? 2 : 1);
+        if (this.tameness >= 3) {
+          this.tamed = true;
+          this.owner = tamer;
+          logThrottled(`${tamer.name} 驯服了一条狗，狗认定他为主人。`, 15);
+        }
+      }
+      return;
     }
-    if (!this.owner) return;
     const d = Math.hypot(this.owner.x - this.x, this.owner.y - this.y);
     if (d > 4) this.stepToward(this.owner, this.speed * dt);
   }
@@ -129,6 +147,7 @@ class Creature {
 function spawnCreature(x, y, type, captured) {
   const c = new Creature(x, y, type);
   if (captured) c.pasture = { x, y };
+  // 狗出生时是野生的，需要有人靠近驯化后才会认主
   creatures.push(c);
   return c;
 }

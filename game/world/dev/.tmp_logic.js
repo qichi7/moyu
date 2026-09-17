@@ -29,7 +29,7 @@ const T = {
 const TILE_META = {
   [T.VOID]:     { name: "虚空", color: "#0a0d13", walk: false, h: 0 },
   [T.DEEP]:     { name: "深海", color: "#123a5e", walk: false, fillable: true, fillTo: T.SAND, hp: 14 },
-  [T.WATER]:    { name: "浅海", color: "#2b6ea8", walk: false, fillable: true, bridgeable: true, fillTo: T.SAND, hp: 8 },
+  [T.WATER]:    { name: "浅海", color: "#235d96", walk: false, fillable: true, bridgeable: true, fillTo: T.SAND, hp: 8 },
   [T.SAND]:     { name: "沙滩", color: "#cfc08a", walk: true, h: 0 },
   [T.GRASS]:    { name: "草地", color: "#5e8c4f", walk: true, h: 0 },
   [T.TREE]:     { name: "森林", color: "#2f5e33", walk: false, diggable: true, digTo: T.GRASS, hp: 4 },
@@ -64,7 +64,7 @@ const SIM = {
   WORK_EFFORT: 1.3,     // 每个工人每秒任务进度
   FARM_MATURITY: 55,    // 农田成熟秒数
   FARM_YIELD: 4,        // 每次成熟产粮
-  BIRTH_CHECK: 0.025,   // 每秒出生判定概率
+  BIRTH_CHECK: 0.015,   // 每秒出生判定概率
   EXPAND_POP_CAP: 22,   // 人口达到此值触发扩张（每次扩张 +22）
   SETTLEMENT_SCORE: [24, 70, 150],   // 聚落升级分数线：村庄/城镇/城市
   SETTLEMENT_RADIUS: 14,             // 聚落繁荣度统计半径
@@ -813,6 +813,19 @@ function ensureStock(s) {
   return s.stock;
 }
 
+// 联合库存：国家级工程（架桥/造陆）跨聚落汇总与扣费
+function jointStock(res) {
+  return world.settlements.reduce((sum, s) => sum + (s.stock ? s.stock[res] || 0 : 0), 0);
+}
+function jointConsume(res, n) {
+  for (const s of world.settlements) {
+    const st = ensureStock(s);
+    const take = Math.min(st[res] || 0, n);
+    if (take > 0) { st[res] -= take; n -= take; }
+    if (n <= 0) return;
+  }
+}
+
 // ---- tile 改造：按任务类型决定成果 ----
 function workTile(task, amount) {
   const x = task.x, y = task.y;
@@ -845,7 +858,7 @@ const tasks = {
   list: [],
 };
 
-const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 6, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5 };
+const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 6, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3 };
 // 工程资源消耗：架桥耗木材、造陆耗沙土（完工时从最近聚落库存扣除）
 const TASK_RESOURCE_COST = { BRIDGE: { wood: 1 }, FILL: { sand: 2 } };
 
@@ -868,7 +881,7 @@ function taskJobPref(t) {
   switch (t.type) {
     case "FARM": return "FARM";
     case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT": return "BUILD";
-    case "HUNT": return "HUNT";
+    case "HUNT": case "CAPTURE": return "HUNT";
     case "FISH": return "FISH";
     case "DIG": return t.res === "stone" ? "DIG_STONE" : "DIG_WOOD";
     default: return null;
@@ -886,10 +899,9 @@ function tasksTake(agent) {
     if (t.done) continue;
     if ((t.blockedCount || 0) >= 3) continue;
     if (t.type === "BRIDGE" || t.type === "FILL") {
-      const s = nearestSettlement(t.x, t.y);
-      const stock = s ? ensureStock(s) : null;
       const cost = TASK_RESOURCE_COST[t.type];
-      if (!stock || Object.keys(cost).some(k => stock[k] < cost[k])) continue;   // 库存不够一格的 → 不领
+      const lack = Object.keys(cost).some(k => jointStock(k) < cost[k]);
+      if (lack) continue;   // 库存不够一格的 → 不领
     }
     const cap = t.type === "BUILD" || t.type === "FARM" ? 2 : 4;
     if (t.workers.size >= cap) continue;
@@ -1099,19 +1111,37 @@ class Creature {
     if (this.target) this.stepToward(this.target, this.speed * dt);
   }
 
-  // 狗：跟随最近的小人（4 格内不贴脸）
+  // 狗：认定了固定主人就一生跟随（主人去世后才重新认主）
+  // 狗：野生幼犬需要被驯化——有人靠近停留累计驯化进度，成功后一生认定固定主人
   updateDog(dt) {
-    this.ownerCd = (this.ownerCd || 0) - dt;
-    if (!this.owner || this.ownerCd <= 0) {
-      this.ownerCd = 2;
-      let best = null, bestD = 1e9;
+    if (!this.tamed || !this.owner || this.owner.dead) {
+      // 未驯化（或主人去世重新待驯）：游荡 + 驯化检测
+      this.tamed = false;
+      this.owner = null;
+      this.moveCd -= dt;
+      if (this.moveCd <= 0) {
+        this.moveCd = 1.5 + rand() * 2;
+        const a = rand() * Math.PI * 2;
+        const nx = Math.round(this.x + Math.cos(a) * 2), ny = Math.round(this.y + Math.sin(a) * 2);
+        if (walkable(nx, ny)) this.target = { x: nx + 0.5, y: ny + 0.5 };
+      }
+      if (this.target) this.stepToward(this.target, this.speed * dt);
+      // 驯化：有小人靠近（1.5 格内）累计驯化度，喜爱牲畜的人在旁进度翻倍
+      let tamer = null, tamerD = 1.5;
       for (const a of agents) {
         const d = Math.hypot(a.x - this.x, a.y - this.y);
-        if (d < bestD) { bestD = d; best = a; }
+        if (d < tamerD) { tamerD = d; tamer = a; }
       }
-      this.owner = best;
+      if (tamer) {
+        this.tameness += dt * (tamer.hobby === "animal" ? 2 : 1);
+        if (this.tameness >= 3) {
+          this.tamed = true;
+          this.owner = tamer;
+          logThrottled(`${tamer.name} 驯服了一条狗，狗认定他为主人。`, 15);
+        }
+      }
+      return;
     }
-    if (!this.owner) return;
     const d = Math.hypot(this.owner.x - this.x, this.owner.y - this.y);
     if (d > 4) this.stepToward(this.owner, this.speed * dt);
   }
@@ -1160,6 +1190,7 @@ class Creature {
 function spawnCreature(x, y, type, captured) {
   const c = new Creature(x, y, type);
   if (captured) c.pasture = { x, y };
+  // 狗出生时是野生的，需要有人靠近驯化后才会认主
   creatures.push(c);
   return c;
 }
@@ -1630,19 +1661,17 @@ class Agent {
         }
       }
     }
-    // 工程资源检查：架桥耗木材、造陆耗沙土，库存不足则挂起等补给
+    // 工程资源检查：架桥耗木材、造陆耗沙土（联合库存，跨聚落汇总），不足则挂起等补给
     if (t.type === "BRIDGE" || t.type === "FILL") {
-      const s = nearestSettlement(t.x, t.y);
       const cost = TASK_RESOURCE_COST[t.type];
-      const stock = s ? ensureStock(s) : null;
-      const lack = !stock || Object.keys(cost).some(k => stock[k] < cost[k]);
-      if (lack) {
-        logThrottled(`${t.type === "BRIDGE" ? "木材" : "沙土"}不足，工程暂停等待补给。`, 30);
+      const res = Object.keys(cost)[0];
+      if (jointStock(res) < cost[res]) {
+        logThrottled(`${res === "wood" ? "木材" : "沙土"}不足，工程暂停等待补给。`, 30);
         return;
       }
       t.progress += effort;
       if (t.progress >= (t.need || 0)) {
-        for (const k in cost) stock[k] -= cost[k];   // 完工结算资源
+        jointConsume(res, cost[res]);   // 完工结算资源
         this.task = null;
         tasksFinish(t);
         this.state = "idle";
@@ -1650,10 +1679,9 @@ class Agent {
       this.energy -= SIM.ENERGY_DECAY * dt * 0.5;
       return;
     }
-    if (t.type === "BUILD" || t.type === "FARM" || t.type === "HUNT" ||
-        t.type === "GATHER" || t.type === "FISH" || t.type === "CAPTURE" || t.type === "PLANT") {
-      t.progress += effort;
-      if (t.progress >= t.need) {
+    if (t.type === "DIG") {
+      // 伐木/采石：磨 tile 血量，产出由工人搬运回仓
+      if (workTile(t, effort)) {
         const y = tasksFinish(t, this);   // 完成任务，取得搬运产出
         this.task = null;
         this.state = "idle";
@@ -1663,10 +1691,16 @@ class Agent {
         }
       }
     } else {
-      if (workTile(t, effort)) {
+      // 其余任务一律进度制（建造/农牧/畜牧/采集/狩猎等），防止无出口的假 workTile 卡死
+      t.progress += effort;
+      if (t.progress >= t.need) {
+        const y = tasksFinish(t, this);   // 完成任务，取得搬运产出
         this.task = null;
-        tasksFinish(t);
         this.state = "idle";
+        if (y) {
+          this.carrying = y;
+          this.state = "idle";           // 下一轮决策将回仓入库
+        }
       }
     }
     this.energy -= SIM.ENERGY_DECAY * dt * 0.5;
@@ -1855,8 +1889,8 @@ function plannerTick() {
       tasksAdd({ type: "HUNT", x: Math.round(c.x - 0.5), y: Math.round(c.y - 0.5), creature: c });
     }
   }
-  // 2d. 畜牧（城邦时代解锁）：无牧场 → 建牧场；有牧场有空位且附近有野生牲畜 → 捕获
-  if (world.era >= 2) {
+  // 2d. 畜牧（定居时代解锁：驯化早于城市文明）：无牧场 → 建牧场；有牧场有空位且附近有野生牲畜 → 捕获
+  if (world.era >= 1) {
     if (world.pastures.length === 0 && tasksPending("PASTURE", true).length < 1) {
       const a = pickAnchor();
       const s = findSpot(a.x, a.y, 4, 14, T.GRASS);
@@ -1947,9 +1981,10 @@ function plannerTick() {
   if (days < 1 && pop > 0) { logThrottled(`饥荒告警：存粮仅够 ${days.toFixed(1)} 天！`, SIM.DAY_LEN); emit("famine"); }
 
   // 4. 人口自然增长：由农田承载余量驱动（田先于人到位），饥荒期停止生育
+  //    出生安全垫随人口放大（food > 100 + 人口×4），防止出生率超过承载力引发饿死潮
   //    BIRTH_CHECK 是每秒概率，规划器每 PLANNER_INTERVAL 秒才判一次，需换算成窗口概率
   const hasRoom = world.houses.length * 3 > pop;
-  if (pop > 0 && pop < world.popCap && world.food > 100 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
+  if (pop > 0 && pop < world.popCap && world.food > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
     const near = findBirthSpot();
     if (near) {
       const baby = spawnAgent(near.x, near.y);
