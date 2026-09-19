@@ -91,6 +91,31 @@ function pickAnchor() {
 }
 
 // ---- 规划器：聚合小人状态 → 触发世界变化 ----
+// 距 (x,y) 最近的同类设施（聚簇基准点）
+function nearestOf(list, p) {
+  let best = null, bd = 1e9;
+  for (const o of list) {
+    const d = Math.abs(o.x - p.x) + Math.abs(o.y - p.y);
+    if (d < bd) { bd = d; best = o; }
+  }
+  return best;
+}
+
+// 同聚落内的设施列表（聚簇只在区内进行——用户需求：不同地区之间不需要聚集）
+// 归属判定用无半径最近聚落（设施选址半径可大于 SETTLEMENT_RADIUS，nearestSettlement 会误判为无主）
+function localFacilities(list, settle) {
+  if (!settle) return list;
+  return list.filter(o => ownerSettle(o.x, o.y) === settle);
+}
+function ownerSettle(x, y) {
+  let best = null, bd = 1e9;
+  for (const s of world.settlements) {
+    const d = Math.abs(s.x - x) + Math.abs(s.y - y);
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+}
+
 function plannerTick() {
   const pop = agents.length;
   const homeless = agents.filter(a => !a.home).length;
@@ -99,22 +124,28 @@ function plannerTick() {
   //    已无立足之地 → 直接开辟新区。房屋富余（够住且多 3 间以上）则不新建
   //    闸门只统计"还在正常推进"的任务，冻结任务不算数，防止堵死建房通道；
   //    无家者超过 6 人时无视账面容量富余，强制补建（孤立地段的房不算有效容量）
+  //    选址偏好：同聚落内房子聚簇（新屋挨着已有房屋 3 格内，房间距防贴脸），跨聚落不要求
   const capacity = world.houses.length * 3;
   if ((homeless > 6 || capacity - pop <= 2) && capacity <= pop + 8 && tasksPending("BUILD", true).length < 3) {
-    // 锚点优先：城邦时代后有居住区划的聚落 → 居住区；再无家者重心；再粮仓锚点
+    // 锚点优先：有居住区划的聚落 → 居住区（区内也聚簇：新屋挨已有房屋）；再无家者重心；再粮仓锚点
     let s = null;
     for (const st of world.settlements) {
       if (!st.zones) continue;
       const z = st.zones.find(z => z.type === "housing");
-      if (z) { s = findSpot(z.x, z.y, 0, z.r, T.GRASS); if (s) break; }
+      if (z) {
+        const ref = nearestOf(localFacilities(world.houses, st), z);
+        s = (ref && expandSpot(ref, 2, 6, T.GRASS)) ||
+            findSpot(z.x, z.y, 0, z.r, T.GRASS);
+        if (s) break;
+      }
     }
     if (!s) {
       const c = centroidOf(agents.filter(a => !a.home));
-      s = c && findSpot(c.x | 0, c.y | 0, 2, 14, T.GRASS);
-    }
-    if (!s) {
-      const a = pickAnchor();
-      s = findSpot(a.x, a.y, 3, 18, T.GRASS);
+      const anchor = c || pickAnchor();
+      const ref = nearestOf(localFacilities(world.houses, nearestSettlement(anchor.x, anchor.y)), anchor);
+      s = (ref && expandSpot(ref, 2, 6, T.GRASS)) ||
+          (c && findSpot(c.x | 0, c.y | 0, 2, 14, T.GRASS)) ||
+          findSpot(anchor.x, anchor.y, 3, 18, T.GRASS);
     }
     if (s) {
       tasksAdd({ type: "BUILD", x: s.x, y: s.y, need: 14 });
@@ -127,25 +158,43 @@ function plannerTick() {
   }
 
   // 2. 粮食压力 → 多渠道补粮：农田 / 浆果采集 / 狩猎 / 畜牧（城邦解锁）
+  //    选址偏好：同聚落内农田连片（新田挨着已有农田 3 格内，田可紧贴成片），跨聚落不要求
   if (world.farms.length * 6 < pop + 8 && tasksPending("FARM", true).length < 2) {
     let s = null;
     for (const st of world.settlements) {
       if (!st.zones) continue;
       const z = st.zones.find(z => z.type === "farm");
-      if (z) { s = findSpot(z.x, z.y, 0, z.r, T.GRASS, [T.HOUSE, T.SITE]); if (s) break; }
+      if (z) {
+        const ref = nearestOf(localFacilities(world.farms, st), z);
+        s = (ref && expandSpot(ref, 1, 6, T.GRASS)) ||
+            findSpot(z.x, z.y, 0, z.r, T.GRASS, [T.HOUSE, T.SITE]);
+        if (s) break;
+      }
     }
     if (!s) {
       const starving = agents.filter(a => a.hunger < 40);
       const c = starving.length >= 3 ? centroidOf(starving) : null;
-      s = c && findSpot(c.x | 0, c.y | 0, 3, 16, T.GRASS, [T.HOUSE, T.SITE]);
-    }
-    if (!s) {
-      const a = pickAnchor();
-      s = findSpot(a.x, a.y, 4, 26, T.GRASS, [T.HOUSE, T.SITE]);
+      const anchor = c || pickAnchor();
+      const ref = nearestOf(localFacilities(world.farms, nearestSettlement(anchor.x, anchor.y)), anchor);
+      s = (ref && expandSpot(ref, 1, 6, T.GRASS)) ||
+          findSpot(anchor.x, anchor.y, c ? 3 : 4, c ? 16 : 26, T.GRASS, [T.HOUSE, T.SITE]);
     }
     if (s) {
-      tasksAdd({ type: "FARM", x: s.x, y: s.y, need: 9 });
-      logThrottled(`规划署：粮食储备吃紧（${Math.floor(world.food)}），批准开垦 (${s.x},${s.y})。`, 10);
+      // 灌溉约束：农田 5 格内需有水（海/塘均可）；选址无水 → 先在附近挖塘引水（塘成后自然满足）
+      if (nearAny(s.x, s.y, [T.WATER, T.DEEP], 5)) {
+        tasksAdd({ type: "FARM", x: s.x, y: s.y, need: 9 });
+        logThrottled(`规划署：粮食储备吃紧（${Math.floor(world.food)}），批准开垦 (${s.x},${s.y})。`, 10);
+      } else if (tasksPending("EXCAV", true).length < 1) {
+        const pond = expandSpot(s, 2, 6, T.GRASS, new Set()) ||
+                     findSpot(s.x, s.y, 2, 5, T.GRASS, [T.FARM, T.HOUSE]);
+        if (pond) {
+          tasksAdd({ type: "EXCAV", x: pond.x, y: pond.y, need: 8 });
+          logThrottled(`规划署：新农田远离水源，先在 (${pond.x},${pond.y}) 挖塘引水。`, 20);
+        } else {
+          tasksAdd({ type: "FARM", x: s.x, y: s.y, need: 9 });   // 无处挖塘：照旧建田（等世界变化）
+        }
+      }
+      // 已有 EXCAV 在挖：暂缓建田（水到渠成）
     }
   }
   // 2b. 采集：附近有果量充足的浆果丛/果树 → 采集队
@@ -163,7 +212,7 @@ function plannerTick() {
   // 2c. 狩猎：附近有野生牛羊 → 猎队（立项前确认动物存活，且未被捕获任务占用）
   if (world.food < 60 + pop * 3 && tasksPending("HUNT", true).length < 1) {
     const a = pickAnchor();
-    const wild = creatures.filter(c => c.isWild() && !c.dead &&
+    const wild = creatures.filter(c => c.isWild() && !c.dead && CREATURE_META[c.type].hunt &&
       Math.abs(c.x - a.x) + Math.abs(c.y - a.y) < 30 && !tasks.list.some(k => k.creature === c && !k.done));
     if (wild.length) {
       const c = wild[0];
@@ -195,11 +244,57 @@ function plannerTick() {
       }
     }
   }
+  // 2d2. 渔场：圈养鱼群不足 → 三级策略
+  //      ① 近岸有野生鱼群 → 原地圈养（水域即渔场，无需建筑）
+  //      ② 无近岸鱼群但聚落近处有水域 → 从远处野生鱼群捕苗运来圈养（dest 指定水域）
+  //      ③ 连可用的水域都没有 → 先挖塘（EXCAV，塘成后回到②）
+  if (tasksPending("CAPTURE", true).length < 1 &&
+      creatures.filter(c => c.pasture && c.type === "fish" && !c.dead).length < SIM.PASTURE_CAP) {
+    const a = pickAnchor();
+    const wild = creatures.filter(c => c.isWild() && !c.dead && c.type === "fish" &&
+      !tasks.list.some(k => k.creature === c && !k.done));
+    let placed = false;
+    // ① 原地圈养
+    for (const f of wild) {
+      const fx = Math.round(f.x - 0.5), fy = Math.round(f.y - 0.5);
+      if (Math.abs(fx - a.x) + Math.abs(fy - a.y) > 30) continue;
+      const shore = neighborsOf(fx, fy).find(p => walkable(p.x, p.y));
+      if (shore) {
+        tasksAdd({ type: "CAPTURE", x: shore.x, y: shore.y, need: 5, creature: f, pasture: { x: fx, y: fy } });
+        placed = true;
+        break;
+      }
+    }
+    // ② 运鱼到聚落近处水域
+    if (!placed) {
+      const dest = findSpot(a.x, a.y, 4, 18, T.WATER, [T.DOCK]);
+      if (dest && wild.length && !creatures.some(c => c.pasture && c.type === "fish" &&
+          Math.abs(c.pasture.x - dest.x) + Math.abs(c.pasture.y - dest.y) < 3)) {
+        const seed = wild[0];
+        const sx = Math.round(seed.x - 0.5), sy = Math.round(seed.y - 0.5);
+        const shore = neighborsOf(sx, sy).find(p => walkable(p.x, p.y));
+        if (shore) {
+          tasksAdd({ type: "CAPTURE", x: shore.x, y: shore.y, need: 5, creature: seed,
+            pasture: { x: sx, y: sy }, dest: { x: dest.x, y: dest.y } });
+          logThrottled("渔人打算捕些鱼苗，送到近处的水域里放养。", 30);
+          placed = true;
+        }
+      }
+    }
+    // ③ 挖塘
+    if (!placed && tasksPending("EXCAV", true).length < 1) {
+      const pond = findSpot(a.x, a.y, 3, 12, T.GRASS, [T.FARM, T.HOUSE]);
+      if (pond) {
+        tasksAdd({ type: "EXCAV", x: pond.x, y: pond.y, need: 8 });
+        logThrottled("规划署：近处没有可养鱼的水域，先挖一口鱼塘。", 30);
+      }
+    }
+  }
   // 2e. 资源采集：各聚落木材/石材/沙土低于阈值 → 立项伐木/采石/采沙/植树
   for (const s of world.settlements) {
     const stock = ensureStock(s);
     const digPending = type => tasksPending("DIG", true).filter(t => t.res === type).length;
-    if (stock.wood < 10 && digPending("wood") < 6) {
+    if (stock.wood < 25 && digPending("wood") < 6) {   // 储备线 25：造船消耗大，伐木要跑在前面
       const t = findSpot(s.x, s.y, 2, 30, T.TREE);
       if (t) tasksAdd({ type: "DIG", x: t.x, y: t.y, res: "wood" });
     }
@@ -284,6 +379,23 @@ function plannerTick() {
       if (shore && !tasks.list.some(t => !t.done && t.type === "FISH" && t.fishX === fx && t.fishY === fy)) {
         tasksAdd({ type: "FISH", x: shore.x, y: shore.y, need: 5, fishX: fx, fishY: fy });
         break;
+      }
+    }
+  }
+
+  // 2h2. 渔船：有码头且海上有鱼群 → 渔民驾小渔船近海捕捞（渔获回港入粮池；渔民休整后才再出港）
+  if (world.era >= 1 && world.docks.length &&
+      world.ships.filter(s => s.boat).length < SIM.FISHING_BOAT_CAP &&
+      world.fishStock.size > 0) {
+    const fisher = agents.find(x => !x.dead && !x.task && !x.voyaging && !x.rescuing &&
+      (x.hobby === "fishing" || x.job === "fisher") &&
+      (!x.boatRestT || world.time > x.boatRestT));
+    if (fisher) {
+      const dock = world.docks.reduce((b, d) =>
+        !b || Math.abs(d.x - fisher.x) + Math.abs(d.y - fisher.y) < Math.abs(b.x - fisher.x) + Math.abs(b.y - fisher.y) ? d : b, null);
+      if (dock && fisher.goTo(dock.x, dock.y)) {
+        fisher.state = "walk";
+        fisher.onArrive = () => fisher.startFishingTrip(dock);
       }
     }
   }
@@ -398,6 +510,9 @@ function plannerTick() {
   // 9. 时代演进：文明整体迈入新纪元
   eraCheck(pop);
 
+  // 10. 劳动力市场：职业随需求流转（没活干会转行）
+  jobMarketTick(pop);
+
   assignHomes();
 }
 
@@ -460,9 +575,17 @@ function findBirthSpot() {
   return null;
 }
 
-// ---- 农田生长 ----
+// ---- 农田生长（需水灌溉：5 格以内有水才能成熟，缺水停滞；结果缓存 2 秒节流） ----
 function farmTick(dt) {
   for (const f of world.farms) {
+    f.waterCd = (f.waterCd || 0) - dt;
+    if (f.waterCd <= 0) {
+      f.waterCd = 2;
+      const was = f.irrigated;
+      f.irrigated = nearAny(f.x, f.y, [T.WATER, T.DEEP], 5);
+      if (was && !f.irrigated) logThrottled("一片农田失去了灌溉水源，收成停滞了。", 60);
+    }
+    if (!f.irrigated) continue;   // 缺水：停止生长（不倒退，等水来了继续）
     f.grow += dt;
     if (f.grow >= SIM.FARM_MATURITY) {
       f.grow = 0;
@@ -491,10 +614,74 @@ function simUpdate(dt) {
   farmTick(dt);
   berryTick();
   wildBreedTick();
+  spawnWhaleOccasionally();
   quarryTick();
 
   _plannerCd -= dt;
   if (_plannerCd <= 0) { _plannerCd = SIM.PLANNER_INTERVAL; plannerTick(); }
+}
+
+// 劳动力市场：职业随需求平滑流转——零待办的职业逐渐转出，最缺工的职业逐渐补入
+function jobMarketTick(pop) {
+  // 探索者保底：至少 1 人专职探索（劳动力市场优先级最高——没有探索者，世界边界就停止生长）
+  if (!agents.some(a => !a.dead && a.job === "explorer")) {
+    // 从人数最多的非探索者职业中挑 adventure 最高者转职（不抽独苗职业，避免抽走唯一的渔夫/猎人）
+    const byJob = {};
+    for (const a of agents) if (!a.dead && a.job !== "explorer") (byJob[a.job] = byJob[a.job] || []).push(a);
+    let pool = null;
+    for (const j of Object.keys(byJob)) {
+      if (byJob[j].length < 2) continue;
+      if (!pool || byJob[j].length > pool.length) pool = byJob[j];
+    }
+    if (pool) {
+      const best = pool.sort((a, b) => b.adventure - a.adventure)[0];
+      best.job = "explorer";
+      logMsg(`${best.name} 放下手中活计，专职成为探索者——去把世界的边界找出来。`);
+    }
+  }
+  const demand = {
+    farmer:      tasksPending("FARM", true).length,
+    lumberjack:  tasksPending("DIG", true).filter(t => t.res === "wood").length,
+    miner:       tasksPending("DIG", true).filter(t => t.res === "stone").length,
+    hunter:      tasksPending("HUNT", true).length + tasksPending("CAPTURE", true).length,
+    fisher:      tasksPending("FISH", true).length,
+    builder:     tasksPending("BUILD", true).length + tasksPending("PASTURE", true).length +
+                 tasksPending("DOCK", true).length + tasksPending("QUARRY", true).length +
+                 tasksPending("SANDPIT", true).length + tasksPending("PLANT", true).length +
+                 tasksPending("PLANT_BERRY", true).length,
+    explorer:    1,   // 探索自有行为，恒有需求
+  };
+  const workers = {};
+  for (const a of agents) if (!a.dead) workers[a.job] = (workers[a.job] || 0) + 1;
+  world.jobIdle = world.jobIdle || {};
+
+  // 供过于求的职业：零待办持续 60 秒，或从业人数超过需求 4 倍
+  const oversupply = [];
+  for (const j of Object.keys(JOBS)) {
+    if (j === "explorer") continue;
+    const d = demand[j], w = workers[j] || 0;
+    if (d === 0) {
+      world.jobIdle[j] = (world.jobIdle[j] || 0) + SIM.PLANNER_INTERVAL;
+      if (world.jobIdle[j] > 60) oversupply.push(j);
+    } else {
+      if (w > d * 4) oversupply.push(j);
+      world.jobIdle[j] = 0;
+    }
+  }
+  // 转入目标：人均需求最大且仍有待办的职业
+  const target = Object.keys(JOBS).filter(j => demand[j] > 0)
+    .sort((a, b) => demand[b] / Math.max(1, workers[b] || 0) - demand[a] / Math.max(1, workers[a] || 0))[0];
+  if (!target || !oversupply.length || target === oversupply[0]) return;
+  // 每周期最多转 2 人（平滑流动防振荡）
+  let moved = 0;
+  for (const j of oversupply) {
+    const ws = agents.filter(a => a.job === j && !a.dead);
+    if (!ws.length) continue;
+    ws[0].job = target;
+    moved++;
+    if (moved >= 2) break;
+  }
+  if (moved) logThrottled(`${JOBS[oversupply[0]].name}转职为${JOBS[target].name}——劳动力随需求流动。`, 40);
 }
 
 // ---- 初始化模拟 ----

@@ -429,6 +429,12 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
       const r = Math.max(1.5, s * 0.16 * meta.size);
       ctx.fillStyle = "rgba(0,0,0,0.3)";
       ctx.beginPath(); ctx.ellipse(px, py + r * 0.8, r, r * 0.4, 0, 0, 7); ctx.fill();
+      if ((c.strandT || 0) > 3) {   // 搁浅求救标记（被困动物头顶红色感叹号）
+        ctx.fillStyle = "#e74c3c";
+        ctx.font = `bold ${Math.max(8, s * 0.5)}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.fillText("!", px, py - r * 2.2);
+      }
       if (c.type === "cow") {
         ctx.fillStyle = "#8a5a3a";
         ctx.beginPath(); ctx.ellipse(px, py, r * 1.15, r * 0.8, 0, 0, 7); ctx.fill();
@@ -440,11 +446,59 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
         ctx.beginPath(); ctx.ellipse(px, py, r * 1.05, r * 0.75, 0, 0, 7); ctx.fill();
         ctx.fillStyle = "#6b6b6b";
         ctx.beginPath(); ctx.arc(px + r * 0.9, py - r * 0.3, r * 0.4, 0, 7); ctx.fill();
-      } else {
+      } else if (c.type === "deer") {
+        ctx.fillStyle = "#a5713d";
+        ctx.beginPath(); ctx.ellipse(px, py, r * 0.95, r * 0.65, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = "#7a4f28";
+        ctx.beginPath(); ctx.arc(px + r * 0.85, py - r * 0.45, r * 0.32, 0, 7); ctx.fill();
+        ctx.strokeStyle = "#5c3a1a"; ctx.lineWidth = 0.8;   // 鹿角
+        ctx.beginPath();
+        ctx.moveTo(px + r * 0.9, py - r * 0.75); ctx.lineTo(px + r * 1.2, py - r * 1.25);
+        ctx.moveTo(px + r * 1.0, py - r * 0.85); ctx.lineTo(px + r * 1.35, py - r * 1.0);
+        ctx.stroke();
+      } else if (c.type === "boar") {
+        ctx.fillStyle = "#5c4632";
+        ctx.beginPath(); ctx.ellipse(px, py, r * 1.1, r * 0.85, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = "#3d2e1e";
+        ctx.beginPath(); ctx.arc(px + r * 0.95, py - r * 0.15, r * 0.45, 0, 7); ctx.fill();
+      } else if (c.type === "wolf") {
+        ctx.fillStyle = "#787882";
+        ctx.beginPath(); ctx.ellipse(px, py, r * 1.2, r * 0.6, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = "#5a5a64";
+        ctx.beginPath(); ctx.arc(px + r * 1.1, py - r * 0.35, r * 0.4, 0, 7); ctx.fill();
+      } else if (c.type === "fish") {
+        ctx.fillStyle = "rgba(120,180,220,0.85)";
+        for (let i = 0; i < 3; i++) {
+          const fx = px + Math.cos(s * 0.8 + i * 2.1) * r * 1.2, fy = py + Math.sin(s * 0.8 + i * 2.1) * r * 0.7;
+          ctx.beginPath(); ctx.ellipse(fx, fy, r * 0.4, r * 0.18, s * 0.8 + i, 0, 7); ctx.fill();
+        }
+      } else if (c.type === "turtle") {
+        ctx.fillStyle = "#4a7a55";
+        ctx.beginPath(); ctx.ellipse(px, py, r * 0.95, r * 0.7, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = "#33604a";
+        ctx.beginPath(); ctx.ellipse(px, py, r * 0.6, r * 0.45, 0, 0, 7); ctx.fill();
+      } else if (c.type === "whale") {
+        ctx.fillStyle = "#2c4a66";
+        ctx.beginPath(); ctx.ellipse(px, py, r * 1.6, r * 0.75, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = "#3d6284";
+        ctx.beginPath(); ctx.ellipse(px - r * 0.3, py - r * 0.2, r * 0.9, r * 0.4, 0, 0, 7); ctx.fill();
+        const sp2 = (s * 0.5) % 2;   // 喷水柱
+        if (sp2 < 1) { ctx.fillStyle = `rgba(240,248,255,${0.6 - sp2 * 0.6})`; ctx.fillRect(px, py - r * 1.5 - sp2 * r, r * 0.15, r * 0.8); }
+      } else if (c.type === "dog") {
         ctx.fillStyle = "#8a8a92";
         ctx.beginPath(); ctx.ellipse(px, py, r * 1.1, r * 0.7, 0, 0, 7); ctx.fill();
         ctx.fillStyle = "#5a5a62";
         ctx.beginPath(); ctx.arc(px - r * 0.9, py - r * 0.2, r * 0.42, 0, 7); ctx.fill();
+      }
+      if (c.type === "bird") {   // 鸟：空中飞行的小 V 形
+        const fw = Math.sin(s * 6 + c.phase) * r * 0.5;
+        ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(px - r * 1.2, py - fw * 0.5);
+        ctx.lineTo(px, py - r * 0.4);
+        ctx.lineTo(px + r * 1.2, py - fw * 0.5);
+        ctx.stroke();
+        continue;
       }
       if (c.pasture) { // 圈养标记
         ctx.strokeStyle = "rgba(200,170,80,0.8)"; ctx.lineWidth = 0.8;
@@ -484,28 +538,47 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
   // 远航船（航海家在船上时不单独绘制小人）
   for (const s of world.ships) {
     const px = ox + s.x * s, py = oy + s.y * s;
-    const r = Math.max(3, s * 0.55);
+    const boatScale = s.boat ? 0.75 : 1;   // 渔船比远航船小一号
+    const r = Math.max(3, s * 0.55) * boatScale;
     ctx.save();
     ctx.translate(px, py);
     ctx.rotate(s.ang);
     ctx.fillStyle = "rgba(0,0,0,0.3)";
     ctx.beginPath(); ctx.ellipse(0, r * 0.4, r * 1.1, r * 0.4, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = "#7a5a30";   // 船身
+    ctx.fillStyle = s.boat ? "#5c6470" : "#7a5a30";   // 船身（渔船灰）
     ctx.beginPath();
     ctx.moveTo(r * 1.3, 0);
     ctx.quadraticCurveTo(0, r * 0.85, -r * 1.1, r * 0.45);
     ctx.lineTo(-r * 1.1, -r * 0.45);
     ctx.quadraticCurveTo(0, -r * 0.85, r * 1.3, 0);
     ctx.closePath(); ctx.fill();
-    if (s.state === "sailing") {   // 白帆
-      ctx.fillStyle = "#f0ead8";
+    if (s.state === "sailing" || s.state === "rescue") {   // 帆（救援船挂红旗）
+      ctx.fillStyle = s.state === "rescue" ? "#d9483b" : "#f0ead8";
       ctx.beginPath();
       ctx.moveTo(r * 0.1, -r * 0.15);
       ctx.lineTo(r * 0.1, -r * 1.1);
       ctx.lineTo(r * 0.75, -r * 0.2);
       ctx.closePath(); ctx.fill();
     }
+    if (s.boat) {   // 渔船小旗
+      ctx.fillStyle = "#8fa3b8";
+      ctx.fillRect(-r * 0.15, -r * 1.2, r * 0.12, r * 0.6);
+    }
+    if (s.state === "stranded") {   // 被困求救标记（抵消船体旋转保持竖直）
+      ctx.rotate(-s.ang);
+      ctx.fillStyle = "#e74c3c";
+      ctx.font = `bold ${Math.max(9, s * 1.4)}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillText("!", 0, -r * 1.9);
+    }
     ctx.restore();
+    if (s.state === "fishing") {   // 捕捞涟漪（不随船旋转）
+      ctx.strokeStyle = "rgba(240,240,220,0.6)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(px, py, r * (1.6 + Math.sin(s.x * 7 + s.y * 3) * 0.4), 0, 7);
+      ctx.stroke();
+    }
   }
 
   // 小人：头 + 身两段式 + 深色描边，任何底色上一眼可辨

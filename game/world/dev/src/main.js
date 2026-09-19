@@ -25,6 +25,7 @@
     canvas.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     camTween = null;
+    followMode = false; syncFollowBtn();   // 用户拖动视角即退出跟随
     if (pointers.size === 1) {
       dragging = true; lastMX = e.clientX; lastMY = e.clientY;
       downX = e.clientX; downY = e.clientY; downT = performance.now();
@@ -110,7 +111,7 @@
     speed = v;
     for (const k in speedBtns) speedBtns[k].classList.toggle("active", +k === v);
   }
-  ["pause", "s1", "s2", "s4", "s100", "s1000"].forEach(id => {
+  ["pause", "s1", "s2", "s10", "s100", "s1000"].forEach(id => {
     const b = document.getElementById(id);
     if (!b) return;
     speedBtns[b.dataset.v] = b;
@@ -120,7 +121,7 @@
     if (e.code === "Space") { e.preventDefault(); setSpeed(speed === 0 ? 1 : 0); }
     if (e.key === "1") setSpeed(1);
     if (e.key === "2") setSpeed(2);
-    if (e.key === "3") setSpeed(4);
+    if (e.key === "3") setSpeed(10);
     if (e.key === "4") setSpeed(100);
     if (e.key === "5") setSpeed(1000);
   });
@@ -162,6 +163,8 @@
   // 步进上限按速度分档：1000× 允许每帧千步（帧率下降换取模拟吞吐），同时截断积压防螺旋
   const STEP = 1 / 30;
   let acc = 0, lastT = performance.now();
+  let simStepsAcc = 0, rateCd = 0, rateVal = 0;   // 实际速率统计（sim 秒/真实秒，0.5s 刷新）
+  let renderFlip = false;                         // 高倍速隔帧渲染标记
   let lastPhase = "day";
   // 视觉昼夜时钟：与模拟逻辑分离——速度 ≤10× 时与模拟时间一致，超过后封顶 10×（明暗不随加速飙升）
   let visualTod = 0.3;
@@ -173,9 +176,21 @@
     acc += realDt * speed;
     // 步进上限按速度分档：1000× 允许每帧千步（帧率下降换取模拟吞吐），同时截断积压防螺旋
     const maxSteps = speed > 100 ? 1200 : speed > 10 ? 240 : 12;
+    // 帧预算制：每帧模拟最多消耗 ~6ms CPU（每 16 步查一次表），超预算即停、丢弃剩余积压——
+    // 高倍速语义变为"尽力而为"（HUD 显示实际速率），换取帧率锁定与机身不持续满载
     let n = 0;
-    while (acc >= STEP && n < maxSteps) { simUpdate(STEP); acc -= STEP; n++; }
+    if (speed > 0) {
+      const t0 = performance.now();
+      while (acc >= STEP && n < maxSteps) {
+        simUpdate(STEP);
+        acc -= STEP; n++;
+        if ((n & 15) === 0 && performance.now() - t0 > 6) break;
+      }
+    }
+    if (n === 0 && acc >= STEP) { simUpdate(STEP); acc -= STEP; }   // 保底：预算恒超的环境（stub 时钟）也要走时间
     if (acc > STEP * maxSteps) acc = STEP * maxSteps;
+    simStepsAcc += n;
+    SCHED.decideBudget = speed > 10 ? 20 : Infinity;   // 高倍速下决策轮询（见 agent.thinkCd）
 
     // 视觉昼夜：增速封顶 10×
     visualTod = (visualTod + realDt * Math.min(speed, 10) / SIM.DAY_LEN) % 1;
@@ -198,7 +213,19 @@
       if (camTween.t >= 1) camTween = null;
     }
 
-    drawScene(ctx, CW, CH, selectedAgent, selectedCreature, visualTod, waveT);
+    // 跟随视角：相机平滑锁定选中对象（camTween 飞行期间让位，落地后接管）
+    if (followMode && !camTween) {
+      const t = selectedAgent || selectedCreature;
+      if (t) {
+        const k = 1 - Math.exp(-6 * realDt);   // 指数平滑追踪，约 0.5s 收敛到视野中心
+        camera.x += (t.x - camera.x) * k;
+        camera.y += (t.y - camera.y) * k;
+      }
+    }
+
+    // 高倍速下渲染隔帧（模拟照跑）：GPU/合成减半，视觉在 100×+ 快进中无可感知差异
+    renderFlip = !renderFlip;
+    if (speed <= 100 || renderFlip) drawScene(ctx, CW, CH, selectedAgent, selectedCreature, visualTod, waveT);
     updateHud(realDt);
     updateInfoPanel(realDt);
     updateRoster(realDt);
@@ -211,6 +238,7 @@
     pop: el("stat-pop"), food: el("stat-food"), houses: el("stat-houses"),
     date: el("stat-date"), clock: el("stat-clock"), logs: el("logs"),
     build: el("build-id"), era: el("stat-era"),
+    rate: el("stat-rate"), rateBox: el("rate-box"),
   };
   let lastLogLen = -1, hudCd = 0;
 
@@ -218,6 +246,18 @@
     hudCd -= dt;
     if (hudCd > 0) return;
     hudCd = 0.25;
+
+    // 实际速率：高倍速帧预算制下显示真实模拟速率（sim 秒/真实秒）
+    rateCd -= 0.25;
+    if (rateCd <= 0) {
+      rateCd = 0.5;
+      rateVal = Math.round(simStepsAcc * STEP / 0.5);
+      simStepsAcc = 0;
+    }
+    if (hud.rate && hud.rateBox) {
+      hud.rateBox.style.display = speed > 10 ? "" : "none";
+      hud.rate.textContent = rateVal + "×";
+    }
 
     hud.pop.textContent = agents.length;
     hud.food.textContent = Math.floor(world.food);
@@ -244,12 +284,35 @@
   const infoPanel = el("info-panel"), infoBody = el("info-body"), infoClose = el("info-close");
   let selectedAgent = null;
   let selectedCreature = null;
+  let followMode = false;   // 视角跟随：相机平滑锁定选中生物
   let infoCd = 0;   // 跟随面板内容刷新节流
 
     infoClose.addEventListener("click", () => {
     selectedAgent = null;
     selectedCreature = null;
+    followMode = false;
     infoPanel.classList.add("hidden");
+  });
+
+  // 跟随视角开关（信息框上的按钮 / 快捷键 F）
+  const followBtn = el("follow-btn");
+  function syncFollowBtn() {
+    if (!followBtn) return;
+    followBtn.textContent = followMode ? "停止跟随" : "跟随视角";
+    followBtn.classList.toggle("active", followMode);
+    followBtn.style.display = (selectedAgent || selectedCreature) ? "" : "none";
+  }
+  if (followBtn) {
+    followBtn.addEventListener("click", () => {
+      followMode = !followMode && !!(selectedAgent || selectedCreature);
+      sfx.play("click");
+      syncFollowBtn();
+    });
+  }
+  window.addEventListener("keydown", e => {
+    if (e.key === "f" || e.key === "F") {
+      if (selectedAgent || selectedCreature) { followMode = !followMode; syncFollowBtn(); }
+    }
   });
 
   const screenToTile = (cx, cy) => {
@@ -260,8 +323,8 @@
     };
   };
 
-  const TASK_CN = { BUILD: "建造房屋", FARM: "开垦农田", DIG: "开山伐林", FILL: "填海造陆", BRIDGE: "架桥", GATHER: "采集", FISH: "捕鱼", HUNT: "狩猎", CAPTURE: "捕获", PASTURE: "建造牧场", PLANT: "植树" };
-  const STATE_CN = { walk: "赶路中", eat: "进食", sleep: "酣睡", work: "干活", idle: "闲逛" };
+  const TASK_CN = { BUILD: "建造房屋", FARM: "开垦农田", DIG: "开山伐林", FILL: "填海造陆", BRIDGE: "架桥", GATHER: "采集", FISH: "捕鱼", HUNT: "狩猎", CAPTURE: "捕获", PASTURE: "建造牧场", PLANT: "植树", EXCAV: "挖塘" };
+  const STATE_CN = { walk: "赶路中", eat: "进食", sleep: "酣睡", work: "干活", idle: "闲逛", voyage: "航海中" };
   const SETTLE_CN = ["定居点", "村庄", "城镇", "城市"];
 
   // ---- 信息档位命名 ----
@@ -407,9 +470,10 @@
 
   // 每帧：跟随选中的生物（小人优先）+ 定期刷新内容（对话框贴近头顶）
   function updateInfoPanel(realDt) {
+    const target = selectedAgent || selectedCreature;
     if (selectedAgent) {
       const a = selectedAgent;
-      if (a.dead) { infoPanel.classList.add("hidden"); selectedAgent = null; return; }
+      if (a.dead) { infoPanel.classList.add("hidden"); selectedAgent = null; followMode = false; syncFollowBtn(); return; }
       const s = TILE_PX * camera.zoom;
       const px = CW / 2 + (a.x - camera.x) * s;
       const py = CH / 2 + (a.y - camera.y) * s;
@@ -421,7 +485,7 @@
     }
     if (selectedCreature) {
       const c = selectedCreature;
-      if (c.dead) { infoPanel.classList.add("hidden"); selectedCreature = null; return; }
+      if (c.dead) { infoPanel.classList.add("hidden"); selectedCreature = null; followMode = false; syncFollowBtn(); return; }
       const s = TILE_PX * camera.zoom;
       const px = CW / 2 + (c.x - camera.x) * s;
       const py = CH / 2 + (c.y - camera.y) * s;

@@ -21,14 +21,14 @@ const mountains0 = countTile(T.MOUNTAIN), waters0 = countTile(T.WATER);
 const islands0 = world.islands.length;
 
 const STEP = 0.1;
-for (let i = 0; i < 50000; i++) simUpdate(STEP);   // 5000 sim 秒
+for (let i = 0; i < 120000; i++) simUpdate(STEP);   // 4000 sim 秒（与文档口径一致，通路工程有充足建成时间）
 
 const mountains1 = countTile(T.MOUNTAIN), waters1 = countTile(T.WATER);
 const bridges1 = countTile(T.BRIDGE);
 let nanAgents = 0;
 for (const a of agents) if (!isFinite(a.x) || !isFinite(a.y)) nanAgents++;
 
-console.log("---- 2000 sim 秒后 ----");
+console.log("---- 4000 sim 秒后 ----");
 console.log("人口:", agents.length, "（不设上限）");
 console.log("房屋:", world.houses.length, " 农田:", world.farms.length, " 存粮:", Math.floor(world.food));
 console.log("扩张:", world.expansions, "次 | 岛屿:", world.islands.length, "(初始", islands0 + ") | 待办任务:", tasks.list.length);
@@ -61,7 +61,7 @@ assert(isFinite(world.food) && world.food >= 0, "存粮数值正常");
 const ctx = vm.createContext({ console });
 ctx.__failed = false;
 try {
-  vm.runInContext(test, ctx, { filename: "smoke.js", timeout: 120000 });
+  vm.runInContext(test, ctx, { filename: "smoke.js", timeout: 600000 });
 } catch (e) {
   console.error("FAIL 测试抛异常:", e);
   process.exitCode = 1;

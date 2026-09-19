@@ -111,6 +111,12 @@
     color: #6b7688; cursor: pointer; font-size: 15px; padding: 0;
   }
   #info-close:hover { color: #fff; }
+  #follow-btn {
+    position: absolute; top: 2px; right: 24px; background: #161c2a; border: 1px solid #2a3448;
+    color: #8f9ab0; border-radius: 3px; font-size: 10px; padding: 1px 6px; cursor: pointer;
+  }
+  #follow-btn:hover { color: #fff; border-color: #4a5f8a; }
+  #follow-btn.active { background: #2c3a58; color: #e8d9a0; border-color: #4a5f8a; }
 </style>
 </head>
 <body>
@@ -122,7 +128,8 @@
   <span class="stat"><span class="lab">存粮</span><b id="stat-food">0</b></span>
   <span class="stat"><span class="lab">房屋</span><b id="stat-houses">0</b></span>
   <span class="stat"><span class="lab">历法</span><b id="stat-date">1年1月</b><b id="stat-clock">--:--</b></span>
-  <span class="stat"><span class="lab">时代</span><b id="stat-era">蛮荒时代</b></span>
+      <span class="stat"><span class="lab">时代</span><b id="stat-era">蛮荒时代</b></span>
+      <span class="stat" id="rate-box" style="display:none"><span class="lab">实际速率</span><b id="stat-rate">--</b></span>
   <span id="build-id"></span>
   <div id="right-ctl">
     <div id="zoom-ctl">
@@ -135,7 +142,7 @@
       <button id="pause" data-v="0">⏸ 暂停</button>
       <button id="s1" data-v="1" class="active">1×</button>
       <button id="s2" data-v="2">2×</button>
-      <button id="s4" data-v="4">4×</button>
+      <button id="s10" data-v="10">10×</button>
       <button id="s100" data-v="100">100×</button>
       <button id="s1000" data-v="1000">1000×</button>
       <button id="sfx-toggle">音效:开</button>
@@ -157,6 +164,7 @@
 
 <div id="info-panel" class="hidden">
   <button id="info-close">×</button>
+  <button id="follow-btn">跟随视角</button>
   <div id="info-body"></div>
 </div>
 

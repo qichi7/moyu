@@ -60,7 +60,7 @@ const SIM = {
   PLANNER_INTERVAL: 4,  // 规划器每 4 sim 秒跑一次
   AGENT_SPEED: 1.7,     // tile/秒 基准
   HUNGER_DECAY: 1.1,    // hunger 每秒下降
-  ENERGY_DECAY: 0.9,    // 醒着时 energy 每秒下降
+  ENERGY_DECAY: 0.6,    // 醒着时 energy 每秒下降（0.9 时 100 能量只够往返 95 格，扩张区任务必过劳死）
   ENERGY_REGEN: 9,      // 睡觉时每秒恢复
   WORK_EFFORT: 1.3,     // 每个工人每秒任务进度
   FARM_MATURITY: 55,    // 农田成熟秒数
@@ -82,14 +82,28 @@ const SIM = {
   PASTURE_YIELD: 2,     // 每次产粮
   PASTURE_CAP: 6,       // 单牧场圈养上限
   BREED_CHANCE: 0.1,    // 繁殖概率（每 120 秒判定）
-  WILD_BREED_CAP: 60,   // 野生动物总量上限
+  WILD_BREED_CAP: 60,   // 野生可猎动物总量上限
+  TURTLE_CAP: 12,       // 海龟总量上限
+  WHALE_CAP: 5,         // 鲸总量上限
+  ANIMAL_STRAND_DEATH: 90,  // 动物被困（脚下不再是栖息地）坚持时长（秒），超时死亡
   // ---- 航海 ----
   SHIP_COST: 10,        // 造一艘远航船耗木材（联合库存）
   SHIP_SPEED: 3,        // 船速（格/秒）
   SHIP_MAX_DIST: 220,   // 单次远航最大航程
+  SHIP_PROVISION_RATE: 0.15,  // 船只补给消耗（粮/秒）——船速 3 格/s 即每格 0.05 粮
+  SHIP_PROVISION_LOAD: 40,    // 出航满载补给（粮）——满载续航 267s ≈ 800 格，正常往返富余
+  SHIP_RESCUE_RESUPPLY: 25,   // 救援船送达的补给量（粮）——最远被困点返航需 11 粮，足够
+  BOAT_COST: 4,               // 小渔船耗木材（联合库存）——远低于远航船
+  FISHING_BOAT_CAP: 2,        // 同时在海的渔船数上限
+  BOAT_HOLD_CAP: 20,          // 渔船满舱载鱼量（粮）
+  BOAT_FISH_YIELD: 2,         // 渔船每次起网渔获
+  FISHING_INTERVAL: 10,       // 渔船起网周期（秒）
   // ---- 历法与年龄 ----
   YEAR_DAYS: 12,        // 1 昼夜 = 1 个月，12 昼夜 = 1 年（1 岁）
 };
+
+// 高倍速模拟调度：decide 每帧预算（main.js 按倍速写入，agent 消费；headless 测试默认不限）
+const SCHED = { decideBudget: Infinity };
 
 // 物种寿命与年龄分档（岁）：幼年 < s0、青年 < s1、中年 < s2、老年 ≥ s2；超过 lifespan 封顶
 const SPECIES_AGE = {
@@ -97,6 +111,13 @@ const SPECIES_AGE = {
   cow:   { name: "牛",   lifespan: 15, stages: [2, 8, 12] },
   goat:  { name: "羊",   lifespan: 12, stages: [2, 6, 9] },
   dog:   { name: "狗",   lifespan: 10, stages: [2, 5, 8] },
+  deer:  { name: "鹿",   lifespan: 12, stages: [2, 5, 8] },
+  boar:  { name: "野猪", lifespan: 10, stages: [2, 5, 7] },
+  wolf:  { name: "狼",   lifespan: 10, stages: [2, 5, 7] },
+  fish:  { name: "鱼群", lifespan: 5,  stages: [1, 2, 3] },
+  turtle:{ name: "海龟", lifespan: 30, stages: [5, 15, 22] },
+  whale: { name: "鲸",   lifespan: 50, stages: [10, 25, 38] },
+  bird:  { name: "鸟",   lifespan: 6,  stages: [1, 3, 4] },
 };
 
 // 时代划分：按已达到的最高聚落等级 / 人口里程碑
@@ -362,6 +383,9 @@ function collectDiscoveries(x0, y0, x1, y1) {
 // reveal=false（视口生成/重算）：无陆地影响 → 虚空（首生成）或保持原值（重算不黑回）
 // reveal=true （居民点亮）：无陆地影响 → litTest 判定通过则点亮为深海，否则保留
 // 返回本次新注册的发现岛列表（调用方负责对其周边做虚空重算）
+let _grElev = new Float32Array(0);   // generateRegion 复用缓冲（海拔场）
+let _grFirst = new Uint8Array(0);    // generateRegion 复用缓冲（陆地候选标记）
+
 function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
   const N = world.noise;
   const ex0 = Math.floor(x0 / CHUNK) * CHUNK;
@@ -377,8 +401,10 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
     if (d.x + d.r + 9 >= ex0 && d.x - d.r - 9 <= ex1 && d.y + d.r + 9 >= ey0 && d.y - d.r - 9 <= ey1) relevant.push(d);
   }
   const w = ex1 - ex0 + 1, h = ey1 - ey0 + 1;
-  const elev = new Float32Array(w * h);    // 海拔场：悬崖判定与地势渲染共用
-  const firstPass = new Uint8Array(w * h); // 1 = 陆地候选
+  // 缓冲复用：elev/firstPass 模块级按需扩容（高频点亮时消除每次分配的 GC 压力）
+  const need = w * h;
+  if (_grElev.length < need) { _grElev = new Float32Array(need); _grFirst = new Uint8Array(need); }
+  const elev = _grElev, firstPass = _grFirst;
   for (let y = ey0; y <= ey1; y++) {
     for (let x = ex0; x <= ex1; x++) {
       const c = ensureChunk(x >> 5, y >> 5);
@@ -386,7 +412,7 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
       c.gen = true;
       const i = cIdx(x, y);
       const li = (y - ey0) * w + (x - ex0);
-      if (!relevant.length) { settleFarTile(c, i, x, y, reveal, litTest, wasGen); continue; }
+      if (!relevant.length) { settleFarTile(c, i, x, y, reveal, litTest, wasGen); elev[li] = -1; continue; }
       let bump = 0, inInfluence = false;
       for (const o of relevant) {
         const d = Math.hypot(x - o.x, y - o.y);
@@ -402,10 +428,18 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
       elev[li] = e;
       firstPass[li] = 1;
       let t;
-      if (e < 0.28) t = T.DEEP;
+      if (e < 0.28) {
+        t = T.DEEP;
+        // 深海鲸：概率极低，同格防重（区域重算不重复生成）
+        if (hash2(x + 441, y + 819) < 0.008 && !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "whale");
+      }
       else if (e < 0.38) {
         t = T.WATER;
-        if (hash2(x + 555, y + 777) < 0.02) world.fishStock.set(x + "," + y, 3);   // 浅海鱼群
+        if (hash2(x + 555, y + 777) < 0.02) {
+          world.fishStock.set(x + "," + y, 3);
+          if (!creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "fish");
+        }
+        else if (hash2(x + 613, y + 209) < 0.005 && !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "turtle");
       }
       else if (e < 0.42) t = T.SAND;
       else if (e > 0.68) {
@@ -452,12 +486,45 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
 }
 
 // 远航船：航海家坐船出海开拓地图——沿途点亮大片虚空，遇陆地靠岸（命名/定居化自然触发）
-const ships = [];
+// 统一引用 world.ships（此前模块级 const ships 与 world.ships 割裂：玩家船冻结原地/救援船对渲染隐形）
 
+// 补给归零的被困判定：船停航呼救，等待救援船（水手需求冻结由 agent.state==="voyage" 覆盖）
 function shipTick(dt) {
+  const ships = world.ships;
+  tickFishingBoats(dt);   // 渔船独立状态机（fishing/fishingReturn），与远航船共用实体表
+  // 被困呼救：为每艘被困船派一艘救援船（粮池足够才出发，不足则等待并提示）
+  for (const s of ships) {
+    if (s.state !== "stranded" || s.rescueQueued) continue;
+    if (ships.some(r => r.state === "rescue" && r.target === s)) { s.rescueQueued = true; continue; }
+    const d = Math.hypot(s.x - world.store.x, s.y - world.store.y);
+    const need = Math.ceil(d * SIM.SHIP_PROVISION_RATE * 1.3 + SIM.SHIP_RESCUE_RESUPPLY);
+    if (world.food < need) { logThrottled("粮草不足，救援船队在码头待命……", 60); continue; }
+    world.food -= need;
+    ships.push({
+      x: world.store.x + 0.5, y: world.store.y + 0.5,
+      ang: Math.atan2(s.y - world.store.y, s.x - world.store.x),
+      sailor: null, state: "rescue", target: s,
+      prov: d * SIM.SHIP_PROVISION_RATE * 1.3, dist: 0, revealCd: 0,
+    });
+    s.rescueQueued = true;
+    logMsg("救援船满载粮草出港，前去营救被困的航海家。");
+  }
   for (const s of ships) {
     if (s.state !== "sailing") continue;
     s.ang += (rand() - 0.5) * 0.25;   // 轻微偏航，航线自然弯曲
+    // 补给消耗与预留：余量不足以返航即调头（无特殊情况时永远预留足够回程物资）
+    s.prov -= SIM.SHIP_PROVISION_RATE * dt;
+    const dHome = Math.hypot(world.store.x - s.x, world.store.y - s.y);
+    if (s.prov <= 0) {
+      s.state = "stranded";
+      if (s.sailor) logMsg(`航海家 ${s.sailor.name} 的船补给耗尽，被困海上，发出求救信号！`);
+      continue;
+    }
+    if (s.prov < dHome * SIM.SHIP_PROVISION_RATE * 1.3) {
+      s.state = "return";
+      if (s.sailor) logMsg(`航海家 ${s.sailor.name} 的船补给仅够回程，调头返航。`);
+      continue;
+    }
     const nx = s.x + Math.cos(s.ang) * SIM.SHIP_SPEED * dt;
     const ny = s.y + Math.sin(s.ang) * SIM.SHIP_SPEED * dt;
     // 航行沿途大面积点亮虚空（航海开拓的核心价值）
@@ -467,14 +534,19 @@ function shipTick(dt) {
     const ahead = tileAt(aheadX, aheadY);
     if (ahead !== T.VOID && ahead !== T.DEEP && ahead !== T.WATER) {
       // 发现陆地：靠岸下船（登岛命名/定居化由小人自身逻辑触发）
-      s.state = "docked";
-      s.dockedAt = world.time;
       const sailor = s.sailor;
       const shore = [{ x: aheadX, y: aheadY }, ...neighborsOf(aheadX, aheadY)].find(p => walkable(p.x, p.y));
       if (shore && sailor) {
+        s.state = "docked";
+        s.dockedAt = world.time;
         sailor.x = shore.x + 0.5; sailor.y = shore.y + 0.5;
         sailor.state = "idle"; sailor.voyaging = false;
         logMsg(`航海家 ${sailor.name} 的船靠岸了，新的土地已在眼前。`);
+      } else if (sailor) {
+        // 撞岸点无立足之地：大幅转向绕行，防止原地反复撞击（水手不硬着陆）
+        s.ang += (rand() < 0.5 ? 1 : -1) * Math.PI / 3;
+      } else {
+        s.state = "docked"; s.dockedAt = world.time;   // 无水手船照常停靠
       }
       continue;
     }
@@ -487,6 +559,12 @@ function shipTick(dt) {
     if (s.state !== "return") continue;
     const dx = world.store.x - s.x, dy = world.store.y - s.y;
     const d = Math.hypot(dx, dy) || 1;
+    s.prov -= SIM.SHIP_PROVISION_RATE * dt;
+    if (s.prov <= 0) {
+      s.state = "stranded";
+      if (s.sailor) logMsg(`航海家 ${s.sailor.name} 的船在归途中补给耗尽，被困海上，发出求救信号！`);
+      continue;
+    }
     const nx = s.x + (dx / d) * SIM.SHIP_SPEED * dt, ny = s.y + (dy / d) * SIM.SHIP_SPEED * dt;
     s.revealCd -= dt;
     if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 10); }
@@ -499,9 +577,115 @@ function shipTick(dt) {
     s.x = nx; s.y = ny;
     if (s.sailor) { s.sailor.x = s.x; s.sailor.y = s.y; }
   }
+  for (const s of ships) {
+    if (s.state !== "rescue") continue;
+    const t = s.target;
+    // 目标已自行脱困或消失 → 转入返航
+    if (!t || t.state !== "stranded") { s.state = "return"; continue; }
+    // 救援船补给可耗尽：营救使命优先，不设返航预留（路线偏离的余量已计入装载）
+    s.prov -= SIM.SHIP_PROVISION_RATE * dt;
+    const dx = t.x - s.x, dy = t.y - s.y;
+    const d = Math.hypot(dx, dy) || 1;
+    if (d < 2.5) {
+      // 会合：送达补给，两船各自返航
+      t.prov += SIM.SHIP_RESCUE_RESUPPLY;
+      t.state = "return"; t.rescueQueued = false;
+      s.state = "return";
+      if (t.sailor) logMsg(`救援船与航海家 ${t.sailor.name} 的船会合，粮草已送达，船队踏上归途。`);
+      continue;
+    }
+    // 朝目标平滑转向；前方近处是陆地则侧向绕行
+    const ax = Math.round(s.x + Math.cos(s.ang) * 3), ay = Math.round(s.y + Math.sin(s.ang) * 3);
+    const aheadT = tileAt(ax, ay);
+    if (aheadT !== T.VOID && aheadT !== T.DEEP && aheadT !== T.WATER) {
+      s.ang += (hash2(Math.round(s.x), Math.round(s.y)) < 0.5 ? 1 : -1) * 1.8 * dt;
+    } else {
+      let diff = Math.atan2(Math.sin(Math.atan2(dy, dx) - s.ang), Math.cos(Math.atan2(dy, dx) - s.ang));
+      s.ang += diff * Math.min(1, dt * 2);
+    }
+    s.x += Math.cos(s.ang) * SIM.SHIP_SPEED * dt;
+    s.y += Math.sin(s.ang) * SIM.SHIP_SPEED * dt;
+  }
   // 长期停靠的船清理（远航需另造新船）
   for (let i = ships.length - 1; i >= 0; i--) {
     if (ships[i].state === "docked" && world.time - ships[i].dockedAt > 600) ships.splice(i, 1);
+  }
+}
+
+// 渔船：近海捕捞（渔民驾船到鱼点起网，满舱或鱼点枯竭即返航卸货；渔民同为人类单位，贴边点亮）
+function tickFishingBoats(dt) {
+  const ships = world.ships;
+  for (const s of ships) {
+    if (s.state !== "fishing") continue;
+    s.revealCd -= dt;
+    if (s.revealCd <= 0) {
+      s.revealCd = 2;
+      const cx = Math.round(s.x), cy = Math.round(s.y);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (tileAt(cx + dx, cy + dy) === T.VOID) { revealArea(cx + dx * 2, cy + dy * 2, 6); break; }
+      }
+    }
+    // 无目标 / 满舱 → 返航
+    if (!s.target || s.hold >= SIM.BOAT_HOLD_CAP) {
+      if (s.hold > 0 && s.hold >= SIM.BOAT_HOLD_CAP && s.sailor) logMsg(`${s.sailor.name} 的渔船满载而归。`);
+      s.state = "fishingReturn";
+      continue;
+    }
+    const fk = Math.round(s.target.x - 0.5) + "," + Math.round(s.target.y - 0.5);
+    if ((world.fishStock.get(fk) || 0) <= 0) {
+      // 鱼点枯竭：换下一个近海鱼点，无鱼可捕则空舱返航
+      const next = pickFishingSpot({ x: s.x, y: s.y });
+      if (next) { s.target = next; }
+      else {
+        s.state = "fishingReturn";
+        if (s.sailor) logMsg(`${s.sailor.name} 发现近海鱼群稀少，转舵回港。`);
+        continue;
+      }
+    }
+    const dx = s.target.x - s.x, dy = s.target.y - s.y;
+    const d = Math.hypot(dx, dy) || 1;
+    if (d > 1.2) {
+      // 朝鱼点航行；前方近处是陆地则侧向绕行
+      const ax = Math.round(s.x + Math.cos(s.ang) * 3), ay = Math.round(s.y + Math.sin(s.ang) * 3);
+      const aheadT = tileAt(ax, ay);
+      if (aheadT !== T.VOID && aheadT !== T.DEEP && aheadT !== T.WATER) {
+        s.ang += (hash2(Math.round(s.x), Math.round(s.y)) < 0.5 ? 1 : -1) * 1.8 * dt;
+      } else {
+        const want = Math.atan2(dy, dx);
+        s.ang += Math.atan2(Math.sin(want - s.ang), Math.cos(want - s.ang)) * Math.min(1, dt * 2);
+      }
+      s.x += Math.cos(s.ang) * SIM.SHIP_SPEED * dt;
+      s.y += Math.sin(s.ang) * SIM.SHIP_SPEED * dt;
+    } else {
+      // 到点起网：扣鱼群资源，渔获入舱
+      s.fishCd -= dt;
+      if (s.fishCd <= 0) {
+        s.fishCd = SIM.FISHING_INTERVAL;
+        catchFish(Math.round(s.target.x - 0.5), Math.round(s.target.y - 0.5));
+        s.hold += SIM.BOAT_FISH_YIELD;
+      }
+    }
+    if (s.sailor) { s.sailor.x = s.x; s.sailor.y = s.y; }
+  }
+  for (const s of ships) {
+    if (s.state !== "fishingReturn") continue;
+    const dx = world.store.x - s.x, dy = world.store.y - s.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const nx = s.x + (dx / d) * SIM.SHIP_SPEED * dt, ny = s.y + (dy / d) * SIM.SHIP_SPEED * dt;
+    const aheadT = tileAt(Math.round(nx), Math.round(ny));
+    if (walkable(Math.round(nx), Math.round(ny)) && aheadT !== T.WATER && aheadT !== T.DEEP) {
+      // 靠岸卸货：渔获就地入粮池，渔民下船休整（渔船停靠码头，由常规清理回收）
+      s.state = "docked"; s.dockedAt = world.time;
+      if (s.sailor) {
+        s.sailor.x = nx; s.sailor.y = ny;
+        s.sailor.state = "idle"; s.sailor.voyaging = false;
+        if (s.hold > 0) { world.food += s.hold; logMsg(`渔船回港，${s.hold} 粮渔获入库。`); s.hold = 0; }
+        s.sailor.boatRestT = world.time + 30;   // 渔民休整后才再出港
+      }
+      continue;
+    }
+    s.x = nx; s.y = ny;
+    if (s.sailor) { s.sailor.x = s.x; s.sailor.y = s.y; }
   }
 }
 
@@ -583,22 +767,14 @@ function revealArea(cx, cy, r) {
   };
   const pad = Math.ceil(pr + wob + 9);
   const discovered = generateRegion(cx - pad, cy - pad, cx + pad, cy + pad, false, true, litTest);
-  // 发现岛整体显现（不受斑块限制），周边虚空改造成岛缘海
+  // 发现岛显现：点亮范围 = 探索斑块 ∪ 岛缘海圆（r+9）——无矩形 bounding 痕迹
   for (const isl of discovered) {
+    const ir = Math.ceil(isl.r) + 9;
+    const islTest = (x, y) => Math.hypot(x - isl.x, y - isl.y) <= ir;
+    const combined = (x, y) => litTest(x, y) || islTest(x, y);
     generateRegion(
-      Math.floor(isl.x - isl.r - 10), Math.floor(isl.y - isl.r - 10),
-      Math.ceil(isl.x + isl.r + 10), Math.ceil(isl.y + isl.r + 10), true, true
-    );
-  }
-}
-
-// 居民探索点亮：把目标区域的虚空显形（生成海 + 随机发现岛），并重算新发现岛周边
-function revealArea(cx, cy, r) {
-  const d = generateRegion(cx - r, cy - r, cx + r, cy + r, false, true);
-  for (const isl of d) {
-    generateRegion(
-      Math.floor(isl.x - isl.r - 10), Math.floor(isl.y - isl.r - 10),
-      Math.ceil(isl.x + isl.r + 10), Math.ceil(isl.y + isl.r + 10), true, true
+      Math.floor(isl.x - ir - 2), Math.floor(isl.y - ir - 2),
+      Math.ceil(isl.x + ir + 2), Math.ceil(isl.y + ir + 2), true, true, combined
     );
   }
 }
@@ -655,6 +831,7 @@ function processExplore(budget) {
 // ---- 初始生成：主岛在原点，5 座无人岛环布四周 ----
 function genWorld(seed) {
   world.noise = makeNoise(seed || 1);
+  _jsCache.t = -1;   // 新世界：联合库存缓存失效
   world.chunks = new Map();
   world.islands = [];
   world.settlements = [];
@@ -671,7 +848,8 @@ function genWorld(seed) {
   world.sandpits = [];
 
   world.islands.push({ x: 0, y: 0, r: 14, claimed: true });
-  for (let i = 0; i < 5; i++) {
+  const islN = 2 + randInt(0, 4);   // 初始 2~6 座无人岛（总岛数 3~7 随机）
+  for (let i = 0; i < islN; i++) {
     const a = (i / 5) * Math.PI * 2 + rand() * 0.6;
     const d = 28 + rand() * 8;
     world.islands.push({
@@ -709,7 +887,7 @@ function pickName(main) {
 
 // 在 (cx,cy) 附近 [rMin,rMax] 范围随机找一个 want 类型、周围干净的格子
 function findSpot(cx, cy, rMin, rMax, want, around) {
-  for (let i = 0; i < 300; i++) {
+  for (let i = 0; i < 150; i++) {
     const a = rand() * Math.PI * 2;
     const r = rMin + rand() * (rMax - rMin);
     const x = Math.round(cx + Math.cos(a) * r);
@@ -717,6 +895,24 @@ function findSpot(cx, cy, rMin, rMax, want, around) {
     if (tileAt(x, y) !== want) continue;
     if (nearAny(x, y, around || [T.HOUSE, T.FARM, T.SITE], 2)) continue;
     return { x, y };
+  }
+  return null;
+}
+
+// 设施聚簇：从基准设施 ref 逐圈向外（确定性，紧贴扩展）找 want 类型格
+// 房屋传 rMin=2（房间留 1 格走道），农田传 rMin=1（田可紧贴连片）；跨聚落天然不聚集（逐圈局部性）
+// exclude: 已规划占位（"x,y" 集合），同批多栋外扩时防撞位；want=GRASS 天然不与建筑/工地叠格，无需 around 排除
+function expandSpot(ref, rMin, maxR, want, exclude) {
+  for (let r = rMin; r <= maxR; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;   // 只扫当前圈
+        const x = ref.x + dx, y = ref.y + dy;
+        if (exclude && exclude.has(x + "," + y)) continue;
+        if (tileAt(x, y) !== want) continue;
+        return { x, y };
+      }
+    }
   }
   return null;
 }
@@ -812,13 +1008,25 @@ function expand() {
   } else {
     logMsg(`渡海开辟${d.name}，先民登岛勘察。`);
   }
+  // 新区预置：房与田围绕本区粮仓聚簇成村（确定性外扩 + 占位防撞；田链式锚定前一块，连片生长）
+  const planned = new Set();
+  if (g) planned.add(g.x + "," + g.y);
   for (let i = 0; i < 3; i++) {
-    const s = findSpot(nx, ny, 3, 13, T.GRASS);
-    if (s) tasksAdd({ type: "BUILD", x: s.x, y: s.y });
+    const s = (g && expandSpot(g, 2, 8, T.GRASS, planned)) || findSpot(nx, ny, 3, 13, T.GRASS);
+    if (s) {
+      tasksAdd({ type: "BUILD", x: s.x, y: s.y });
+      planned.add(s.x + "," + s.y);
+    }
   }
+  let lastFarm = null;
   for (let i = 0; i < 2; i++) {
-    const s = findSpot(nx, ny, 3, 13, T.GRASS);
-    if (s) tasksAdd({ type: "FARM", x: s.x, y: s.y });
+    const refF = lastFarm || g;
+    const s = (refF && expandSpot(refF, 1, 8, T.GRASS, planned)) || findSpot(nx, ny, 3, 13, T.GRASS);
+    if (s) {
+      tasksAdd({ type: "FARM", x: s.x, y: s.y });
+      planned.add(s.x + "," + s.y);
+      lastFarm = s;
+    }
   }
 
 
@@ -859,6 +1067,18 @@ function catchFish(x, y) {
   return true;
 }
 
+// 选一个离锚点最近的仍有鱼的近海鱼点（渔船目标）
+function pickFishingSpot(near) {
+  let best = null, bd = 1e9;
+  for (const [k, v] of world.fishStock) {
+    if (v <= 0) continue;
+    const [x, y] = k.split(",").map(Number);
+    const d = Math.abs(x - near.x) + Math.abs(y - near.y);
+    if (d < bd) { bd = d; best = { x: x + 0.5, y: y + 0.5 }; }
+  }
+  return best;
+}
+
 // 距离 (x,y) 最近的聚落（资源产出/消耗的归属方）
 function nearestSettlement(x, y) {
   let best = null, bd = 1e9;
@@ -876,10 +1096,22 @@ function ensureStock(s) {
 }
 
 // 联合库存：国家级工程（架桥/造陆）跨聚落汇总与扣费
+// 缓存：每 sim 秒刷新一次快照（tasksTake 等高频调用共享），扣减后强制失效
+let _jsCache = { t: -1, wood: 0, stone: 0, sand: 0 };
 function jointStock(res) {
-  return world.settlements.reduce((sum, s) => sum + (s.stock ? s.stock[res] || 0 : 0), 0);
+  const sec = world.time | 0;
+  if (_jsCache.t !== sec) {
+    _jsCache = { t: sec };
+    for (const r of ["wood", "stone", "sand"]) {
+      _jsCache[r] = world.settlements.reduce((sum, s) => sum + (s.stock ? s.stock[r] || 0 : 0), 0);
+    }
+  }
+  return _jsCache[res] || 0;
 }
+// 外部直接修改 settlement.stock 后调用（缓存以 sim 秒为桶，步进外的写入不会自动失效）
+function jointStockDirty() { _jsCache.t = -1; }
 function jointConsume(res, n) {
+  _jsCache.t = -1;   // 扣减后失效缓存
   for (const s of world.settlements) {
     const st = ensureStock(s);
     const take = Math.min(st[res] || 0, n);
@@ -905,8 +1137,9 @@ function workTile(task, amount) {
   if (c.hp[i] <= 0) c.hp[i] = hpMax;
   c.hp[i] -= amount;
   if (c.hp[i] <= 0) {
+    const was = t;   // 改造前 tile：tasksFinish 依赖它判产出（完工后 setTile 已改写，不能重读）
     setTile(x, y, target);
-    return true;
+    return { done: true, was };
   }
   return false;
 }
@@ -920,7 +1153,7 @@ const tasks = {
   list: [],
 };
 
-const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 4, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3, FILL: 10 };
+const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 4, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3, FILL: 10, EXCAV: 8 };
 // 工程资源消耗：架桥耗木材、造陆耗沙土（完工时从最近聚落库存扣除）
 const TASK_RESOURCE_COST = { BRIDGE: { wood: 1 }, FILL: { sand: 1 } };
 
@@ -939,12 +1172,13 @@ function tasksPending(type, excludeFrozen) {
   return tasks.list.filter(t => (!type || t.type === type) && !t.done && (!excludeFrozen || (t.blockedCount || 0) < 3));
 }
 
-// 任务 → 职业偏好映射（DIG 按 res 区分伐木/采石）
+// 任务 → 职业偏好映射（DIG 按 res 区分伐木/采石；CAPTURE 鱼群归渔民、牲畜归猎人）
 function taskJobPref(t) {
   switch (t.type) {
     case "FARM": return "FARM";
-    case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT": return "BUILD";
-    case "HUNT": case "CAPTURE": return "HUNT";
+    case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT": case "EXCAV": return "BUILD";
+    case "CAPTURE": return t.creature && t.creature.type === "fish" ? "FISH" : "HUNT";
+    case "HUNT": return "HUNT";
     case "FISH": return "FISH";
     case "DIG": return t.res === "stone" ? "DIG_STONE" : "DIG_WOOD";
     default: return null;
@@ -971,7 +1205,9 @@ function tasksTake(agent) {
     const d = Math.abs(t.x - ax) + Math.abs(t.y - ay);
     const jobMatch = myJob && taskJobPref(t) === myJob ? 1 : 0;
     const age = world.time - (t.born || world.time);   // 任务老化：立项越久越优先，远任务不饿死
-    const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000 - age * 3;
+    // 资源危机升权：联合木材枯竭时伐木任务急速提级（否则桥/船工程全饿死）
+    const crisis = (t.type === "DIG" && t.res === "wood") ? Math.max(0, 8 - jointStock("wood")) * 200 : 0;
+    const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000 - age * 3 - crisis;
     if (score < bestScore) { bestScore = score; best = t; }
   }
   return best;
@@ -981,7 +1217,7 @@ function tasksRelease(t, agent) {
   if (t) t.workers.delete(agent);
 }
 
-function tasksFinish(t) {
+function tasksFinish(t, agent, was) {
   t.done = true;
   // 同任务的其他工人：引用清空 + 状态复位（否则他们对已完成任务继续施工——卡死/重复结算）
   for (const w of t.workers) {
@@ -1016,9 +1252,8 @@ function tasksFinish(t) {
       break;
     }
     case "DIG": {
-      const was = tileAt(t.x, t.y);
       setTile(t.x, t.y, T.GRASS);
-      // 产出由工人搬运回仓：伐木得木材、采石得石材
+      // 产出由工人搬运回仓：伐木得木材、采石得石材（was 由 workTile 传入——完工后 tile 已改写，不能重读）
       if (was === T.TREE) return { res: "wood", amount: 6 };
       if (was === T.MOUNTAIN) return { res: "stone", amount: 7 };
       break;
@@ -1027,6 +1262,15 @@ function tasksFinish(t) {
       const s = nearestSettlement(t.x, t.y);
       if (s) ensureStock(s).sand += 2;   // 挖海泥回填，就地结算
       setTile(t.x, t.y, T.SAND);
+      // 该格原有鱼群被填：移除鱼群实体与库存
+      const fk = t.x + "," + t.y;
+      if (world.fishStock.has(fk)) {
+        world.fishStock.delete(fk);
+        for (let i = creatures.length - 1; i >= 0; i--) {
+          const c = creatures[i];
+          if (c.type === "fish" && Math.hypot(c.x - t.x - 0.5, c.y - t.y - 0.5) < 1.5) creatures.splice(i, 1);
+        }
+      }
       break;
     }
     case "BRIDGE": {
@@ -1104,19 +1348,26 @@ function tasksFinish(t) {
       logMsg(`码头建成，航海家们开始筹划远航。`);
       break;
     }
-    case "DOCK": {
-      setTile(t.x, t.y, T.DOCK);
-      world.docks.push({ x: t.x, y: t.y });
-      logMsg(`码头建成，航海家们开始筹划远航。`);
+    case "EXCAV": {
+      // 挖塘：陆格挖成水（灌溉/养鱼的人工水域）
+      setTile(t.x, t.y, T.WATER);
+      logThrottled("居民挖出了新的水塘，水波在塘里荡开。", 30);
       break;
     }
     case "CAPTURE": {
-      // 捕获：把野生牲畜安置进牧场
+      // 捕获：把野生牲畜安置进牧场；鱼群圈进水域渔场（t.dest 指定时运往该处圈养，否则原地）
       const c = t.creature;
       if (c && !c.dead && c.isWild()) {
-        c.pasture = { x: t.pasture.x, y: t.pasture.y };
-        c.x = t.pasture.x + 0.5; c.y = t.pasture.y + 0.5;
-        logThrottled("牧民把新的牲畜赶进了牧场。", 25);
+        const dest = t.dest || t.pasture;
+        c.pasture = { x: dest.x, y: dest.y };
+        c.x = dest.x + 0.5; c.y = dest.y + 0.5;
+        if (c.type === "fish") {
+          world.fishStock.delete(dest.x + "," + dest.y);   // 圈养后走渔场产出，不再作野生钓点
+          world.fishStock.delete(t.pasture.x + "," + t.pasture.y);
+          logThrottled(t.dest ? "渔人把鱼苗挑到了新挖的水塘里放养。" : "渔人把鱼群圈进了水上渔场，渔场将定期供给鲜鱼。", 25);
+        } else {
+          logThrottled("牧民把新的牲畜赶进了牧场。", 25);
+        }
       }
       break;
     }
@@ -1130,10 +1381,29 @@ function tasksFinish(t) {
 // 狗：聚落伙伴，跟随最近的小人，主人狩猎时在旁助阵（围堵猎物）
 
 const CREATURE_META = {
-  cow:  { name: "牛",  yield: 8, speed: 0.55, flee: 1.1, size: 1.0 },
-  goat: { name: "羊",  yield: 5, speed: 0.7,  flee: 1.25, size: 0.8 },
-  dog:  { name: "狗",  yield: 0, speed: 2.2,  flee: 0,   size: 0.55 },
+  cow:   { name: "牛",   yield: 8, speed: 0.55, flee: 1.1,  size: 1.0,  habitat: "grass",  hunt: true },
+  goat:  { name: "羊",   yield: 5, speed: 0.7,  flee: 1.25, size: 0.8,  habitat: "grass",  hunt: true },
+  deer:  { name: "鹿",   yield: 4, speed: 1.3,  flee: 1.7,  size: 0.85, habitat: "grass",  hunt: true },
+  boar:  { name: "野猪", yield: 6, speed: 0.9,  flee: 1.0,  size: 0.9,  habitat: "forest", hunt: true },
+  dog:   { name: "狗",   yield: 0, speed: 2.2,  flee: 0,    size: 0.55, habitat: "grass",  hunt: false },
+  wolf:  { name: "狼",   yield: 0, speed: 1.2,  flee: 0,    size: 0.7,  habitat: "forest", hunt: false, predates: "goat" },
+  fish:  { name: "鱼群", yield: 0, speed: 0.8,  flee: 0,    size: 0.5,  habitat: "water",  hunt: false, school: 4 },
+  turtle:{ name: "海龟", yield: 0, speed: 0.25, flee: 0,    size: 0.6,  habitat: "water",  hunt: false },
+  whale: { name: "鲸",   yield: 0, speed: 0.6,  flee: 0,    size: 2.6,  habitat: "deep",   hunt: false },
+  bird:  { name: "鸟",   yield: 0, speed: 2.5,  flee: 0,    size: 0.3,  habitat: "air",    hunt: false },
 };
+
+// 栖息地判定：生物只在自己的栖息地内活动
+function habitatOk(c, x, y) {
+  const t = tileAt(x, y);
+  switch (CREATURE_META[c.type].habitat) {
+    case "water":  return t === T.WATER;
+    case "deep":   return t === T.DEEP || t === T.WATER;
+    case "forest": return t === T.GRASS || t === T.TREE;
+    case "air":    return true;   // 鸟在天上飞，不受地形限制
+    default:       return t === T.GRASS || t === T.SAND;
+  }
+}
 
 const creatures = [];
 
@@ -1145,55 +1415,135 @@ class Creature {
     this.x = x + 0.5; this.y = y + 0.5;
     this.speed = meta.speed;
     this.dead = false;
-    this.age = randRange(spAge.stages[1], spAge.stages[2]);   // 初始青年~中年
+    this.age = spAge ? randRange(spAge.stages[1], spAge.stages[2]) : 1;   // 初始青年~中年（无寿命表物种兜底）
     this.pasture = null;      // {x,y} 圈养位置（null = 野生）
     this.moveCd = randRange(0, 2);
     this.breedCd = 120;
     this.outputCd = SIM.PASTURE_INTERVAL;
   }
 
-  isWild() { return !this.pasture && this.type !== "dog"; }
+  isWild() { return !this.pasture && this.type !== "dog" && this.type !== "bird"; }
 
   update(dt) {
     if (this.dead) return;
-    // 年龄：1 游戏年长 1 岁，寿命封顶
+    // 被人搬运：坐标跟随搬运者，跳过一切自主行为（搬运者死亡则掉落原地）
+    if (this.carriedBy) {
+      if (this.carriedBy.dead) { this.carriedBy = null; return; }
+      this.x = this.carriedBy.x - 0.4; this.y = this.carriedBy.y - 0.4;
+      return;
+    }
+    // 年龄：1 游戏年长 1 岁，寿命封顶（无寿命表的物种不老化）
     const spAge = SPECIES_AGE[this.type];
-    this.age = Math.min(spAge.lifespan, this.age + dt / (SIM.DAY_LEN * SIM.YEAR_DAYS));
+    if (spAge) this.age = Math.min(spAge.lifespan, this.age + dt / (SIM.DAY_LEN * SIM.YEAR_DAYS));
+    // 老死：寿命耗尽后平均 3 天内自然离世（概率衰减避免同龄瞬灭）
+    if (spAge && this.age >= spAge.lifespan && rand() < dt / (SIM.DAY_LEN * 3)) {
+      this.dead = true;
+      logMsg(`一只年迈的${CREATURE_META[this.type].name}寿终正寝。`);
+      return;
+    }
+    // 搁浅/被困：施工（填海/造陆）改变地形后脚下不再是栖息地，困太久会死，等待有人救援
+    // （圈养动物在人类管理的牧场里，脚下是 PASTURE tile，不参与搁浅判定）
+    if (this.type !== "bird" && !this.pasture && !habitatOk(this, Math.round(this.x), Math.round(this.y))) {
+      this.strandT = (this.strandT || 0) + dt;
+      if (this.strandT > SIM.ANIMAL_STRAND_DEATH) {
+        this.dead = true;
+        logMsg(this.type === "whale"
+          ? "搁浅的鲸在滩涂上停止了呼吸。"
+          : `一只${CREATURE_META[this.type].name}被困在陌生的地形里，没能撑下去。`);
+        return;
+      }
+      return;   // 被困时无法移动（移动路径本就被 habitatOk 挡住），原地等待
+    }
+    this.strandT = 0;
     if (this.pasture) { this.updatePasture(dt); return; }
     if (this.type === "dog") { this.updateDog(dt); return; }
+    if (this.type === "bird") { this.updateBird(dt); return; }
+    if (this.type === "wolf") { this.updateWolf(dt); return; }
     this.updateWild(dt);
   }
 
-  // 野生：游荡；有猎人逼近则远离（附近有狗则逃跑变慢——被围堵）
+  // 野生：游荡（栖息地内）；可猎物种会被猎人逼近而逃离（附近有狗则被围堵减速）
   updateWild(dt) {
-    // 逃跑判定
-    let threat = null, threatD = 2.8;
-    for (const a of agents) {
-      const d = Math.hypot(a.x - this.x, a.y - this.y);
-      if (d < threatD) { threatD = d; threat = a; }
+    const meta = CREATURE_META[this.type];
+    // 逃跑判定：只对可猎物种生效
+    if (meta.hunt) {
+      let threat = null, threatD = 2.8;
+      for (const a of agents) {
+        const d = Math.hypot(a.x - this.x, a.y - this.y);
+        if (d < threatD) { threatD = d; threat = a; }
+      }
+      let dogNear = false;
+      for (const c of creatures) {
+        if (c.type === "dog" && !c.dead && Math.hypot(c.x - this.x, c.y - this.y) < 4) { dogNear = true; break; }
+      }
+      if (threat) {
+        this.fleeT = (this.fleeT || 0) + dt;
+        const tired = this.fleeT > 8 ? 0.4 : 1;
+        const sp = (dogNear ? 0.55 : meta.flee) * tired * dt;
+        const dx = this.x - threat.x, dy = this.y - threat.y;
+        const d = Math.hypot(dx, dy) || 1;
+        this.moveBy((dx / d) * sp, (dy / d) * sp);
+        return;
+      }
+      this.fleeT = 0;
     }
-    let dogNear = false;
-    for (const c of creatures) {
-      if (c.type === "dog" && !c.dead && Math.hypot(c.x - this.x, c.y - this.y) < 4) { dogNear = true; break; }
-    }
-    if (threat) {
-      // 逃跑疲劳：被追 8 秒后精疲力尽，速度大减（保证猎手追得上）
-      this.fleeT = (this.fleeT || 0) + dt;
-      const tired = this.fleeT > 8 ? 0.4 : 1;
-      const sp = (dogNear ? 0.55 : CREATURE_META[this.type].flee) * tired * dt;
-      const dx = this.x - threat.x, dy = this.y - threat.y;
-      const d = Math.hypot(dx, dy) || 1;
-      this.moveBy((dx / d) * sp, (dy / d) * sp);
-      return;
-    }
-    this.fleeT = 0;
-    // 游荡
+    // 游荡：栖息地内随机走
     this.moveCd -= dt;
     if (this.moveCd <= 0) {
       this.moveCd = 2 + rand() * 3;
       const a = rand() * Math.PI * 2;
-      const nx = Math.round(this.x + Math.cos(a) * 2), ny = Math.round(this.y + Math.sin(a) * 2);
-      if (walkable(nx, ny)) this.target = { x: nx + 0.5, y: ny + 0.5 };
+      const dist = meta.habitat === "deep" || meta.habitat === "air" ? 4 : 2;
+      const nx = Math.round(this.x + Math.cos(a) * dist), ny = Math.round(this.y + Math.sin(a) * dist);
+      if (habitatOk(this, nx, ny)) this.target = { x: nx + 0.5, y: ny + 0.5 };
+    }
+    if (this.target) {
+      const dx = this.target.x - this.x, dy = this.target.y - this.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const sp = meta.speed * dt;
+      const nx = this.x + (dx / d) * sp, ny = this.y + (dy / d) * sp;
+      if (habitatOk(this, Math.round(nx), Math.round(ny))) { this.x = nx; this.y = ny; }
+      if (d <= sp) this.target = null;
+    }
+  }
+
+  // 狼：捕食野生羊（自然生态——靠近羊群停留数秒后羊消失），不主动攻击人
+  updateWolf(dt) {
+    this.moveCd -= dt;
+    const prey = creatures.find(c => !c.dead && c.type === "goat" && c.isWild() &&
+      Math.hypot(c.x - this.x, c.y - this.y) < 4);
+    if (prey) {
+      this.preyT = (this.preyT || 0) + dt;
+      if (this.preyT > 4) {
+        prey.dead = true;
+        this.preyT = 0;
+        logThrottled("林间传来狼嚎——有野羊成了狼群的晚餐。", 60);
+      }
+      return;
+    }
+    this.preyT = 0;
+    if (this.moveCd <= 0) {
+      this.moveCd = 2 + rand() * 3;
+      const a = rand() * Math.PI * 2;
+      const nx = Math.round(this.x + Math.cos(a) * 3), ny = Math.round(this.y + Math.sin(a) * 3);
+      if (habitatOk(this, nx, ny)) this.target = { x: nx + 0.5, y: ny + 0.5 };
+    }
+    if (this.target) {
+      const dx = this.target.x - this.x, dy = this.target.y - this.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const sp = CREATURE_META[this.type].speed * dt;
+      const nx = this.x + (dx / d) * sp, ny = this.y + (dy / d) * sp;
+      if (habitatOk(this, Math.round(nx), Math.round(ny))) { this.x = nx; this.y = ny; }
+      if (d <= sp) this.target = null;
+    }
+  }
+
+  // 鸟：空中缓慢漂移（纯装饰，不受地形限制）
+  updateBird(dt) {
+    this.moveCd -= dt;
+    if (this.moveCd <= 0) {
+      this.moveCd = 3 + rand() * 3;
+      const a = rand() * Math.PI * 2;
+      this.target = { x: this.x + Math.cos(a) * 8, y: this.y + Math.sin(a) * 8 };
     }
     if (this.target) this.stepToward(this.target, this.speed * dt);
   }
@@ -1233,14 +1583,18 @@ class Creature {
     if (d > 4) this.stepToward(this.owner, this.speed * dt);
   }
 
-  // 圈养：在栏内小范围活动，定期产粮 + 繁殖
+  // 圈养：在栏内小范围活动，定期产粮 + 繁殖（水生物种圈养于水域渔场，游荡判定走栖息地）
   updatePasture(dt) {
+    const waterBound = CREATURE_META[this.type].habitat === "water" || CREATURE_META[this.type].habitat === "deep";
     this.moveCd -= dt;
     if (this.moveCd <= 0) {
       this.moveCd = 1.5 + rand() * 2;
       const a = rand() * Math.PI * 2;
       const tx = this.pasture.x + 0.5 + Math.cos(a) * 2.5, ty = this.pasture.y + 0.5 + Math.sin(a) * 2.5;
-      if (walkable(Math.round(tx), Math.round(ty))) this.target = { x: tx, y: ty };
+      const ok = waterBound
+        ? habitatOk(this, Math.round(tx), Math.round(ty))
+        : walkable(Math.round(tx), Math.round(ty));
+      if (ok) this.target = { x: tx, y: ty };
     }
     if (this.target) this.stepToward(this.target, this.speed * dt);
 
@@ -1269,7 +1623,7 @@ class Creature {
 
   moveBy(mx, my) {
     const nx = this.x + mx, ny = this.y + my;
-    if (walkable(Math.round(nx), Math.round(ny))) { this.x = nx; this.y = ny; }
+    if (habitatOk(this, Math.round(nx), Math.round(ny))) { this.x = nx; this.y = ny; }
     else this.target = null;
   }
 }
@@ -1282,14 +1636,19 @@ function spawnCreature(x, y, type, captured) {
   return c;
 }
 
-// 在一座岛上散布兽群（按草地面积，牛羊混编）
+// 在一座岛上散布生物：牲畜兽群 + 野生鹿/野猪/狼 + 海龟（按栖息地落位）
 function populateIslandCreatures(bx, by, r) {
-  let grass = 0;
-  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++)
-    if (tileAt(bx + dx, by + dy) === T.GRASS) grass++;
-  if (grass < 12) return 0;
-  const herds = 1 + Math.floor(grass / 60);
+  let grass = 0, forestEdge = 0, water = 0;
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    const t = tileAt(bx + dx, by + dy);
+    if (t === T.GRASS) grass++;
+    if (t === T.TREE) forestEdge++;
+    if (t === T.WATER) water++;
+  }
   let n = 0;
+  if (grass < 12) return 0;
+  // 牲畜兽群
+  const herds = 1 + Math.floor(grass / 60);
   for (let h = 0; h < herds; h++) {
     const type = rand() < 0.5 ? "cow" : "goat";
     const cnt = type === "cow" ? 3 + randInt(0, 3) : 4 + randInt(0, 4);
@@ -1299,17 +1658,71 @@ function populateIslandCreatures(bx, by, r) {
       if (s) { spawnCreature(s.x, s.y, type); n++; }
     }
   }
+  // 野生鹿群（草地）
+  const deerCnt = 2 + randInt(0, 3);
+  for (let i = 0; i < deerCnt; i++) {
+    const s = findSpot(bx, by, 3, r, T.GRASS);
+    if (s) { spawnCreature(s.x, s.y, "deer"); n++; }
+  }
+  // 野猪与狼（林地边缘）
+  if (forestEdge > 6) {
+    for (let i = 0; i < 2 + randInt(0, 2); i++) {
+      const s = findSpot(bx, by, 2, r, T.GRASS, [T.BERRY, T.FRUIT]);
+      if (s) { spawnCreature(s.x, s.y, "boar"); n++; }
+    }
+    if (rand() < 0.5) {
+      const s = findSpot(bx, by, 2, r, T.GRASS);
+      if (s) { spawnCreature(s.x, s.y, "wolf"); n++; }
+    }
+  }
+  // 海龟（浅水）
+  for (let i = 0; i < 2 && water > 8; i++) {
+    for (let tries = 0; tries < 40; tries++) {
+      const cx = bx + randInt(-r, r), cy = by + randInt(-r, r);
+      if (tileAt(cx, cy) === T.WATER) { spawnCreature(cx, cy, "turtle"); n++; break; }
+    }
+  }
   return n;
 }
 
-// 野生总量自然增长（防止猎绝；有上限）
+// 野生总量自然增长（防止猎绝；分栖息地设上限）
 function wildBreedTick() {
   if (world.time % 120 > 1) return;
-  const wild = creatures.filter(c => c.isWild() && !c.dead);
-  if (wild.length >= SIM.WILD_BREED_CAP || wild.length < 4) return;
-  const c = wild[randInt(0, wild.length - 1)];
-  const p = findSpot(Math.round(c.x), Math.round(c.y), 0, 3, T.GRASS);
-  if (p) spawnCreature(p.x, p.y, c.type);
+  // 陆生：可猎物种 + 狼（捕食者种群也需延续，与羊群构成生态闭环）
+  const land = creatures.filter(c => c.isWild() && !c.dead && (CREATURE_META[c.type].hunt || c.type === "wolf"));
+  if (land.length < SIM.WILD_BREED_CAP && land.length >= 4) {
+    const c = land[randInt(0, land.length - 1)];
+    const p = findSpot(Math.round(c.x), Math.round(c.y), 0, 3, T.GRASS) ||
+              (c.type === "wolf" ? findSpot(Math.round(c.x), Math.round(c.y), 0, 5, T.TREE) : null);   // 森林深处的狼可在林地繁衍
+    if (p) spawnCreature(p.x, p.y, c.type);
+  }
+  // 海龟（浅水繁殖）
+  const turtles = creatures.filter(c => c.isWild() && !c.dead && c.type === "turtle");
+  if (turtles.length > 0 && turtles.length < SIM.TURTLE_CAP) {
+    const t0 = turtles[randInt(0, turtles.length - 1)];
+    const ps = findSpot(Math.round(t0.x), Math.round(t0.y), 0, 5, T.WATER);
+    if (ps) spawnCreature(ps.x, ps.y, "turtle");
+  }
+  // 鲸（深海繁殖）
+  const whales = creatures.filter(c => !c.dead && c.type === "whale");
+  if (whales.length > 0 && whales.length < SIM.WHALE_CAP) {
+    const w0 = whales[randInt(0, whales.length - 1)];
+    const pw = findSpot(Math.round(w0.x), Math.round(w0.y), 0, 8, T.DEEP);
+    if (pw) spawnCreature(pw.x, pw.y, "whale");
+  }
+}
+// 鲸：深海罕见生物（航海氛围），随深海探索偶现
+function spawnWhaleOccasionally() {
+  if (world.time % 240 > 1) return;
+  if (creatures.filter(c => c.type === "whale" && !c.dead).length >= SIM.WHALE_CAP) return;
+  for (let tries = 0; tries < 60; tries++) {
+    const x = Math.round(world.store.x + randRange(-160, 160));
+    const y = Math.round(world.store.y + randRange(-160, 160));
+    if (tileAt(x, y) === T.DEEP && !creatures.some(c => !c.dead && Math.hypot(c.x - x, c.y - y) < 40)) {
+      spawnCreature(x, y, "whale");
+      return;
+    }
+  }
 }
 
 // 狩猎收益
@@ -1402,6 +1815,19 @@ class Agent {
     // 航海中：一切需求冻结（船上有补给），坐标由船携带
     if (this.state === "voyage") return;
 
+    // 被动点亮：所有人类单位走到已点亮区边缘时，顺手点亮眼前的虚空（探索不只属于探险家）
+    this.litCd = (this.litCd || 0) - dt;
+    if (this.litCd <= 0) {
+      this.litCd = 2.5;
+      const px = Math.round(this.x), py = Math.round(this.y);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (tileAt(px + dx, py + dy) === T.VOID) {
+          revealArea(px + dx * 2, py + dy * 2, 4);
+          break;
+        }
+      }
+    }
+
     // ---- 登岛命名：第一个踏上未知岛屿的人为它取名，并就地升格为定居点 ----
     this.islandCheckCd = (this.islandCheckCd || 0) - dt;
     if (this.islandCheckCd <= 0) {
@@ -1422,13 +1848,19 @@ class Agent {
                 setTile(sc.x, sc.y, T.HOUSE);
                 world.houses.push({ x: sc.x, y: sc.y, granary: true });
                 world.settlements.push({ x: sc.x, y: sc.y, name: o.name, level: 0, stock: { wood: 15, stone: 5, sand: 10 } });
+                // 房与田围绕粮仓聚簇成村（确定性外扩 + 占位防撞；田链式锚定前一块，连片生长）
+                const planned = new Set([sc.x + "," + sc.y]);
                 for (let i = 0; i < 3; i++) {
-                  const b = findSpot(sc.x, sc.y, 2, Math.max(6, o.r * 0.8), T.GRASS);
-                  if (b) tasksAdd({ type: "BUILD", x: b.x, y: b.y, need: 10 });
+                  const b = expandSpot(sc, 2, Math.max(8, o.r * 0.8), T.GRASS, planned) ||
+                            findSpot(sc.x, sc.y, 2, Math.max(6, o.r * 0.8), T.GRASS);
+                  if (b) { tasksAdd({ type: "BUILD", x: b.x, y: b.y, need: 10 }); planned.add(b.x + "," + b.y); }
                 }
+                let lastFarm = null;
                 for (let i = 0; i < 2; i++) {
-                  const f = findSpot(sc.x, sc.y, 3, Math.max(8, o.r), T.GRASS, [T.HOUSE, T.SITE]);
-                  if (f) tasksAdd({ type: "FARM", x: f.x, y: f.y, need: 9 });
+                  const refF = lastFarm || sc;
+                  const f = expandSpot(refF, 1, Math.max(8, o.r), T.GRASS, planned) ||
+                            findSpot(sc.x, sc.y, 3, Math.max(8, o.r), T.GRASS, [T.HOUSE, T.SITE]);
+                  if (f) { tasksAdd({ type: "FARM", x: f.x, y: f.y, need: 9 }); planned.add(f.x + "," + f.y); lastFarm = f; }
                 }
                 logMsg(`「${o.name}」升格为定居点，先民渡海建设，粮仓落成。`);
                 emit("expand");
@@ -1491,7 +1923,13 @@ class Agent {
     else this.starveT = 0;
     if (this.starveT > 40) { this.starveT = 0; this.migrate(); }
 
-    if (this.thinkCd <= 0) { this.thinkCd = 0.4 + rand() * 0.3; this.decide(); }
+    // 决策：thinkCd 门控 + 高倍速下的全局轮询预算（SCHED.decideBudget 由 main.js 按倍速设定，
+    // headless 测试默认 Infinity 不受影响）——未轮到时稍后重试，保证决策频率与倍速解耦
+    if (this.thinkCd <= 0) {
+      this.thinkCd = 0.4 + rand() * 0.3;
+      if (SCHED.decideBudget > 0) { SCHED.decideBudget--; this.decide(); }
+      else this.thinkCd = 0.05;
+    }
 
     switch (this.state) {
       case "walk": this.stepAlong(dt); break;
@@ -1529,10 +1967,32 @@ class Agent {
         return;
       }
     }
+    // 2.8 救助被困动物：施工改变地形后，搁浅的动物需要有人送回栖息地（紧急事项，优先于领任务；喜爱牲畜者更积极）
+    if (!this.task && !this.voyaging) {
+      const victim = creatures.find(c => !c.dead && !c.carriedBy && !c.rescuer &&
+        (c.strandT || 0) > 3 && c.type !== "bird" && c.type !== "fish" &&
+        (!c.noRescueT || world.time > c.noRescueT));   // 曾接近失败：冷却 60s 后可重试（地形可能已改变）
+      if (victim && rand() < (this.hobby === "animal" ? 0.5 : 0.15)) {
+        if (this.goTo(victim.x, victim.y)) {
+          victim.rescuer = this;
+          this.rescuing = victim;
+          this.state = "walk";
+          this.onArrive = () => this.pickupAnimal(victim);
+          return;
+        }
+        victim.noRescueT = world.time + 60;   // 暂时无法接近：冷却重试，不永久放弃
+      }
+    }
+
     // 3. 领任务干活
     if (!this.task) {
+      // 保险：手上有产出先就地登记入库（否则领新任务 → 旧产出被下次完工覆盖而蒸发）
+      if (this.carrying) this.deposit();
       const t = tasksTake(this);
       if (t) {
+        // 劳动保护：路程耗能（ENERGY_DECAY 0.9/s ÷ 船速 1.7 格/s 往返）预估不足 → 先睡觉，防止远途过劳死
+        const d = Math.abs(t.x - this.x) + Math.abs(t.y - this.y);
+        if (this.energy < Math.min(95, 18 + d * 0.75)) { this.goSleep(); return; }
         this.task = t;
         t.workers.add(this);
         if (this.goTo(t.x, t.y)) {
@@ -1573,11 +2033,46 @@ class Agent {
       }
     }
 
+    // 3.95 专职探索者：前沿螺旋探索——找到最近「陆地与虚空接壤」的前沿格前往大面积点亮；
+    //      局部扫不到前沿（或前沿被水隔开）时倾向出海（航海回退，点亮新海域后前沿自然出现）
+    if (this.job === "explorer" && !this.task && !this.voyaging && this.energy > 30 && this.hunger > 40) {
+      // 前沿扫描节流：每 2 sim 秒一次，期间复用缓存（deide 高频不重复扫屏）
+      if (world.time - (this.frontScanT || -9) > 2) {
+        this.frontScanT = world.time;
+        this.frontCache = findFrontier(Math.round(this.x), Math.round(this.y), 40);
+      }
+      const front = this.frontCache;
+      if (front) {
+        if (this.goTo(front.x, front.y)) {
+          this.state = "walk";
+          this.onArrive = () => {
+            this.state = "idle";
+            // 到达前沿：大面积点亮（斑块推进边界），随后由被动点亮与下次前沿扫描接力
+            if (tileAt(front.x, front.y) !== T.VOID) {
+              revealArea(front.x, front.y, 8 + Math.round(this.adventure * 4));
+            }
+          };
+          return;
+        }
+        this.frontCache = null;   // 前沿被水隔开不可达：清缓存，转出海判定
+      }
+      if (!front && world.docks.length && rand() < 0.5) {
+        const dock = world.docks.reduce((b, d) =>
+          !b || Math.abs(d.x - this.x) + Math.abs(d.y - this.y) < Math.abs(b.x - this.x) + Math.abs(b.y - this.y) ? d : b, null);
+        if (dock && this.goTo(dock.x, dock.y)) {
+          this.state = "walk";
+          this.onArrive = () => this.startVoyage(dock);
+          return;
+        }
+      }
+    }
+
     // 4. 探索欲：高探索欲的居民会主动向未知远方进发（点亮虚空、发现新岛）
     if (!this.task) {
       if (this.exploring) {
-        // 探索旅程进行中：精力/饥饿尚可且腿数未满 → 继续向外延伸
-        if (this.energy > 30 && this.hunger > 40 && this.exploreLegs < 2 + this.adventure * 4) {
+        // 探索旅程进行中：精力/饥饿尚可且腿数未满 → 继续向外延伸（专职探索者不受腿数限制）
+        if (this.energy > 30 && this.hunger > 40 &&
+            this.exploreLegs < (this.job === "explorer" ? Infinity : 2 + this.adventure * 4)) {
           this.exploreLegs++;
           this.exploreLeg();
           return;
@@ -1628,29 +2123,113 @@ class Agent {
     }
   }
 
-  // 死亡结算：释放任务与住房，通知世界（背包里的产出随之散失）
+  // 死亡结算：释放任务与住房，通知世界（背包产出就地登记——拓荒者的遗物不白白散失）
   die(reason) {
     if (this.dead) return;
     this.dead = true;
     if (this.task) { tasksRelease(this.task, this); this.task = null; }
+    if (this.rescuing) { this.rescuing.rescuer = null; this.rescuing = null; }   // 释放被困动物的认领锁
+    if (this.carrying) { this.deposit(); this.carrying = null; }   // 遗产：产出就地入库
     this.home = null;
     logMsg(`${this.name} ${reason}，享年 ${Math.floor(this.age)} 岁。`);
     emit("agent-death", this);
   }
 
-  // 出海远航：造船消耗联合木材，登船后航向未知海域（船逻辑见 world.shipTick）
+  // 抱起搁浅动物：找最近的可达栖息地（水生物种由岸边送回水中），动身前往
+  pickupAnimal(c) {
+    if (c.dead || c.rescuer !== this) { this.rescuing = null; return; }
+    const want = c.type === "whale" ? T.DEEP : (CREATURE_META[c.type].habitat === "water" ? T.WATER : T.GRASS);
+    // 栖息格 + 小人可站立的岸边格配对（水格本身不可通行，从岸边把动物送下水）
+    let spot = null, stand = null;
+    for (let i = 0; i < 6 && !spot; i++) {
+      const s = findSpot(Math.round(this.x), Math.round(this.y), 2, 30, want);
+      if (!s) break;
+      if (want === T.GRASS) { spot = s; stand = s; break; }   // 陆生直接走到放归点
+      const sh = neighborsOf(s.x, s.y).find(p => walkable(p.x, p.y));
+      if (sh) { spot = s; stand = sh; }
+    }
+    if (!spot) { c.rescuer = null; this.rescuing = null; return; }   // 附近找不到栖息地：放弃
+    c.carriedBy = this;
+    c.strandT = 0;
+    if (!this.goTo(stand.x, stand.y)) {
+      // 岸边不可达：就地放下（尽力了，动物回到原状态）
+      c.carriedBy = null; c.rescuer = null; this.rescuing = null;
+      return;
+    }
+    this.state = "walk";
+    this.onArrive = () => this.releaseAnimal(c, spot);
+  }
+
+  // 到达放归点：动物回到栖息地，恢复自由
+  releaseAnimal(c, spot) {
+    c.carriedBy = null;
+    if (!c.dead) {
+      c.x = spot.x + 0.5; c.y = spot.y + 0.5;
+      c.strandT = 0; c.target = null;
+      logMsg(`${this.name} 把被困的${CREATURE_META[c.type].name}送回了安全的栖息地。`);
+    }
+    c.rescuer = null;
+    this.rescuing = null;
+    this.state = "idle";
+  }
+
+  // 驾小渔船出海捕鱼：造船耗少量联合木材，近海鱼点起网，满舱返航卸货（船逻辑见 shipTick 渔船分支）
+  startFishingTrip(dock) {
+    if (this.voyaging || this.state === "voyage") return false;   // 已在海上的人不能再出海
+    const water = neighborsOf(dock.x, dock.y).find(p => tileAt(p.x, p.y) === T.WATER);
+    if (!water) { logThrottled("码头旁没有足够的水域停渔船。", 40); return; }
+    // 木材安全余量：留 12 木给通路工程（桥/填海优先于渔船，防止工程被造船饿死）
+    if (jointStock("wood") < SIM.BOAT_COST + 12) {
+      logThrottled("木材不足，无力打造渔船。", 40);
+      return;
+    }
+    jointConsume("wood", SIM.BOAT_COST);
+    world.ships.push({
+      x: water.x + 0.5, y: water.y + 0.5,
+      ang: rand() * Math.PI * 2, sailor: this, state: "fishing",
+      boat: true, hold: 0, fishCd: 0, target: pickFishingSpot(dock), revealCd: 0, dist: 0,
+    });
+    this.state = "voyage";
+    this.voyaging = true;
+    this.task = null;
+    logMsg(`${this.name} 驾着小渔船出海捕鱼了。`);
+    return true;
+  }
+
+  // 出海远航：造船消耗联合木材，装载粮草做补给，登船后航向未知海域（船逻辑见 world.shipTick）
   startVoyage(dock) {
-    if (jointStock("wood") < SIM.SHIP_COST) {
+    const water = neighborsOf(dock.x, dock.y).find(p => tileAt(p.x, p.y) === T.WATER);
+    if (!water) { logThrottled("码头旁没有足够的水域停船。", 40); return; }
+    // 先探明码头周边水域（点亮生成真实地形，避免朝向落入"VOID 生成后变陆地"的陷阱）
+    revealArea(water.x, water.y, 9);
+    // 初始朝向：均匀扫描 24 个方位角找前方 3 格开阔的方向（确定性，地理允许即必命中）
+    let ang = -1;
+    for (let k = 0; k < 24; k++) {
+      const tAng = (k / 24) * Math.PI * 2 + rand() * 0.15;
+      let open = true;
+      for (let d = 1.5; d <= 3; d += 0.5) {
+        const t = tileAt(Math.round(water.x + Math.cos(tAng) * d), Math.round(water.y + Math.sin(tAng) * d));
+        if (t !== T.VOID && t !== T.DEEP && t !== T.WATER) { open = false; break; }
+      }
+      if (open) { ang = tAng; break; }
+    }
+    if (ang < 0) { logThrottled("码头周边水路不畅，远航船无法出港。", 40); return; }
+    // 同样留木材安全余量给通路工程
+    if (jointStock("wood") < SIM.SHIP_COST + 12) {
       logThrottled("木材不足，无法造船远航。", 40);
       return;
     }
     jointConsume("wood", SIM.SHIP_COST);
-    const water = neighborsOf(dock.x, dock.y).find(p => tileAt(p.x, p.y) === T.WATER);
-    if (!water) { logThrottled("码头旁没有足够的水域停船。", 40); return; }
+    // 装载补给（粮食）：有多少装多少，不满也出海——补给耗尽会被困海上，只能呼救
+    const load = Math.min(SIM.SHIP_PROVISION_LOAD, Math.floor(world.food));
+    if (load < SIM.SHIP_PROVISION_LOAD) {
+      logMsg(`${this.name} 的船粮草不满（${load}/${SIM.SHIP_PROVISION_LOAD}），仍执意扬帆出海。`);
+    }
+    world.food -= load;
     world.ships.push({
       x: water.x + 0.5, y: water.y + 0.5,
-      ang: rand() * Math.PI * 2, sailor: this, state: "sailing",
-      dist: 0, revealCd: 0,
+      ang, sailor: this, state: "sailing",
+      prov: load, dist: 0, revealCd: 0,
     });
     this.state = "voyage";
     this.voyaging = true;
@@ -1774,16 +2353,20 @@ class Agent {
     if (t.done) { this.task = null; this.state = "idle"; return; }   // 任务已被其他工人完成（防御网）
 
     // 狩猎/捕获：猎物会跑，实时追踪；猎物消失则任务作废
+    // 水生猎物（鱼群）不追踪——渔人守在立项给的岸边格，圈养水域由任务结算处理
     let gx = t.x, gy = t.y, chaseR = 2.2;
     if (t.creature) {
       if (t.creature.dead) { this.abandonTask(); return; }
-      gx = t.creature.x - 0.5; gy = t.creature.y - 0.5;
-      chaseR = 5;
-      const d = Math.hypot(gx + 0.5 - this.x, gy + 0.5 - this.y);
-      if (d > 6) {
-        if (this.goTo(Math.round(gx), Math.round(gy))) { this.state = "walk"; this.onArrive = () => { this.state = "work"; }; }
-        else this.abandonTask();
-        return;
+      const waterPrey = CREATURE_META[t.creature.type].habitat === "water";
+      if (!waterPrey) {
+        gx = t.creature.x - 0.5; gy = t.creature.y - 0.5;
+        chaseR = 5;
+        const d = Math.hypot(gx + 0.5 - this.x, gy + 0.5 - this.y);
+        if (d > 6) {
+          if (this.goTo(Math.round(gx), Math.round(gy))) { this.state = "walk"; this.onArrive = () => { this.state = "work"; }; }
+          else this.abandonTask();
+          return;
+        }
       }
     }
     const d = Math.abs((gx + 0.5) - this.x) + Math.abs((gy + 0.5) - this.y);
@@ -1824,8 +2407,9 @@ class Agent {
     }
     if (t.type === "DIG") {
       // 伐木/采石：磨 tile 血量，产出由工人搬运回仓
-      if (workTile(t, effort)) {
-        const y = tasksFinish(t, this);   // 完成任务，取得搬运产出
+      const r = workTile(t, effort);
+      if (r && r.done) {
+        const y = tasksFinish(t, this, r.was);   // 完成任务，传入改造前 tile 判定产出
         this.task = null;
         this.state = "idle";
         if (y) {
@@ -1848,6 +2432,21 @@ class Agent {
     }
     this.energy -= SIM.ENERGY_DECAY * dt * 0.5;
   }
+}
+
+// 螺旋向外找最近的前沿格：可站立陆地且 4 邻含 VOID（探索者的目标点；只扫局部，成本受 maxR 约束）
+function findFrontier(cx, cy, maxR) {
+  for (let r = 1; r <= maxR; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;   // 只扫当前圈
+        const x = cx + dx, y = cy + dy;
+        if (!walkable(x, y)) continue;
+        if (neighborsOf(x, y).some(p => tileAt(p.x, p.y) === T.VOID)) return { x, y };
+      }
+    }
+  }
+  return null;
 }
 
 function isDaytime() {
@@ -1958,6 +2557,31 @@ function pickAnchor() {
 }
 
 // ---- 规划器：聚合小人状态 → 触发世界变化 ----
+// 距 (x,y) 最近的同类设施（聚簇基准点）
+function nearestOf(list, p) {
+  let best = null, bd = 1e9;
+  for (const o of list) {
+    const d = Math.abs(o.x - p.x) + Math.abs(o.y - p.y);
+    if (d < bd) { bd = d; best = o; }
+  }
+  return best;
+}
+
+// 同聚落内的设施列表（聚簇只在区内进行——用户需求：不同地区之间不需要聚集）
+// 归属判定用无半径最近聚落（设施选址半径可大于 SETTLEMENT_RADIUS，nearestSettlement 会误判为无主）
+function localFacilities(list, settle) {
+  if (!settle) return list;
+  return list.filter(o => ownerSettle(o.x, o.y) === settle);
+}
+function ownerSettle(x, y) {
+  let best = null, bd = 1e9;
+  for (const s of world.settlements) {
+    const d = Math.abs(s.x - x) + Math.abs(s.y - y);
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+}
+
 function plannerTick() {
   const pop = agents.length;
   const homeless = agents.filter(a => !a.home).length;
@@ -1966,22 +2590,28 @@ function plannerTick() {
   //    已无立足之地 → 直接开辟新区。房屋富余（够住且多 3 间以上）则不新建
   //    闸门只统计"还在正常推进"的任务，冻结任务不算数，防止堵死建房通道；
   //    无家者超过 6 人时无视账面容量富余，强制补建（孤立地段的房不算有效容量）
+  //    选址偏好：同聚落内房子聚簇（新屋挨着已有房屋 3 格内，房间距防贴脸），跨聚落不要求
   const capacity = world.houses.length * 3;
   if ((homeless > 6 || capacity - pop <= 2) && capacity <= pop + 8 && tasksPending("BUILD", true).length < 3) {
-    // 锚点优先：城邦时代后有居住区划的聚落 → 居住区；再无家者重心；再粮仓锚点
+    // 锚点优先：有居住区划的聚落 → 居住区（区内也聚簇：新屋挨已有房屋）；再无家者重心；再粮仓锚点
     let s = null;
     for (const st of world.settlements) {
       if (!st.zones) continue;
       const z = st.zones.find(z => z.type === "housing");
-      if (z) { s = findSpot(z.x, z.y, 0, z.r, T.GRASS); if (s) break; }
+      if (z) {
+        const ref = nearestOf(localFacilities(world.houses, st), z);
+        s = (ref && expandSpot(ref, 2, 6, T.GRASS)) ||
+            findSpot(z.x, z.y, 0, z.r, T.GRASS);
+        if (s) break;
+      }
     }
     if (!s) {
       const c = centroidOf(agents.filter(a => !a.home));
-      s = c && findSpot(c.x | 0, c.y | 0, 2, 14, T.GRASS);
-    }
-    if (!s) {
-      const a = pickAnchor();
-      s = findSpot(a.x, a.y, 3, 18, T.GRASS);
+      const anchor = c || pickAnchor();
+      const ref = nearestOf(localFacilities(world.houses, nearestSettlement(anchor.x, anchor.y)), anchor);
+      s = (ref && expandSpot(ref, 2, 6, T.GRASS)) ||
+          (c && findSpot(c.x | 0, c.y | 0, 2, 14, T.GRASS)) ||
+          findSpot(anchor.x, anchor.y, 3, 18, T.GRASS);
     }
     if (s) {
       tasksAdd({ type: "BUILD", x: s.x, y: s.y, need: 14 });
@@ -1994,25 +2624,43 @@ function plannerTick() {
   }
 
   // 2. 粮食压力 → 多渠道补粮：农田 / 浆果采集 / 狩猎 / 畜牧（城邦解锁）
+  //    选址偏好：同聚落内农田连片（新田挨着已有农田 3 格内，田可紧贴成片），跨聚落不要求
   if (world.farms.length * 6 < pop + 8 && tasksPending("FARM", true).length < 2) {
     let s = null;
     for (const st of world.settlements) {
       if (!st.zones) continue;
       const z = st.zones.find(z => z.type === "farm");
-      if (z) { s = findSpot(z.x, z.y, 0, z.r, T.GRASS, [T.HOUSE, T.SITE]); if (s) break; }
+      if (z) {
+        const ref = nearestOf(localFacilities(world.farms, st), z);
+        s = (ref && expandSpot(ref, 1, 6, T.GRASS)) ||
+            findSpot(z.x, z.y, 0, z.r, T.GRASS, [T.HOUSE, T.SITE]);
+        if (s) break;
+      }
     }
     if (!s) {
       const starving = agents.filter(a => a.hunger < 40);
       const c = starving.length >= 3 ? centroidOf(starving) : null;
-      s = c && findSpot(c.x | 0, c.y | 0, 3, 16, T.GRASS, [T.HOUSE, T.SITE]);
-    }
-    if (!s) {
-      const a = pickAnchor();
-      s = findSpot(a.x, a.y, 4, 26, T.GRASS, [T.HOUSE, T.SITE]);
+      const anchor = c || pickAnchor();
+      const ref = nearestOf(localFacilities(world.farms, nearestSettlement(anchor.x, anchor.y)), anchor);
+      s = (ref && expandSpot(ref, 1, 6, T.GRASS)) ||
+          findSpot(anchor.x, anchor.y, c ? 3 : 4, c ? 16 : 26, T.GRASS, [T.HOUSE, T.SITE]);
     }
     if (s) {
-      tasksAdd({ type: "FARM", x: s.x, y: s.y, need: 9 });
-      logThrottled(`规划署：粮食储备吃紧（${Math.floor(world.food)}），批准开垦 (${s.x},${s.y})。`, 10);
+      // 灌溉约束：农田 5 格内需有水（海/塘均可）；选址无水 → 先在附近挖塘引水（塘成后自然满足）
+      if (nearAny(s.x, s.y, [T.WATER, T.DEEP], 5)) {
+        tasksAdd({ type: "FARM", x: s.x, y: s.y, need: 9 });
+        logThrottled(`规划署：粮食储备吃紧（${Math.floor(world.food)}），批准开垦 (${s.x},${s.y})。`, 10);
+      } else if (tasksPending("EXCAV", true).length < 1) {
+        const pond = expandSpot(s, 2, 6, T.GRASS, new Set()) ||
+                     findSpot(s.x, s.y, 2, 5, T.GRASS, [T.FARM, T.HOUSE]);
+        if (pond) {
+          tasksAdd({ type: "EXCAV", x: pond.x, y: pond.y, need: 8 });
+          logThrottled(`规划署：新农田远离水源，先在 (${pond.x},${pond.y}) 挖塘引水。`, 20);
+        } else {
+          tasksAdd({ type: "FARM", x: s.x, y: s.y, need: 9 });   // 无处挖塘：照旧建田（等世界变化）
+        }
+      }
+      // 已有 EXCAV 在挖：暂缓建田（水到渠成）
     }
   }
   // 2b. 采集：附近有果量充足的浆果丛/果树 → 采集队
@@ -2030,7 +2678,7 @@ function plannerTick() {
   // 2c. 狩猎：附近有野生牛羊 → 猎队（立项前确认动物存活，且未被捕获任务占用）
   if (world.food < 60 + pop * 3 && tasksPending("HUNT", true).length < 1) {
     const a = pickAnchor();
-    const wild = creatures.filter(c => c.isWild() && !c.dead &&
+    const wild = creatures.filter(c => c.isWild() && !c.dead && CREATURE_META[c.type].hunt &&
       Math.abs(c.x - a.x) + Math.abs(c.y - a.y) < 30 && !tasks.list.some(k => k.creature === c && !k.done));
     if (wild.length) {
       const c = wild[0];
@@ -2062,11 +2710,57 @@ function plannerTick() {
       }
     }
   }
+  // 2d2. 渔场：圈养鱼群不足 → 三级策略
+  //      ① 近岸有野生鱼群 → 原地圈养（水域即渔场，无需建筑）
+  //      ② 无近岸鱼群但聚落近处有水域 → 从远处野生鱼群捕苗运来圈养（dest 指定水域）
+  //      ③ 连可用的水域都没有 → 先挖塘（EXCAV，塘成后回到②）
+  if (tasksPending("CAPTURE", true).length < 1 &&
+      creatures.filter(c => c.pasture && c.type === "fish" && !c.dead).length < SIM.PASTURE_CAP) {
+    const a = pickAnchor();
+    const wild = creatures.filter(c => c.isWild() && !c.dead && c.type === "fish" &&
+      !tasks.list.some(k => k.creature === c && !k.done));
+    let placed = false;
+    // ① 原地圈养
+    for (const f of wild) {
+      const fx = Math.round(f.x - 0.5), fy = Math.round(f.y - 0.5);
+      if (Math.abs(fx - a.x) + Math.abs(fy - a.y) > 30) continue;
+      const shore = neighborsOf(fx, fy).find(p => walkable(p.x, p.y));
+      if (shore) {
+        tasksAdd({ type: "CAPTURE", x: shore.x, y: shore.y, need: 5, creature: f, pasture: { x: fx, y: fy } });
+        placed = true;
+        break;
+      }
+    }
+    // ② 运鱼到聚落近处水域
+    if (!placed) {
+      const dest = findSpot(a.x, a.y, 4, 18, T.WATER, [T.DOCK]);
+      if (dest && wild.length && !creatures.some(c => c.pasture && c.type === "fish" &&
+          Math.abs(c.pasture.x - dest.x) + Math.abs(c.pasture.y - dest.y) < 3)) {
+        const seed = wild[0];
+        const sx = Math.round(seed.x - 0.5), sy = Math.round(seed.y - 0.5);
+        const shore = neighborsOf(sx, sy).find(p => walkable(p.x, p.y));
+        if (shore) {
+          tasksAdd({ type: "CAPTURE", x: shore.x, y: shore.y, need: 5, creature: seed,
+            pasture: { x: sx, y: sy }, dest: { x: dest.x, y: dest.y } });
+          logThrottled("渔人打算捕些鱼苗，送到近处的水域里放养。", 30);
+          placed = true;
+        }
+      }
+    }
+    // ③ 挖塘
+    if (!placed && tasksPending("EXCAV", true).length < 1) {
+      const pond = findSpot(a.x, a.y, 3, 12, T.GRASS, [T.FARM, T.HOUSE]);
+      if (pond) {
+        tasksAdd({ type: "EXCAV", x: pond.x, y: pond.y, need: 8 });
+        logThrottled("规划署：近处没有可养鱼的水域，先挖一口鱼塘。", 30);
+      }
+    }
+  }
   // 2e. 资源采集：各聚落木材/石材/沙土低于阈值 → 立项伐木/采石/采沙/植树
   for (const s of world.settlements) {
     const stock = ensureStock(s);
     const digPending = type => tasksPending("DIG", true).filter(t => t.res === type).length;
-    if (stock.wood < 10 && digPending("wood") < 6) {
+    if (stock.wood < 25 && digPending("wood") < 6) {   // 储备线 25：造船消耗大，伐木要跑在前面
       const t = findSpot(s.x, s.y, 2, 30, T.TREE);
       if (t) tasksAdd({ type: "DIG", x: t.x, y: t.y, res: "wood" });
     }
@@ -2151,6 +2845,23 @@ function plannerTick() {
       if (shore && !tasks.list.some(t => !t.done && t.type === "FISH" && t.fishX === fx && t.fishY === fy)) {
         tasksAdd({ type: "FISH", x: shore.x, y: shore.y, need: 5, fishX: fx, fishY: fy });
         break;
+      }
+    }
+  }
+
+  // 2h2. 渔船：有码头且海上有鱼群 → 渔民驾小渔船近海捕捞（渔获回港入粮池；渔民休整后才再出港）
+  if (world.era >= 1 && world.docks.length &&
+      world.ships.filter(s => s.boat).length < SIM.FISHING_BOAT_CAP &&
+      world.fishStock.size > 0) {
+    const fisher = agents.find(x => !x.dead && !x.task && !x.voyaging && !x.rescuing &&
+      (x.hobby === "fishing" || x.job === "fisher") &&
+      (!x.boatRestT || world.time > x.boatRestT));
+    if (fisher) {
+      const dock = world.docks.reduce((b, d) =>
+        !b || Math.abs(d.x - fisher.x) + Math.abs(d.y - fisher.y) < Math.abs(b.x - fisher.x) + Math.abs(b.y - fisher.y) ? d : b, null);
+      if (dock && fisher.goTo(dock.x, dock.y)) {
+        fisher.state = "walk";
+        fisher.onArrive = () => fisher.startFishingTrip(dock);
       }
     }
   }
@@ -2265,6 +2976,9 @@ function plannerTick() {
   // 9. 时代演进：文明整体迈入新纪元
   eraCheck(pop);
 
+  // 10. 劳动力市场：职业随需求流转（没活干会转行）
+  jobMarketTick(pop);
+
   assignHomes();
 }
 
@@ -2327,9 +3041,17 @@ function findBirthSpot() {
   return null;
 }
 
-// ---- 农田生长 ----
+// ---- 农田生长（需水灌溉：5 格以内有水才能成熟，缺水停滞；结果缓存 2 秒节流） ----
 function farmTick(dt) {
   for (const f of world.farms) {
+    f.waterCd = (f.waterCd || 0) - dt;
+    if (f.waterCd <= 0) {
+      f.waterCd = 2;
+      const was = f.irrigated;
+      f.irrigated = nearAny(f.x, f.y, [T.WATER, T.DEEP], 5);
+      if (was && !f.irrigated) logThrottled("一片农田失去了灌溉水源，收成停滞了。", 60);
+    }
+    if (!f.irrigated) continue;   // 缺水：停止生长（不倒退，等水来了继续）
     f.grow += dt;
     if (f.grow >= SIM.FARM_MATURITY) {
       f.grow = 0;
@@ -2358,10 +3080,74 @@ function simUpdate(dt) {
   farmTick(dt);
   berryTick();
   wildBreedTick();
+  spawnWhaleOccasionally();
   quarryTick();
 
   _plannerCd -= dt;
   if (_plannerCd <= 0) { _plannerCd = SIM.PLANNER_INTERVAL; plannerTick(); }
+}
+
+// 劳动力市场：职业随需求平滑流转——零待办的职业逐渐转出，最缺工的职业逐渐补入
+function jobMarketTick(pop) {
+  // 探索者保底：至少 1 人专职探索（劳动力市场优先级最高——没有探索者，世界边界就停止生长）
+  if (!agents.some(a => !a.dead && a.job === "explorer")) {
+    // 从人数最多的非探索者职业中挑 adventure 最高者转职（不抽独苗职业，避免抽走唯一的渔夫/猎人）
+    const byJob = {};
+    for (const a of agents) if (!a.dead && a.job !== "explorer") (byJob[a.job] = byJob[a.job] || []).push(a);
+    let pool = null;
+    for (const j of Object.keys(byJob)) {
+      if (byJob[j].length < 2) continue;
+      if (!pool || byJob[j].length > pool.length) pool = byJob[j];
+    }
+    if (pool) {
+      const best = pool.sort((a, b) => b.adventure - a.adventure)[0];
+      best.job = "explorer";
+      logMsg(`${best.name} 放下手中活计，专职成为探索者——去把世界的边界找出来。`);
+    }
+  }
+  const demand = {
+    farmer:      tasksPending("FARM", true).length,
+    lumberjack:  tasksPending("DIG", true).filter(t => t.res === "wood").length,
+    miner:       tasksPending("DIG", true).filter(t => t.res === "stone").length,
+    hunter:      tasksPending("HUNT", true).length + tasksPending("CAPTURE", true).length,
+    fisher:      tasksPending("FISH", true).length,
+    builder:     tasksPending("BUILD", true).length + tasksPending("PASTURE", true).length +
+                 tasksPending("DOCK", true).length + tasksPending("QUARRY", true).length +
+                 tasksPending("SANDPIT", true).length + tasksPending("PLANT", true).length +
+                 tasksPending("PLANT_BERRY", true).length,
+    explorer:    1,   // 探索自有行为，恒有需求
+  };
+  const workers = {};
+  for (const a of agents) if (!a.dead) workers[a.job] = (workers[a.job] || 0) + 1;
+  world.jobIdle = world.jobIdle || {};
+
+  // 供过于求的职业：零待办持续 60 秒，或从业人数超过需求 4 倍
+  const oversupply = [];
+  for (const j of Object.keys(JOBS)) {
+    if (j === "explorer") continue;
+    const d = demand[j], w = workers[j] || 0;
+    if (d === 0) {
+      world.jobIdle[j] = (world.jobIdle[j] || 0) + SIM.PLANNER_INTERVAL;
+      if (world.jobIdle[j] > 60) oversupply.push(j);
+    } else {
+      if (w > d * 4) oversupply.push(j);
+      world.jobIdle[j] = 0;
+    }
+  }
+  // 转入目标：人均需求最大且仍有待办的职业
+  const target = Object.keys(JOBS).filter(j => demand[j] > 0)
+    .sort((a, b) => demand[b] / Math.max(1, workers[b] || 0) - demand[a] / Math.max(1, workers[a] || 0))[0];
+  if (!target || !oversupply.length || target === oversupply[0]) return;
+  // 每周期最多转 2 人（平滑流动防振荡）
+  let moved = 0;
+  for (const j of oversupply) {
+    const ws = agents.filter(a => a.job === j && !a.dead);
+    if (!ws.length) continue;
+    ws[0].job = target;
+    moved++;
+    if (moved >= 2) break;
+  }
+  if (moved) logThrottled(`${JOBS[oversupply[0]].name}转职为${JOBS[target].name}——劳动力随需求流动。`, 40);
 }
 
 // ---- 初始化模拟 ----

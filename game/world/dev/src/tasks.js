@@ -6,7 +6,7 @@ const tasks = {
   list: [],
 };
 
-const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 4, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3, FILL: 10 };
+const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 4, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3, FILL: 10, EXCAV: 8 };
 // 工程资源消耗：架桥耗木材、造陆耗沙土（完工时从最近聚落库存扣除）
 const TASK_RESOURCE_COST = { BRIDGE: { wood: 1 }, FILL: { sand: 1 } };
 
@@ -25,12 +25,13 @@ function tasksPending(type, excludeFrozen) {
   return tasks.list.filter(t => (!type || t.type === type) && !t.done && (!excludeFrozen || (t.blockedCount || 0) < 3));
 }
 
-// 任务 → 职业偏好映射（DIG 按 res 区分伐木/采石）
+// 任务 → 职业偏好映射（DIG 按 res 区分伐木/采石；CAPTURE 鱼群归渔民、牲畜归猎人）
 function taskJobPref(t) {
   switch (t.type) {
     case "FARM": return "FARM";
-    case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT": return "BUILD";
-    case "HUNT": case "CAPTURE": return "HUNT";
+    case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT": case "EXCAV": return "BUILD";
+    case "CAPTURE": return t.creature && t.creature.type === "fish" ? "FISH" : "HUNT";
+    case "HUNT": return "HUNT";
     case "FISH": return "FISH";
     case "DIG": return t.res === "stone" ? "DIG_STONE" : "DIG_WOOD";
     default: return null;
@@ -57,7 +58,9 @@ function tasksTake(agent) {
     const d = Math.abs(t.x - ax) + Math.abs(t.y - ay);
     const jobMatch = myJob && taskJobPref(t) === myJob ? 1 : 0;
     const age = world.time - (t.born || world.time);   // 任务老化：立项越久越优先，远任务不饿死
-    const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000 - age * 3;
+    // 资源危机升权：联合木材枯竭时伐木任务急速提级（否则桥/船工程全饿死）
+    const crisis = (t.type === "DIG" && t.res === "wood") ? Math.max(0, 8 - jointStock("wood")) * 200 : 0;
+    const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000 - age * 3 - crisis;
     if (score < bestScore) { bestScore = score; best = t; }
   }
   return best;
@@ -67,7 +70,7 @@ function tasksRelease(t, agent) {
   if (t) t.workers.delete(agent);
 }
 
-function tasksFinish(t) {
+function tasksFinish(t, agent, was) {
   t.done = true;
   // 同任务的其他工人：引用清空 + 状态复位（否则他们对已完成任务继续施工——卡死/重复结算）
   for (const w of t.workers) {
@@ -102,9 +105,8 @@ function tasksFinish(t) {
       break;
     }
     case "DIG": {
-      const was = tileAt(t.x, t.y);
       setTile(t.x, t.y, T.GRASS);
-      // 产出由工人搬运回仓：伐木得木材、采石得石材
+      // 产出由工人搬运回仓：伐木得木材、采石得石材（was 由 workTile 传入——完工后 tile 已改写，不能重读）
       if (was === T.TREE) return { res: "wood", amount: 6 };
       if (was === T.MOUNTAIN) return { res: "stone", amount: 7 };
       break;
@@ -113,6 +115,15 @@ function tasksFinish(t) {
       const s = nearestSettlement(t.x, t.y);
       if (s) ensureStock(s).sand += 2;   // 挖海泥回填，就地结算
       setTile(t.x, t.y, T.SAND);
+      // 该格原有鱼群被填：移除鱼群实体与库存
+      const fk = t.x + "," + t.y;
+      if (world.fishStock.has(fk)) {
+        world.fishStock.delete(fk);
+        for (let i = creatures.length - 1; i >= 0; i--) {
+          const c = creatures[i];
+          if (c.type === "fish" && Math.hypot(c.x - t.x - 0.5, c.y - t.y - 0.5) < 1.5) creatures.splice(i, 1);
+        }
+      }
       break;
     }
     case "BRIDGE": {
@@ -190,19 +201,26 @@ function tasksFinish(t) {
       logMsg(`码头建成，航海家们开始筹划远航。`);
       break;
     }
-    case "DOCK": {
-      setTile(t.x, t.y, T.DOCK);
-      world.docks.push({ x: t.x, y: t.y });
-      logMsg(`码头建成，航海家们开始筹划远航。`);
+    case "EXCAV": {
+      // 挖塘：陆格挖成水（灌溉/养鱼的人工水域）
+      setTile(t.x, t.y, T.WATER);
+      logThrottled("居民挖出了新的水塘，水波在塘里荡开。", 30);
       break;
     }
     case "CAPTURE": {
-      // 捕获：把野生牲畜安置进牧场
+      // 捕获：把野生牲畜安置进牧场；鱼群圈进水域渔场（t.dest 指定时运往该处圈养，否则原地）
       const c = t.creature;
       if (c && !c.dead && c.isWild()) {
-        c.pasture = { x: t.pasture.x, y: t.pasture.y };
-        c.x = t.pasture.x + 0.5; c.y = t.pasture.y + 0.5;
-        logThrottled("牧民把新的牲畜赶进了牧场。", 25);
+        const dest = t.dest || t.pasture;
+        c.pasture = { x: dest.x, y: dest.y };
+        c.x = dest.x + 0.5; c.y = dest.y + 0.5;
+        if (c.type === "fish") {
+          world.fishStock.delete(dest.x + "," + dest.y);   // 圈养后走渔场产出，不再作野生钓点
+          world.fishStock.delete(t.pasture.x + "," + t.pasture.y);
+          logThrottled(t.dest ? "渔人把鱼苗挑到了新挖的水塘里放养。" : "渔人把鱼群圈进了水上渔场，渔场将定期供给鲜鱼。", 25);
+        } else {
+          logThrottled("牧民把新的牲畜赶进了牧场。", 25);
+        }
       }
       break;
     }

@@ -44,7 +44,7 @@ const SIM = {
   PLANNER_INTERVAL: 4,  // 规划器每 4 sim 秒跑一次
   AGENT_SPEED: 1.7,     // tile/秒 基准
   HUNGER_DECAY: 1.1,    // hunger 每秒下降
-  ENERGY_DECAY: 0.9,    // 醒着时 energy 每秒下降
+  ENERGY_DECAY: 0.6,    // 醒着时 energy 每秒下降（0.9 时 100 能量只够往返 95 格，扩张区任务必过劳死）
   ENERGY_REGEN: 9,      // 睡觉时每秒恢复
   WORK_EFFORT: 1.3,     // 每个工人每秒任务进度
   FARM_MATURITY: 55,    // 农田成熟秒数
@@ -66,14 +66,28 @@ const SIM = {
   PASTURE_YIELD: 2,     // 每次产粮
   PASTURE_CAP: 6,       // 单牧场圈养上限
   BREED_CHANCE: 0.1,    // 繁殖概率（每 120 秒判定）
-  WILD_BREED_CAP: 60,   // 野生动物总量上限
+  WILD_BREED_CAP: 60,   // 野生可猎动物总量上限
+  TURTLE_CAP: 12,       // 海龟总量上限
+  WHALE_CAP: 5,         // 鲸总量上限
+  ANIMAL_STRAND_DEATH: 90,  // 动物被困（脚下不再是栖息地）坚持时长（秒），超时死亡
   // ---- 航海 ----
   SHIP_COST: 10,        // 造一艘远航船耗木材（联合库存）
   SHIP_SPEED: 3,        // 船速（格/秒）
   SHIP_MAX_DIST: 220,   // 单次远航最大航程
+  SHIP_PROVISION_RATE: 0.15,  // 船只补给消耗（粮/秒）——船速 3 格/s 即每格 0.05 粮
+  SHIP_PROVISION_LOAD: 40,    // 出航满载补给（粮）——满载续航 267s ≈ 800 格，正常往返富余
+  SHIP_RESCUE_RESUPPLY: 25,   // 救援船送达的补给量（粮）——最远被困点返航需 11 粮，足够
+  BOAT_COST: 4,               // 小渔船耗木材（联合库存）——远低于远航船
+  FISHING_BOAT_CAP: 2,        // 同时在海的渔船数上限
+  BOAT_HOLD_CAP: 20,          // 渔船满舱载鱼量（粮）
+  BOAT_FISH_YIELD: 2,         // 渔船每次起网渔获
+  FISHING_INTERVAL: 10,       // 渔船起网周期（秒）
   // ---- 历法与年龄 ----
   YEAR_DAYS: 12,        // 1 昼夜 = 1 个月，12 昼夜 = 1 年（1 岁）
 };
+
+// 高倍速模拟调度：decide 每帧预算（main.js 按倍速写入，agent 消费；headless 测试默认不限）
+const SCHED = { decideBudget: Infinity };
 
 // 物种寿命与年龄分档（岁）：幼年 < s0、青年 < s1、中年 < s2、老年 ≥ s2；超过 lifespan 封顶
 const SPECIES_AGE = {
@@ -81,6 +95,13 @@ const SPECIES_AGE = {
   cow:   { name: "牛",   lifespan: 15, stages: [2, 8, 12] },
   goat:  { name: "羊",   lifespan: 12, stages: [2, 6, 9] },
   dog:   { name: "狗",   lifespan: 10, stages: [2, 5, 8] },
+  deer:  { name: "鹿",   lifespan: 12, stages: [2, 5, 8] },
+  boar:  { name: "野猪", lifespan: 10, stages: [2, 5, 7] },
+  wolf:  { name: "狼",   lifespan: 10, stages: [2, 5, 7] },
+  fish:  { name: "鱼群", lifespan: 5,  stages: [1, 2, 3] },
+  turtle:{ name: "海龟", lifespan: 30, stages: [5, 15, 22] },
+  whale: { name: "鲸",   lifespan: 50, stages: [10, 25, 38] },
+  bird:  { name: "鸟",   lifespan: 6,  stages: [1, 3, 4] },
 };
 
 // 时代划分：按已达到的最高聚落等级 / 人口里程碑
