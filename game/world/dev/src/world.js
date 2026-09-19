@@ -151,6 +151,12 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
         }
       }
       if (!inInfluence) { settleFarTile(c, i, x, y, reveal, litTest, wasGen); elev[li] = -1; continue; }
+      const curTile = c.tiles[i];
+      if (curTile !== T.VOID) {
+        // 已生成格（房屋/道路/桥/农田/已点亮地形）：只补海拔渲染场，绝不改写 tile——点亮只属于虚空
+        elev[li] = N.fbm(x * 0.05, y * 0.05, 4) * 0.55 + bump;
+        continue;
+      }
       const e = N.fbm(x * 0.05, y * 0.05, 4) * 0.55 + bump;
       const m = N.fbm(x * 0.06 + 90, y * 0.06 + 55, 3);
       elev[li] = e;
@@ -226,8 +232,9 @@ function shipTick(dt) {
     if (ships.some(r => r.state === "rescue" && r.target === s)) { s.rescueQueued = true; continue; }
     const d = Math.hypot(s.x - world.store.x, s.y - world.store.y);
     const need = Math.ceil(d * SIM.SHIP_PROVISION_RATE * 1.3 + SIM.SHIP_RESCUE_RESUPPLY);
-    if (world.food < need) { logThrottled("粮草不足，救援船队在码头待命……", 60); continue; }
-    world.food -= need;
+    const homePort = ownerSettle(world.store.x, world.store.y);
+    if (!homePort || ensureStock(homePort).food < need) { logThrottled("粮草不足，救援船队在码头待命……", 60); continue; }
+    ensureStock(homePort).food -= need;
     ships.push({
       x: world.store.x + 0.5, y: world.store.y + 0.5,
       ang: Math.atan2(s.y - world.store.y, s.x - world.store.x),
@@ -407,7 +414,7 @@ function tickFishingBoats(dt) {
       if (s.sailor) {
         s.sailor.x = nx; s.sailor.y = ny;
         s.sailor.state = "idle"; s.sailor.voyaging = false;
-        if (s.hold > 0) { world.food += s.hold; logMsg(`渔船回港，${s.hold} 粮渔获入库。`); s.hold = 0; }
+        if (s.hold > 0) { ensureStock(ownerSettle(s.x, s.y)).food += s.hold; logMsg(`渔船回港，${s.hold} 粮渔获入库。`); s.hold = 0; }
         s.sailor.boatRestT = world.time + 30;   // 渔民休整后才再出港
       }
       continue;
@@ -463,11 +470,12 @@ function carveRiver(isl) {
 // 无陆地影响格的落格规则（点亮永久不黑回）
 function settleFarTile(c, i, x, y, reveal, litTest, wasGen) {
   if (reveal) {
-    if (!litTest || litTest(x, y)) {
+    // 点亮只作用于虚空（未生成格）：已生成的地形/造物绝不被海域覆盖
+    if (c.tiles[i] === T.VOID && (!litTest || litTest(x, y))) {
       c.tiles[i] = T.DEEP;
       world.litCells.add(x + "," + y);
     }
-    // 斑块外：保留原状（虚空留给未来探索）
+    // 非 VOID 或斑块外：保持原状（虚空留给未来探索）
   } else if (!wasGen) {
     c.tiles[i] = T.VOID;                       // 首次视口生成：未探索虚空
   } else if (world.litCells.has(x + "," + y)) {
@@ -606,11 +614,21 @@ function genWorld(seed) {
 
 const _NAME1 = ["临", "青", "沧", "月", "枫", "云", "石", "南", "白", "金", "岚", "汀"];
 const _NAME2 = ["溪", "屿", "港", "湾", "崖", "林", "岩", "川", "沙", "浦"];
+// 地名查重：聚落名与已命名岛屿都在同一命名空间（基础名不重复）；
+// 两字池（120）用尽自动升级三字（1200），再耗尽走编号兜底——无限扩张不会死循环
 function pickName(main) {
-  let n;
-  do { n = _NAME1[randInt(0, _NAME1.length - 1)] + _NAME2[randInt(0, _NAME2.length - 1)]; }
-  while (world.settlements.some(s => s.name === n));
-  return main ? n + "城" : n;
+  const used = new Set();
+  for (const s of world.settlements) used.add(s.name.replace(/城$/, ""));
+  for (const o of world.islands) if (o.name) used.add(o.name);
+  for (let i = 0; i < 200; i++) {
+    const a = _NAME1[randInt(0, _NAME1.length - 1)], b = _NAME2[randInt(0, _NAME2.length - 1)];
+    let n = a + b;
+    if (used.has(n)) n = a + b + _NAME2[randInt(0, _NAME2.length - 1)];   // 直接升级三字
+    if (!used.has(n)) return main ? n + "城" : n;
+  }
+  let k = used.size;
+  while (used.has("新地" + k)) k++;
+  return main ? "新地城" + k : "新地" + k;
 }
 
 // 在 (cx,cy) 附近 [rMin,rMax] 范围随机找一个 want 类型、周围干净的格子
@@ -817,10 +835,24 @@ function nearestSettlement(x, y) {
   return best;
 }
 
-// 聚落资源库存（wood 木材 / stone 石材 / sand 沙土；粮为全局共享池）
+// 聚落资源库存（wood/stone/sand/food——粮食城市内共享，不是全图共享池）
 function ensureStock(s) {
-  if (!s.stock) s.stock = { wood: 0, stone: 0, sand: 0 };
+  if (!s.stock) s.stock = { wood: 0, stone: 0, sand: 0, food: 0 };
+  if (s.stock.food === undefined) s.stock.food = 0;   // 旧聚落兼容
   return s.stock;
+}
+// 无半径最近的归属聚落（田/牧场/粮食产出的归属方；nearestSettlement 有 SETTLEMENT_RADIUS 上限不适用）
+function ownerSettle(x, y) {
+  let best = null, bd = 1e9;
+  for (const s of world.settlements) {
+    const d = Math.abs(s.x - x) + Math.abs(s.y - y);
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+}
+// 全域存粮总和（HUD/规划/告警的全局视角指标；实际进食只消耗所在城市库存）
+function totalFood() {
+  return world.settlements.reduce((sum, s) => sum + (s.stock ? s.stock.food || 0 : 0), 0);
 }
 
 // 联合库存：国家级工程（架桥/造陆）跨聚落汇总与扣费

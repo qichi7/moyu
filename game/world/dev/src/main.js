@@ -260,7 +260,7 @@
     }
 
     hud.pop.textContent = agents.length;
-    hud.food.textContent = Math.floor(world.food);
+    hud.food.textContent = Math.floor(totalFood());
     hud.houses.textContent = world.houses.length;
     // 历法：1 昼夜 = 1 个月，12 昼夜 = 1 年
     const totalDays = Math.floor(world.time / SIM.DAY_LEN);
@@ -580,7 +580,7 @@
         const cows = livestock.filter(c => c.type === "cow").length;
         const goats = livestock.length - cows;
         html += `<div class="roster-names">` +
-          `<div class="roster-res">木<b>${stock.wood}</b> 石<b>${stock.stone}</b> 沙<b>${stock.sand}</b> 粮<b>${Math.floor(world.food)}</b></div>` +
+          `<div class="roster-res">木<b>${stock.wood}</b> 石<b>${stock.stone}</b> 沙<b>${stock.sand}</b> 粮<b>${Math.floor(stock.food || 0)}</b></div>` +
           `<div class="roster-res">圈养牲畜<b>${livestock.length}</b>（牛 ${cows} · 羊 ${goats}）</div>` +
           (residents.length ? residents.map(nameLine).join("") : `<div class="roster-res">（尚无居民定居）</div>`) +
           `</div>`;

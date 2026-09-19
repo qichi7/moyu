@@ -224,7 +224,8 @@ class Creature {
     this.outputCd -= dt;
     if (this.outputCd <= 0) {
       this.outputCd = SIM.PASTURE_INTERVAL;
-      world.food += SIM.PASTURE_YIELD;
+      const st = ownerSettle(this.pasture.x, this.pasture.y);
+      if (st) ensureStock(st).food += SIM.PASTURE_YIELD;
     }
     this.breedCd -= dt;
     if (this.breedCd <= 0) {

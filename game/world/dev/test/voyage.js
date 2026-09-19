@@ -45,7 +45,7 @@ function findDock() {
 // ---- 场景 A：满载出海，预留返航 ----
 simInit(42);
 for (let i = 0; i < 3000; i++) simUpdate(STEP);   // 300s 世界预热
-world.food = 1000;                                 // 保证满载
+world.settlements.forEach(function (s) { ensureStock(s).food = 1000; });   // 保证满载（粮食城市内共享）
 world.settlements.forEach(function (s) { ensureStock(s).wood = 100; });   // 保证造船木材
 revealArea(world.store.x, world.store.y, 50);      // 先探明母港周边地形（reveal 会把 WATER 重算为 DEEP，必须先探明再选址）
 const a1 = agents.find(x => !x.dead && (x.job === "explorer" || x.hobby === "explore") && x.adventure > 0.4);
@@ -77,7 +77,7 @@ if (!a1) { assert(false, "场景A：找到高探索欲居民"); } else {
 // ---- 场景 B：低补给出海 → 被困 → 救援 ----
 simInit(42);
 for (let i = 0; i < 3000; i++) simUpdate(STEP);
-world.food = 12;   // 只够装 12 粮
+world.settlements.forEach(function (s) { ensureStock(s).food = 12; });   // 只够装 12 粮
 world.settlements.forEach(function (s) { ensureStock(s).wood = 100; });   // 保证造船木材
 revealArea(world.store.x, world.store.y, 50);      // 先探明再选址
 const a2 = agents.find(x => !x.dead && (x.job === "explorer" || x.hobby === "explore") && x.adventure > 0.4);
@@ -88,8 +88,9 @@ a2.x = dock2.x + 0.5; a2.y = dock2.y + 0.5;
 a2.startVoyage(dock2);
 const ship2 = world.ships[world.ships.length - 1];
 assert(ship2 && ship2.state === "sailing" && ship2.prov === 12, "场景B：少装出海（补给 12/40，航行中）");
-// 预留返航验证（确定性）：近港低补给——余量 < 回程所需即应调头
-ship2.prov = 0.5;
+// 预留返航验证（确定性）：瞬移 60 格外远海再压低补给——余量 < 回程所需即应调头
+ship2.x = world.store.x + 60; ship2.y = world.store.y + 3;
+ship2.prov = 1.5;
 let turnedBack = false;
 for (let i = 0; i < 50; i++) {
   simUpdate(STEP);
@@ -114,10 +115,10 @@ for (let i = 0; i < 400; i++) {
 assert(stranded, "场景B：低补给船耗尽 → 被困海上");
 assert(a2.state === "voyage" && !a2.dead, "场景B：被困水手存活（航海需求冻结生效）");
 // 救援：粮池不足时应待命，补足后应派出
-world.food = 5;
+world.settlements.forEach(function (s) { ensureStock(s).food = 5; });
 for (let i = 0; i < 200; i++) simUpdate(STEP);
 assert(!world.ships.some(s => s.state === "rescue"), "场景B：粮草不足时救援船待命");
-world.food = 500;
+world.settlements.forEach(function (s) { ensureStock(s).food = 500; });
 let rescue = null;
 for (let i = 0; i < 200; i++) {
   simUpdate(STEP);

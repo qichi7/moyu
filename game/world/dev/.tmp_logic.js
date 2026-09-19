@@ -423,6 +423,12 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
         }
       }
       if (!inInfluence) { settleFarTile(c, i, x, y, reveal, litTest, wasGen); elev[li] = -1; continue; }
+      const curTile = c.tiles[i];
+      if (curTile !== T.VOID) {
+        // 已生成格（房屋/道路/桥/农田/已点亮地形）：只补海拔渲染场，绝不改写 tile——点亮只属于虚空
+        elev[li] = N.fbm(x * 0.05, y * 0.05, 4) * 0.55 + bump;
+        continue;
+      }
       const e = N.fbm(x * 0.05, y * 0.05, 4) * 0.55 + bump;
       const m = N.fbm(x * 0.06 + 90, y * 0.06 + 55, 3);
       elev[li] = e;
@@ -498,8 +504,9 @@ function shipTick(dt) {
     if (ships.some(r => r.state === "rescue" && r.target === s)) { s.rescueQueued = true; continue; }
     const d = Math.hypot(s.x - world.store.x, s.y - world.store.y);
     const need = Math.ceil(d * SIM.SHIP_PROVISION_RATE * 1.3 + SIM.SHIP_RESCUE_RESUPPLY);
-    if (world.food < need) { logThrottled("粮草不足，救援船队在码头待命……", 60); continue; }
-    world.food -= need;
+    const homePort = ownerSettle(world.store.x, world.store.y);
+    if (!homePort || ensureStock(homePort).food < need) { logThrottled("粮草不足，救援船队在码头待命……", 60); continue; }
+    ensureStock(homePort).food -= need;
     ships.push({
       x: world.store.x + 0.5, y: world.store.y + 0.5,
       ang: Math.atan2(s.y - world.store.y, s.x - world.store.x),
@@ -679,7 +686,7 @@ function tickFishingBoats(dt) {
       if (s.sailor) {
         s.sailor.x = nx; s.sailor.y = ny;
         s.sailor.state = "idle"; s.sailor.voyaging = false;
-        if (s.hold > 0) { world.food += s.hold; logMsg(`渔船回港，${s.hold} 粮渔获入库。`); s.hold = 0; }
+        if (s.hold > 0) { ensureStock(ownerSettle(s.x, s.y)).food += s.hold; logMsg(`渔船回港，${s.hold} 粮渔获入库。`); s.hold = 0; }
         s.sailor.boatRestT = world.time + 30;   // 渔民休整后才再出港
       }
       continue;
@@ -735,11 +742,12 @@ function carveRiver(isl) {
 // 无陆地影响格的落格规则（点亮永久不黑回）
 function settleFarTile(c, i, x, y, reveal, litTest, wasGen) {
   if (reveal) {
-    if (!litTest || litTest(x, y)) {
+    // 点亮只作用于虚空（未生成格）：已生成的地形/造物绝不被海域覆盖
+    if (c.tiles[i] === T.VOID && (!litTest || litTest(x, y))) {
       c.tiles[i] = T.DEEP;
       world.litCells.add(x + "," + y);
     }
-    // 斑块外：保留原状（虚空留给未来探索）
+    // 非 VOID 或斑块外：保持原状（虚空留给未来探索）
   } else if (!wasGen) {
     c.tiles[i] = T.VOID;                       // 首次视口生成：未探索虚空
   } else if (world.litCells.has(x + "," + y)) {
@@ -878,11 +886,21 @@ function genWorld(seed) {
 
 const _NAME1 = ["临", "青", "沧", "月", "枫", "云", "石", "南", "白", "金", "岚", "汀"];
 const _NAME2 = ["溪", "屿", "港", "湾", "崖", "林", "岩", "川", "沙", "浦"];
+// 地名查重：聚落名与已命名岛屿都在同一命名空间（基础名不重复）；
+// 两字池（120）用尽自动升级三字（1200），再耗尽走编号兜底——无限扩张不会死循环
 function pickName(main) {
-  let n;
-  do { n = _NAME1[randInt(0, _NAME1.length - 1)] + _NAME2[randInt(0, _NAME2.length - 1)]; }
-  while (world.settlements.some(s => s.name === n));
-  return main ? n + "城" : n;
+  const used = new Set();
+  for (const s of world.settlements) used.add(s.name.replace(/城$/, ""));
+  for (const o of world.islands) if (o.name) used.add(o.name);
+  for (let i = 0; i < 200; i++) {
+    const a = _NAME1[randInt(0, _NAME1.length - 1)], b = _NAME2[randInt(0, _NAME2.length - 1)];
+    let n = a + b;
+    if (used.has(n)) n = a + b + _NAME2[randInt(0, _NAME2.length - 1)];   // 直接升级三字
+    if (!used.has(n)) return main ? n + "城" : n;
+  }
+  let k = used.size;
+  while (used.has("新地" + k)) k++;
+  return main ? "新地城" + k : "新地" + k;
 }
 
 // 在 (cx,cy) 附近 [rMin,rMax] 范围随机找一个 want 类型、周围干净的格子
@@ -1089,10 +1107,24 @@ function nearestSettlement(x, y) {
   return best;
 }
 
-// 聚落资源库存（wood 木材 / stone 石材 / sand 沙土；粮为全局共享池）
+// 聚落资源库存（wood/stone/sand/food——粮食城市内共享，不是全图共享池）
 function ensureStock(s) {
-  if (!s.stock) s.stock = { wood: 0, stone: 0, sand: 0 };
+  if (!s.stock) s.stock = { wood: 0, stone: 0, sand: 0, food: 0 };
+  if (s.stock.food === undefined) s.stock.food = 0;   // 旧聚落兼容
   return s.stock;
+}
+// 无半径最近的归属聚落（田/牧场/粮食产出的归属方；nearestSettlement 有 SETTLEMENT_RADIUS 上限不适用）
+function ownerSettle(x, y) {
+  let best = null, bd = 1e9;
+  for (const s of world.settlements) {
+    const d = Math.abs(s.x - x) + Math.abs(s.y - y);
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+}
+// 全域存粮总和（HUD/规划/告警的全局视角指标；实际进食只消耗所在城市库存）
+function totalFood() {
+  return world.settlements.reduce((sum, s) => sum + (s.stock ? s.stock.food || 0 : 0), 0);
 }
 
 // 联合库存：国家级工程（架桥/造陆）跨聚落汇总与扣费
@@ -1601,7 +1633,8 @@ class Creature {
     this.outputCd -= dt;
     if (this.outputCd <= 0) {
       this.outputCd = SIM.PASTURE_INTERVAL;
-      world.food += SIM.PASTURE_YIELD;
+      const st = ownerSettle(this.pasture.x, this.pasture.y);
+      if (st) ensureStock(st).food += SIM.PASTURE_YIELD;
     }
     this.breedCd -= dt;
     if (this.breedCd <= 0) {
@@ -1748,9 +1781,20 @@ function pickAgentName() {
   return "居民" + (agents.length + 1);
 }
 
-// 原住民部落小名
+// 原住民部落小名（查重：原住民多，12 个单字必重，扩展双字组合 + 池尽编号）
 const _NATIVE = ["岩", "木", "禾", "川", "石", "叶", "风", "泉", "星", "鹿", "火", "溪"];
-const pickNativeName = () => "阿" + _NATIVE[randInt(0, _NATIVE.length - 1)];
+const _usedNative = new Set();
+function pickNativeName() {
+  for (let i = 0; i < 60; i++) {
+    const n = "阿" + _NATIVE[randInt(0, _NATIVE.length - 1)] +
+              (rand() < 0.5 ? _NATIVE[randInt(0, _NATIVE.length - 1)] : "");
+    if (!_usedNative.has(n)) { _usedNative.add(n); return n; }
+  }
+  let k = 1;
+  while (_usedNative.has("阿石" + k)) k++;
+  _usedNative.add("阿石" + k);
+  return "阿石" + k;
+}
 
 let _agentIdSeq = 1;
 
@@ -1933,12 +1977,16 @@ class Agent {
 
     switch (this.state) {
       case "walk": this.stepAlong(dt); break;
-      case "eat":
-        if (world.food > 0) {
-          world.food -= 1; this.hunger = 100;
+      case "eat": {
+        // 城市内共享粮食：吃所在城市（无半径最近聚落）的库存
+        const sc = ownerSettle(this.x, this.y);
+        const st = sc && ensureStock(sc);
+        if (st && st.food > 0) {
+          st.food -= 1; this.hunger = 100;
           this.state = "idle";
-        } else { this.state = "idle"; } // 没粮，回去等规划器开荒
+        } else { this.state = "idle"; } // 本城没粮，回去等规划器开荒/挖塘
         break;
+      }
       case "sleep":
         this.energy += SIM.ENERGY_REGEN * dt;
         if (this.energy >= 100 || isDaytime()) this.state = "idle";
@@ -2110,17 +2158,13 @@ class Agent {
     }
   }
 
-  // 入库：把搬运的产出登记进仓库（粮为全局共享池，其余进最近聚落库存）
+  // 入库：把搬运的产出登记进仓库（粮食与其他资源一致：进所属城市库存，城市内共享）
   deposit() {
     if (!this.carrying) return;
     const { res, amount } = this.carrying;
     this.carrying = null;
-    if (res === "food") {
-      world.food += amount;
-    } else {
-      const s = nearestSettlement(Math.round(this.x), Math.round(this.y));
-      if (s) ensureStock(s)[res] += amount;
-    }
+    const s = ownerSettle(Math.round(this.x), Math.round(this.y));
+    if (s) ensureStock(s)[res] += amount;
   }
 
   // 死亡结算：释放任务与住房，通知世界（背包产出就地登记——拓荒者的遗物不白白散失）
@@ -2220,12 +2264,14 @@ class Agent {
       return;
     }
     jointConsume("wood", SIM.SHIP_COST);
-    // 装载补给（粮食）：有多少装多少，不满也出海——补给耗尽会被困海上，只能呼救
-    const load = Math.min(SIM.SHIP_PROVISION_LOAD, Math.floor(world.food));
+    // 装载补给（粮食）：从码头所属城市库存装粮，有多少装多少，不满也出海
+    const portCity = ownerSettle(dock.x, dock.y);
+    const supply = portCity ? ensureStock(portCity).food : 0;
+    const load = Math.min(SIM.SHIP_PROVISION_LOAD, Math.floor(supply));
     if (load < SIM.SHIP_PROVISION_LOAD) {
       logMsg(`${this.name} 的船粮草不满（${load}/${SIM.SHIP_PROVISION_LOAD}），仍执意扬帆出海。`);
     }
-    world.food -= load;
+    if (portCity) ensureStock(portCity).food -= load;
     world.ships.push({
       x: water.x + 0.5, y: water.y + 0.5,
       ang, sailor: this, state: "sailing",
@@ -2573,15 +2619,6 @@ function localFacilities(list, settle) {
   if (!settle) return list;
   return list.filter(o => ownerSettle(o.x, o.y) === settle);
 }
-function ownerSettle(x, y) {
-  let best = null, bd = 1e9;
-  for (const s of world.settlements) {
-    const d = Math.abs(s.x - x) + Math.abs(s.y - y);
-    if (d < bd) { bd = d; best = s; }
-  }
-  return best;
-}
-
 function plannerTick() {
   const pop = agents.length;
   const homeless = agents.filter(a => !a.home).length;
@@ -2649,7 +2686,7 @@ function plannerTick() {
       // 灌溉约束：农田 5 格内需有水（海/塘均可）；选址无水 → 先在附近挖塘引水（塘成后自然满足）
       if (nearAny(s.x, s.y, [T.WATER, T.DEEP], 5)) {
         tasksAdd({ type: "FARM", x: s.x, y: s.y, need: 9 });
-        logThrottled(`规划署：粮食储备吃紧（${Math.floor(world.food)}），批准开垦 (${s.x},${s.y})。`, 10);
+        logThrottled(`规划署：粮食储备吃紧（${Math.floor(totalFood())}），批准开垦 (${s.x},${s.y})。`, 10);
       } else if (tasksPending("EXCAV", true).length < 1) {
         const pond = expandSpot(s, 2, 6, T.GRASS, new Set()) ||
                      findSpot(s.x, s.y, 2, 5, T.GRASS, [T.FARM, T.HOUSE]);
@@ -2664,7 +2701,7 @@ function plannerTick() {
     }
   }
   // 2b. 采集：附近有果量充足的浆果丛/果树 → 采集队
-  if (world.food < 60 + pop * 3 && tasksPending("GATHER", true).length < 2) {
+  if (totalFood() < 60 + pop * 3 && tasksPending("GATHER", true).length < 2) {
     for (const [k, v] of world.berryStock) {
       if (v < 2) continue;
       const [bx, by] = k.split(",").map(Number);
@@ -2676,7 +2713,7 @@ function plannerTick() {
     }
   }
   // 2c. 狩猎：附近有野生牛羊 → 猎队（立项前确认动物存活，且未被捕获任务占用）
-  if (world.food < 60 + pop * 3 && tasksPending("HUNT", true).length < 1) {
+  if (totalFood() < 60 + pop * 3 && tasksPending("HUNT", true).length < 1) {
     const a = pickAnchor();
     const wild = creatures.filter(c => c.isWild() && !c.dead && CREATURE_META[c.type].hunt &&
       Math.abs(c.x - a.x) + Math.abs(c.y - a.y) < 30 && !tasks.list.some(k => k.creature === c && !k.done));
@@ -2835,7 +2872,7 @@ function plannerTick() {
     }
   }
   // 2h. 捕鱼：食物压力且有近海鱼群（海岸可站立）
-  if (world.food < 60 + pop * 3 && tasksPending("FISH", true).length < 2) {
+  if (totalFood() < 60 + pop * 3 && tasksPending("FISH", true).length < 2) {
     const a = pickAnchor();
     for (const [k, v] of world.fishStock) {
       if (v < 2) continue;
@@ -2867,16 +2904,18 @@ function plannerTick() {
   }
 
   // 3. 饥荒告警（一天最多提醒一次，避免刷屏）
-  const days = world.food / Math.max(1, pop * 0.9);
+  const days = totalFood() / Math.max(1, pop * 0.9);
   if (days < 1 && pop > 0) { logThrottled(`饥荒告警：存粮仅够 ${days.toFixed(1)} 天！`, SIM.DAY_LEN); emit("famine"); }
 
   // 4. 人口自然增长：由农田承载余量驱动（田先于人到位），饥荒期停止生育
   //    出生安全垫随人口放大（food > 100 + 人口×4），防止出生率超过承载力引发饿死潮
   //    BIRTH_CHECK 是每秒概率，规划器每 PLANNER_INTERVAL 秒才判一次，需换算成窗口概率
   const hasRoom = world.houses.length * 3 > pop;
-  if (pop > 0 && world.food > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
+  if (pop > 0 && totalFood() > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
     const near = findBirthSpot();
-    if (near) {
+    const birthCity = near && ownerSettle(near.x, near.y);
+    if (near && birthCity && ensureStock(birthCity).food < 20) { /* 出生城市存粮不足：暂缓生育 */ }
+    else if (near) {
       const baby = spawnAgent(near.x, near.y);
       baby.age = 0;   // 新生儿从 0 岁长大（1 游戏年 = 1 岁）
       logThrottled(`新生命降临，人口达到 ${pop + 1}。`, 8);
@@ -2918,8 +2957,10 @@ function plannerTick() {
   }
 
   // 7. 丰收宴席：存粮远超需求时全城共食（每 3 天最多一次），富余粮食有了出口
-  if (pop > 0 && world.food > 60 + pop * 5 && world.time - _lastFeast > SIM.DAY_LEN * 3) {
-    world.food -= 40 + pop;
+  if (pop > 0 && totalFood() > 60 + pop * 5 && world.time - _lastFeast > SIM.DAY_LEN * 3) {
+    // 宴席消耗由存粮最多的城市承担
+    const rich = world.settlements.slice().sort((a, b) => (b.stock ? b.stock.food || 0 : 0) - (a.stock ? a.stock.food || 0 : 0))[0];
+    if (rich) ensureStock(rich).food = Math.max(0, ensureStock(rich).food - (40 + pop));
     _lastFeast = world.time;
     for (const a of agents) { a.hunger = 100; a.energy = Math.min(100, a.energy + 30); }
     logMsg("丰收宴席：全城共食，欢声笑语。");
@@ -3055,7 +3096,8 @@ function farmTick(dt) {
     f.grow += dt;
     if (f.grow >= SIM.FARM_MATURITY) {
       f.grow = 0;
-      world.food += SIM.FARM_YIELD;
+      const st = ownerSettle(f.x, f.y);
+      if (st) ensureStock(st).food += SIM.FARM_YIELD;   // 粮食进所属城市库存
       f.flash = 0.6; // 成熟闪光（渲染用）
     }
     if (f.flash > 0) f.flash -= dt;

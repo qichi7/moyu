@@ -15,9 +15,20 @@ function pickAgentName() {
   return "居民" + (agents.length + 1);
 }
 
-// 原住民部落小名
+// 原住民部落小名（查重：原住民多，12 个单字必重，扩展双字组合 + 池尽编号）
 const _NATIVE = ["岩", "木", "禾", "川", "石", "叶", "风", "泉", "星", "鹿", "火", "溪"];
-const pickNativeName = () => "阿" + _NATIVE[randInt(0, _NATIVE.length - 1)];
+const _usedNative = new Set();
+function pickNativeName() {
+  for (let i = 0; i < 60; i++) {
+    const n = "阿" + _NATIVE[randInt(0, _NATIVE.length - 1)] +
+              (rand() < 0.5 ? _NATIVE[randInt(0, _NATIVE.length - 1)] : "");
+    if (!_usedNative.has(n)) { _usedNative.add(n); return n; }
+  }
+  let k = 1;
+  while (_usedNative.has("阿石" + k)) k++;
+  _usedNative.add("阿石" + k);
+  return "阿石" + k;
+}
 
 let _agentIdSeq = 1;
 
@@ -200,12 +211,16 @@ class Agent {
 
     switch (this.state) {
       case "walk": this.stepAlong(dt); break;
-      case "eat":
-        if (world.food > 0) {
-          world.food -= 1; this.hunger = 100;
+      case "eat": {
+        // 城市内共享粮食：吃所在城市（无半径最近聚落）的库存
+        const sc = ownerSettle(this.x, this.y);
+        const st = sc && ensureStock(sc);
+        if (st && st.food > 0) {
+          st.food -= 1; this.hunger = 100;
           this.state = "idle";
-        } else { this.state = "idle"; } // 没粮，回去等规划器开荒
+        } else { this.state = "idle"; } // 本城没粮，回去等规划器开荒/挖塘
         break;
+      }
       case "sleep":
         this.energy += SIM.ENERGY_REGEN * dt;
         if (this.energy >= 100 || isDaytime()) this.state = "idle";
@@ -377,17 +392,13 @@ class Agent {
     }
   }
 
-  // 入库：把搬运的产出登记进仓库（粮为全局共享池，其余进最近聚落库存）
+  // 入库：把搬运的产出登记进仓库（粮食与其他资源一致：进所属城市库存，城市内共享）
   deposit() {
     if (!this.carrying) return;
     const { res, amount } = this.carrying;
     this.carrying = null;
-    if (res === "food") {
-      world.food += amount;
-    } else {
-      const s = nearestSettlement(Math.round(this.x), Math.round(this.y));
-      if (s) ensureStock(s)[res] += amount;
-    }
+    const s = ownerSettle(Math.round(this.x), Math.round(this.y));
+    if (s) ensureStock(s)[res] += amount;
   }
 
   // 死亡结算：释放任务与住房，通知世界（背包产出就地登记——拓荒者的遗物不白白散失）
@@ -487,12 +498,14 @@ class Agent {
       return;
     }
     jointConsume("wood", SIM.SHIP_COST);
-    // 装载补给（粮食）：有多少装多少，不满也出海——补给耗尽会被困海上，只能呼救
-    const load = Math.min(SIM.SHIP_PROVISION_LOAD, Math.floor(world.food));
+    // 装载补给（粮食）：从码头所属城市库存装粮，有多少装多少，不满也出海
+    const portCity = ownerSettle(dock.x, dock.y);
+    const supply = portCity ? ensureStock(portCity).food : 0;
+    const load = Math.min(SIM.SHIP_PROVISION_LOAD, Math.floor(supply));
     if (load < SIM.SHIP_PROVISION_LOAD) {
       logMsg(`${this.name} 的船粮草不满（${load}/${SIM.SHIP_PROVISION_LOAD}），仍执意扬帆出海。`);
     }
-    world.food -= load;
+    if (portCity) ensureStock(portCity).food -= load;
     world.ships.push({
       x: water.x + 0.5, y: water.y + 0.5,
       ang, sailor: this, state: "sailing",

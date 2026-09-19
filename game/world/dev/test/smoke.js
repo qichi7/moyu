@@ -30,7 +30,7 @@ for (const a of agents) if (!isFinite(a.x) || !isFinite(a.y)) nanAgents++;
 
 console.log("---- 4000 sim 秒后 ----");
 console.log("人口:", agents.length, "（不设上限）");
-console.log("房屋:", world.houses.length, " 农田:", world.farms.length, " 存粮:", Math.floor(world.food));
+console.log("房屋:", world.houses.length, " 农田:", world.farms.length, " 存粮:", Math.floor(totalFood()));
 console.log("扩张:", world.expansions, "次 | 岛屿:", world.islands.length, "(初始", islands0 + ") | 待办任务:", tasks.list.length);
 console.log("聚落:", world.settlements.map(function (s) { return s.name + "(L" + s.level + ")"; }).join(" "));
 console.log("桥 tile:", bridges1, " 山:", mountains0, "->", mountains1, " 水:", waters0, "->", waters1);
@@ -55,7 +55,7 @@ assert(bridges1 > 0 || waters1 < waters0, "架桥/填海实际发生");
 assert(world.settlements.length >= 2, "扩张注册新聚落");
 assert(world.settlements.some(s => s.level >= 1), "聚落升级为村庄");
 assert(nanAgents === 0, "小人坐标无 NaN");
-assert(isFinite(world.food) && world.food >= 0, "存粮数值正常");
+assert(isFinite(totalFood()) && totalFood() >= 0, "存粮数值正常");
 `;
 
 const ctx = vm.createContext({ console });

@@ -107,15 +107,6 @@ function localFacilities(list, settle) {
   if (!settle) return list;
   return list.filter(o => ownerSettle(o.x, o.y) === settle);
 }
-function ownerSettle(x, y) {
-  let best = null, bd = 1e9;
-  for (const s of world.settlements) {
-    const d = Math.abs(s.x - x) + Math.abs(s.y - y);
-    if (d < bd) { bd = d; best = s; }
-  }
-  return best;
-}
-
 function plannerTick() {
   const pop = agents.length;
   const homeless = agents.filter(a => !a.home).length;
@@ -183,7 +174,7 @@ function plannerTick() {
       // 灌溉约束：农田 5 格内需有水（海/塘均可）；选址无水 → 先在附近挖塘引水（塘成后自然满足）
       if (nearAny(s.x, s.y, [T.WATER, T.DEEP], 5)) {
         tasksAdd({ type: "FARM", x: s.x, y: s.y, need: 9 });
-        logThrottled(`规划署：粮食储备吃紧（${Math.floor(world.food)}），批准开垦 (${s.x},${s.y})。`, 10);
+        logThrottled(`规划署：粮食储备吃紧（${Math.floor(totalFood())}），批准开垦 (${s.x},${s.y})。`, 10);
       } else if (tasksPending("EXCAV", true).length < 1) {
         const pond = expandSpot(s, 2, 6, T.GRASS, new Set()) ||
                      findSpot(s.x, s.y, 2, 5, T.GRASS, [T.FARM, T.HOUSE]);
@@ -198,7 +189,7 @@ function plannerTick() {
     }
   }
   // 2b. 采集：附近有果量充足的浆果丛/果树 → 采集队
-  if (world.food < 60 + pop * 3 && tasksPending("GATHER", true).length < 2) {
+  if (totalFood() < 60 + pop * 3 && tasksPending("GATHER", true).length < 2) {
     for (const [k, v] of world.berryStock) {
       if (v < 2) continue;
       const [bx, by] = k.split(",").map(Number);
@@ -210,7 +201,7 @@ function plannerTick() {
     }
   }
   // 2c. 狩猎：附近有野生牛羊 → 猎队（立项前确认动物存活，且未被捕获任务占用）
-  if (world.food < 60 + pop * 3 && tasksPending("HUNT", true).length < 1) {
+  if (totalFood() < 60 + pop * 3 && tasksPending("HUNT", true).length < 1) {
     const a = pickAnchor();
     const wild = creatures.filter(c => c.isWild() && !c.dead && CREATURE_META[c.type].hunt &&
       Math.abs(c.x - a.x) + Math.abs(c.y - a.y) < 30 && !tasks.list.some(k => k.creature === c && !k.done));
@@ -369,7 +360,7 @@ function plannerTick() {
     }
   }
   // 2h. 捕鱼：食物压力且有近海鱼群（海岸可站立）
-  if (world.food < 60 + pop * 3 && tasksPending("FISH", true).length < 2) {
+  if (totalFood() < 60 + pop * 3 && tasksPending("FISH", true).length < 2) {
     const a = pickAnchor();
     for (const [k, v] of world.fishStock) {
       if (v < 2) continue;
@@ -401,16 +392,18 @@ function plannerTick() {
   }
 
   // 3. 饥荒告警（一天最多提醒一次，避免刷屏）
-  const days = world.food / Math.max(1, pop * 0.9);
+  const days = totalFood() / Math.max(1, pop * 0.9);
   if (days < 1 && pop > 0) { logThrottled(`饥荒告警：存粮仅够 ${days.toFixed(1)} 天！`, SIM.DAY_LEN); emit("famine"); }
 
   // 4. 人口自然增长：由农田承载余量驱动（田先于人到位），饥荒期停止生育
   //    出生安全垫随人口放大（food > 100 + 人口×4），防止出生率超过承载力引发饿死潮
   //    BIRTH_CHECK 是每秒概率，规划器每 PLANNER_INTERVAL 秒才判一次，需换算成窗口概率
   const hasRoom = world.houses.length * 3 > pop;
-  if (pop > 0 && world.food > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
+  if (pop > 0 && totalFood() > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
     const near = findBirthSpot();
-    if (near) {
+    const birthCity = near && ownerSettle(near.x, near.y);
+    if (near && birthCity && ensureStock(birthCity).food < 20) { /* 出生城市存粮不足：暂缓生育 */ }
+    else if (near) {
       const baby = spawnAgent(near.x, near.y);
       baby.age = 0;   // 新生儿从 0 岁长大（1 游戏年 = 1 岁）
       logThrottled(`新生命降临，人口达到 ${pop + 1}。`, 8);
@@ -452,8 +445,10 @@ function plannerTick() {
   }
 
   // 7. 丰收宴席：存粮远超需求时全城共食（每 3 天最多一次），富余粮食有了出口
-  if (pop > 0 && world.food > 60 + pop * 5 && world.time - _lastFeast > SIM.DAY_LEN * 3) {
-    world.food -= 40 + pop;
+  if (pop > 0 && totalFood() > 60 + pop * 5 && world.time - _lastFeast > SIM.DAY_LEN * 3) {
+    // 宴席消耗由存粮最多的城市承担
+    const rich = world.settlements.slice().sort((a, b) => (b.stock ? b.stock.food || 0 : 0) - (a.stock ? a.stock.food || 0 : 0))[0];
+    if (rich) ensureStock(rich).food = Math.max(0, ensureStock(rich).food - (40 + pop));
     _lastFeast = world.time;
     for (const a of agents) { a.hunger = 100; a.energy = Math.min(100, a.energy + 30); }
     logMsg("丰收宴席：全城共食，欢声笑语。");
@@ -589,7 +584,8 @@ function farmTick(dt) {
     f.grow += dt;
     if (f.grow >= SIM.FARM_MATURITY) {
       f.grow = 0;
-      world.food += SIM.FARM_YIELD;
+      const st = ownerSettle(f.x, f.y);
+      if (st) ensureStock(st).food += SIM.FARM_YIELD;   // 粮食进所属城市库存
       f.flash = 0.6; // 成熟闪光（渲染用）
     }
     if (f.flash > 0) f.flash -= dt;
