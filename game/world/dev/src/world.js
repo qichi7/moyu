@@ -24,12 +24,18 @@ const world = {
   litCells: new Set(),  // 已被探索点亮的格子 "x,y"（点亮永久，重算时不黑回）
   berryStock: new Map(),// 浆果/果树果量 "x,y" → 份数
   fishStock: new Map(), // 浅海鱼群 "x,y" → 份数
+  ponds: new Set(),     // 人工池塘格 "x,y"（EXCAV 挖出来的水，显示为池塘而非浅海）
+  lastBridgeHead: null, // 上一条桥线的桥头（续接锚点）
+  lastBridgeDir: null,  // 上一条桥线的走向（续接沿此直线延伸，保证笔直）
   pastures: [],         // [{x,y}] 牧场
   docks: [],            // [{x,y}] 码头
   ships: [],            // 远航船实体
   caves: [],            // [{x,y}] 洞穴（采石场选址）
   quarries: [],         // [{x,y}] 采石场（定期产石材）
   sandpits: [],         // [{x,y}] 沙场（定期产沙土）
+  ponds: new Set(),     // 人工池塘（genWorld 重置）
+  lastBridgeHead: null,
+  lastBridgeDir: null,
   logs: [],
 };
 
@@ -67,6 +73,9 @@ function setTile(x, y, t) {
   const i = cIdx(x, y);
   c.tiles[i] = t;
   c.hp[i] = 0;
+  c.thumbDirty = true;                              // 缩略图缓存失效
+  const k = x + "," + y;
+  if (t !== T.WATER) world.ponds.delete(k);          // 水格被改作他用：池塘标记移除
 }
 
 // 兼容旧调用点：无限地图无边界
@@ -136,6 +145,7 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
   for (let y = ey0; y <= ey1; y++) {
     for (let x = ex0; x <= ex1; x++) {
       const c = ensureChunk(x >> 5, y >> 5);
+      c.thumbDirty = true;   // 缩略图缓存失效（tile 可能被点亮/生成改写）
       const wasGen = c.gen;
       c.gen = true;
       const i = cIdx(x, y);
@@ -152,12 +162,17 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
       }
       if (!inInfluence) { settleFarTile(c, i, x, y, reveal, litTest, wasGen); elev[li] = -1; continue; }
       const curTile = c.tiles[i];
+      const cachedE = c.elev ? c.elev[i] : -1;
       if (curTile !== T.VOID) {
-        // 已生成格（房屋/道路/桥/农田/已点亮地形）：只补海拔渲染场，绝不改写 tile——点亮只属于虚空
-        elev[li] = N.fbm(x * 0.05, y * 0.05, 4) * 0.55 + bump;
+        // 已生成格（房屋/道路/桥/农田/已点亮地形）：绝不改写 tile——点亮只属于虚空。
+        // 海拔场已有数据（缓存）则零成本跳过；首次缺数据才补一次（渲染地势用）
+        if (cachedE < 0) elev[li] = N.fbm(x * 0.05, y * 0.05, 4) * 0.55 + bump;
+        else elev[li] = cachedE;
         continue;
       }
-      const e = N.fbm(x * 0.05, y * 0.05, 4) * 0.55 + bump;
+      // VOID 格完整生成：bump=0（无岛影响）时海拔取 chunk 缓存——重叠点亮区零重复 fbm；
+      // 岛缘格（bump>0）必须重算：发现岛的抬升依赖本轮 bump，缓存里没有
+      const e = (cachedE >= 0 && bump === 0) ? cachedE : N.fbm(x * 0.05, y * 0.05, 4) * 0.55 + bump;
       const m = N.fbm(x * 0.06 + 90, y * 0.06 + 55, 3);
       elev[li] = e;
       firstPass[li] = 1;
@@ -264,7 +279,7 @@ function shipTick(dt) {
     const ny = s.y + Math.sin(s.ang) * SIM.SHIP_SPEED * dt;
     // 航行沿途大面积点亮虚空（航海开拓的核心价值）
     s.revealCd -= dt;
-    if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 10); }
+    if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 15); }
     const aheadX = Math.round(nx + Math.cos(s.ang) * 2.5), aheadY = Math.round(ny + Math.sin(s.ang) * 2.5);
     const ahead = tileAt(aheadX, aheadY);
     if (ahead !== T.VOID && ahead !== T.DEEP && ahead !== T.WATER) {
@@ -302,7 +317,7 @@ function shipTick(dt) {
     }
     const nx = s.x + (dx / d) * SIM.SHIP_SPEED * dt, ny = s.y + (dy / d) * SIM.SHIP_SPEED * dt;
     s.revealCd -= dt;
-    if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 10); }
+    if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 15); }
     const aheadT = tileAt(Math.round(nx), Math.round(ny));
     if (walkable(Math.round(nx), Math.round(ny)) && aheadT !== T.WATER && aheadT !== T.DEEP) {
       s.state = "docked"; s.dockedAt = world.time;
@@ -357,7 +372,7 @@ function tickFishingBoats(dt) {
       s.revealCd = 2;
       const cx = Math.round(s.x), cy = Math.round(s.y);
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        if (tileAt(cx + dx, cy + dy) === T.VOID) { revealArea(cx + dx * 2, cy + dy * 2, 6); break; }
+        if (tileAt(cx + dx, cy + dy) === T.VOID) { revealArea(cx + dx * 2, cy + dy * 2, 9); break; }
       }
     }
     // 无目标 / 满舱 → 返航
@@ -712,7 +727,7 @@ function expand() {
   world.active.x1 = Math.max(world.active.x1, nx + 25);
   world.active.y1 = Math.max(world.active.y1, ny + 25);
 
-  // 航线工程：主城 → 新区，7 格宽条带。浅水架桥（快），深海填海（慢），山移平，林砍开
+  // 航线工程：主城 → 新区，1 格宽细长走廊线（细木桥跨水、开凿穿山——不再铺宽条带/菱形沙块）。
   // 走廊可能落在未生成区，先生成走廊带再立项
   const sx0 = world.store.x, sy0 = world.store.y;
   const steps = Math.max(Math.abs(nx - sx0), Math.abs(ny - sy0));
@@ -724,17 +739,18 @@ function expand() {
   );
   let bridges = 0, fills = 0, digs = 0;
   const seen = new Set();
-  const addWork = (x, y) => {
+  const addWork = (x, y, i) => {
     if (seen.has(x + "|" + y)) return;
     seen.add(x + "|" + y);
     const t = tileAt(x, y);
-    if (t === T.WATER) { tasksAdd({ type: "BRIDGE", x, y }); bridges++; }
-    else if (t === T.DEEP) { tasksAdd({ type: "FILL", x, y }); fills++; }
+    // 跨水段不预置桥：工人的 goTo 被水挡住时动态立项（blocked 必邻工人所站格，首格必可达），
+    // 完工后沿 corridor 链式续立到对岸
+    if (t === T.WATER || t === T.DEEP) { bridges++; }
     else if (t === T.TREE || t === T.MOUNTAIN) { tasksAdd({ type: "DIG", x, y }); digs++; }
   };
   for (let i = 0; i <= steps; i++) {
     const x = Math.round(sx0 + dxs * i), y = Math.round(sy0 + dys * i);
-    for (const w of [-2, -1, 0, 1, 2]) addWork(Math.round(x + pxv * w), Math.round(y + pyv * w));
+    addWork(x, y, i);
     if (i % 7 === 0 && tileAt(x, y) === T.GRASS) {
       const roadSettle = nearestSettlement(x, y);
       if (roadSettle) {
@@ -849,6 +865,33 @@ function ownerSettle(x, y) {
     if (d < bd) { bd = d; best = s; }
   }
   return best;
+}
+
+// 池塘选址：三级优先——①邻水格（贴着海/河/塘连片）②近水缘（3 格内有水）③纯内陆兜底
+// anchor 为需求点（农田/聚落），maxR 限定寻找范围；一切以"塘连塘成湖，不零散"为纲
+function findPondSpot(anchor, maxR) {
+  // ① 邻水：anchor 附近逐圈找「GRASS 且 4 邻含水」
+  for (let r = 1; r <= maxR; r++) {
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const x = anchor.x + dx, y = anchor.y + dy;
+      if (tileAt(x, y) !== T.GRASS || !walkable(x, y)) continue;
+      if (nearAny(x, y, [T.HOUSE, T.SITE], 1)) continue;
+      if (neighborsOf(x, y).some(p => tileAt(p.x, p.y) === T.WATER || tileAt(p.x, p.y) === T.DEEP)) return { x, y };
+    }
+  }
+  // ② 近水缘：GRASS 且 3 格内有水（半连片）
+  for (let r = 1; r <= maxR; r++) {
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const x = anchor.x + dx, y = anchor.y + dy;
+      if (tileAt(x, y) !== T.GRASS || !walkable(x, y)) continue;
+      if (nearAny(x, y, [T.HOUSE, T.SITE], 1)) continue;
+      if (nearAny(x, y, [T.WATER, T.DEEP], 3)) return { x, y };
+    }
+  }
+  // ③ 纯内陆兜底：anchor 旁任意干净草地
+  return findSpot(anchor.x, anchor.y, 2, Math.max(5, maxR), T.GRASS, [T.HOUSE, T.SITE]);
 }
 // 全域存粮总和（HUD/规划/告警的全局视角指标；实际进食只消耗所在城市库存）
 function totalFood() {

@@ -28,7 +28,7 @@ const T = {
 
 const TILE_META = {
   [T.VOID]:     { name: "虚空", color: "#0a0d13", walk: false, h: 0 },
-  [T.DEEP]:     { name: "深海", color: "#123a5e", walk: false, fillable: true, fillTo: T.SAND, hp: 14 },
+  [T.DEEP]:     { name: "深海", color: "#123a5e", walk: false, bridgeable: true, hp: 8 },
   [T.WATER]:    { name: "浅海", color: "#235d96", walk: false, fillable: true, bridgeable: true, fillTo: T.SAND, hp: 8 },
   [T.SAND]:     { name: "沙滩", color: "#cfc08a", walk: true, h: 0 },
   [T.GRASS]:    { name: "草地", color: "#5e8c4f", walk: true, h: 0 },
@@ -72,7 +72,7 @@ const SIM = {
   BRIDGE_HP: 3,         // 架一座桥所需工时（比填海快得多）
   EXPLORE_CHANCE: 0.06, // 探索欲 1.0 的小人每次决策触发探索的概率
   EXPLORE_LEGS: 6,      // 一次探索旅程最多延伸的段数
-  REVEAL_RADIUS: 12,    // 探索点亮的斑块半径上限（格），实际大小随机且边界有噪声扰动
+  REVEAL_RADIUS: 18,    // 探索点亮的斑块半径上限（格），实际大小随机且边界有噪声扰动
   // ---- 食物体系 ----
   BERRY_STOCK: 3,       // 每丛浆果/果树的果量上限
   BERRY_REGEN: 60,      // 每 60 秒再生 1 份
@@ -85,7 +85,7 @@ const SIM = {
   WILD_BREED_CAP: 60,   // 野生可猎动物总量上限
   TURTLE_CAP: 12,       // 海龟总量上限
   WHALE_CAP: 5,         // 鲸总量上限
-  ANIMAL_STRAND_DEATH: 90,  // 动物被困（脚下不再是栖息地）坚持时长（秒），超时死亡
+  ANIMAL_STRAND_DEATH: 180, // 动物被困（脚下不再是栖息地）坚持时长（秒），超时死亡——给救援留足窗口
   // ---- 航海 ----
   SHIP_COST: 10,        // 造一艘远航船耗木材（联合库存）
   SHIP_SPEED: 3,        // 船速（格/秒）
@@ -243,7 +243,7 @@ function findPath(sx, sy, tx, ty, maxNodes) {
         const d = Math.abs(nx - sx) + Math.abs(ny - sy);
         if (d < blockedD) {
           const meta = TILE_META[tileAt(nx, ny)];
-          if (meta.diggable || meta.fillable) { blockedD = d; blocked = { x: nx, y: ny }; }
+          if (meta.diggable || meta.fillable || meta.bridgeable) { blockedD = d; blocked = { x: nx, y: ny }; }
         }
         continue;
       }
@@ -296,12 +296,18 @@ const world = {
   litCells: new Set(),  // 已被探索点亮的格子 "x,y"（点亮永久，重算时不黑回）
   berryStock: new Map(),// 浆果/果树果量 "x,y" → 份数
   fishStock: new Map(), // 浅海鱼群 "x,y" → 份数
+  ponds: new Set(),     // 人工池塘格 "x,y"（EXCAV 挖出来的水，显示为池塘而非浅海）
+  lastBridgeHead: null, // 上一条桥线的桥头（续接锚点）
+  lastBridgeDir: null,  // 上一条桥线的走向（续接沿此直线延伸，保证笔直）
   pastures: [],         // [{x,y}] 牧场
   docks: [],            // [{x,y}] 码头
   ships: [],            // 远航船实体
   caves: [],            // [{x,y}] 洞穴（采石场选址）
   quarries: [],         // [{x,y}] 采石场（定期产石材）
   sandpits: [],         // [{x,y}] 沙场（定期产沙土）
+  ponds: new Set(),     // 人工池塘（genWorld 重置）
+  lastBridgeHead: null,
+  lastBridgeDir: null,
   logs: [],
 };
 
@@ -339,6 +345,9 @@ function setTile(x, y, t) {
   const i = cIdx(x, y);
   c.tiles[i] = t;
   c.hp[i] = 0;
+  c.thumbDirty = true;                              // 缩略图缓存失效
+  const k = x + "," + y;
+  if (t !== T.WATER) world.ponds.delete(k);          // 水格被改作他用：池塘标记移除
 }
 
 // 兼容旧调用点：无限地图无边界
@@ -408,6 +417,7 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
   for (let y = ey0; y <= ey1; y++) {
     for (let x = ex0; x <= ex1; x++) {
       const c = ensureChunk(x >> 5, y >> 5);
+      c.thumbDirty = true;   // 缩略图缓存失效（tile 可能被点亮/生成改写）
       const wasGen = c.gen;
       c.gen = true;
       const i = cIdx(x, y);
@@ -424,12 +434,17 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
       }
       if (!inInfluence) { settleFarTile(c, i, x, y, reveal, litTest, wasGen); elev[li] = -1; continue; }
       const curTile = c.tiles[i];
+      const cachedE = c.elev ? c.elev[i] : -1;
       if (curTile !== T.VOID) {
-        // 已生成格（房屋/道路/桥/农田/已点亮地形）：只补海拔渲染场，绝不改写 tile——点亮只属于虚空
-        elev[li] = N.fbm(x * 0.05, y * 0.05, 4) * 0.55 + bump;
+        // 已生成格（房屋/道路/桥/农田/已点亮地形）：绝不改写 tile——点亮只属于虚空。
+        // 海拔场已有数据（缓存）则零成本跳过；首次缺数据才补一次（渲染地势用）
+        if (cachedE < 0) elev[li] = N.fbm(x * 0.05, y * 0.05, 4) * 0.55 + bump;
+        else elev[li] = cachedE;
         continue;
       }
-      const e = N.fbm(x * 0.05, y * 0.05, 4) * 0.55 + bump;
+      // VOID 格完整生成：bump=0（无岛影响）时海拔取 chunk 缓存——重叠点亮区零重复 fbm；
+      // 岛缘格（bump>0）必须重算：发现岛的抬升依赖本轮 bump，缓存里没有
+      const e = (cachedE >= 0 && bump === 0) ? cachedE : N.fbm(x * 0.05, y * 0.05, 4) * 0.55 + bump;
       const m = N.fbm(x * 0.06 + 90, y * 0.06 + 55, 3);
       elev[li] = e;
       firstPass[li] = 1;
@@ -536,7 +551,7 @@ function shipTick(dt) {
     const ny = s.y + Math.sin(s.ang) * SIM.SHIP_SPEED * dt;
     // 航行沿途大面积点亮虚空（航海开拓的核心价值）
     s.revealCd -= dt;
-    if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 10); }
+    if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 15); }
     const aheadX = Math.round(nx + Math.cos(s.ang) * 2.5), aheadY = Math.round(ny + Math.sin(s.ang) * 2.5);
     const ahead = tileAt(aheadX, aheadY);
     if (ahead !== T.VOID && ahead !== T.DEEP && ahead !== T.WATER) {
@@ -574,7 +589,7 @@ function shipTick(dt) {
     }
     const nx = s.x + (dx / d) * SIM.SHIP_SPEED * dt, ny = s.y + (dy / d) * SIM.SHIP_SPEED * dt;
     s.revealCd -= dt;
-    if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 10); }
+    if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 15); }
     const aheadT = tileAt(Math.round(nx), Math.round(ny));
     if (walkable(Math.round(nx), Math.round(ny)) && aheadT !== T.WATER && aheadT !== T.DEEP) {
       s.state = "docked"; s.dockedAt = world.time;
@@ -629,7 +644,7 @@ function tickFishingBoats(dt) {
       s.revealCd = 2;
       const cx = Math.round(s.x), cy = Math.round(s.y);
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        if (tileAt(cx + dx, cy + dy) === T.VOID) { revealArea(cx + dx * 2, cy + dy * 2, 6); break; }
+        if (tileAt(cx + dx, cy + dy) === T.VOID) { revealArea(cx + dx * 2, cy + dy * 2, 9); break; }
       }
     }
     // 无目标 / 满舱 → 返航
@@ -984,7 +999,7 @@ function expand() {
   world.active.x1 = Math.max(world.active.x1, nx + 25);
   world.active.y1 = Math.max(world.active.y1, ny + 25);
 
-  // 航线工程：主城 → 新区，7 格宽条带。浅水架桥（快），深海填海（慢），山移平，林砍开
+  // 航线工程：主城 → 新区，1 格宽细长走廊线（细木桥跨水、开凿穿山——不再铺宽条带/菱形沙块）。
   // 走廊可能落在未生成区，先生成走廊带再立项
   const sx0 = world.store.x, sy0 = world.store.y;
   const steps = Math.max(Math.abs(nx - sx0), Math.abs(ny - sy0));
@@ -996,17 +1011,18 @@ function expand() {
   );
   let bridges = 0, fills = 0, digs = 0;
   const seen = new Set();
-  const addWork = (x, y) => {
+  const addWork = (x, y, i) => {
     if (seen.has(x + "|" + y)) return;
     seen.add(x + "|" + y);
     const t = tileAt(x, y);
-    if (t === T.WATER) { tasksAdd({ type: "BRIDGE", x, y }); bridges++; }
-    else if (t === T.DEEP) { tasksAdd({ type: "FILL", x, y }); fills++; }
+    // 跨水段不预置桥：工人的 goTo 被水挡住时动态立项（blocked 必邻工人所站格，首格必可达），
+    // 完工后沿 corridor 链式续立到对岸
+    if (t === T.WATER || t === T.DEEP) { bridges++; }
     else if (t === T.TREE || t === T.MOUNTAIN) { tasksAdd({ type: "DIG", x, y }); digs++; }
   };
   for (let i = 0; i <= steps; i++) {
     const x = Math.round(sx0 + dxs * i), y = Math.round(sy0 + dys * i);
-    for (const w of [-2, -1, 0, 1, 2]) addWork(Math.round(x + pxv * w), Math.round(y + pyv * w));
+    addWork(x, y, i);
     if (i % 7 === 0 && tileAt(x, y) === T.GRASS) {
       const roadSettle = nearestSettlement(x, y);
       if (roadSettle) {
@@ -1122,6 +1138,33 @@ function ownerSettle(x, y) {
   }
   return best;
 }
+
+// 池塘选址：三级优先——①邻水格（贴着海/河/塘连片）②近水缘（3 格内有水）③纯内陆兜底
+// anchor 为需求点（农田/聚落），maxR 限定寻找范围；一切以"塘连塘成湖，不零散"为纲
+function findPondSpot(anchor, maxR) {
+  // ① 邻水：anchor 附近逐圈找「GRASS 且 4 邻含水」
+  for (let r = 1; r <= maxR; r++) {
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const x = anchor.x + dx, y = anchor.y + dy;
+      if (tileAt(x, y) !== T.GRASS || !walkable(x, y)) continue;
+      if (nearAny(x, y, [T.HOUSE, T.SITE], 1)) continue;
+      if (neighborsOf(x, y).some(p => tileAt(p.x, p.y) === T.WATER || tileAt(p.x, p.y) === T.DEEP)) return { x, y };
+    }
+  }
+  // ② 近水缘：GRASS 且 3 格内有水（半连片）
+  for (let r = 1; r <= maxR; r++) {
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const x = anchor.x + dx, y = anchor.y + dy;
+      if (tileAt(x, y) !== T.GRASS || !walkable(x, y)) continue;
+      if (nearAny(x, y, [T.HOUSE, T.SITE], 1)) continue;
+      if (nearAny(x, y, [T.WATER, T.DEEP], 3)) return { x, y };
+    }
+  }
+  // ③ 纯内陆兜底：anchor 旁任意干净草地
+  return findSpot(anchor.x, anchor.y, 2, Math.max(5, maxR), T.GRASS, [T.HOUSE, T.SITE]);
+}
 // 全域存粮总和（HUD/规划/告警的全局视角指标；实际进食只消耗所在城市库存）
 function totalFood() {
   return world.settlements.reduce((sum, s) => sum + (s.stock ? s.stock.food || 0 : 0), 0);
@@ -1181,6 +1224,7 @@ function workTile(task, amount) {
 // ============ 任务系统：建造 / 开荒 / 移山 / 填海 ============
 
 let _taskId = 1;
+let _lastPond = null;   // 最近挖的塘（池塘聚簇：下一个塘贴着它挖）
 const tasks = {
   list: [],
 };
@@ -1239,7 +1283,9 @@ function tasksTake(agent) {
     const age = world.time - (t.born || world.time);   // 任务老化：立项越久越优先，远任务不饿死
     // 资源危机升权：联合木材枯竭时伐木任务急速提级（否则桥/船工程全饿死）
     const crisis = (t.type === "DIG" && t.res === "wood") ? Math.max(0, 8 - jointStock("wood")) * 200 : 0;
-    const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000 - age * 3 - crisis;
+    // 走廊桥是国家工程（两岛间唯一通路），优先级高于日常任务
+    const natl = t.type === "BRIDGE" && t.corridor ? 1500 : 0;
+    const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000 - age * 3 - crisis - natl;
     if (score < bestScore) { bestScore = score; best = t; }
   }
   return best;
@@ -1308,6 +1354,16 @@ function tasksFinish(t, agent, was) {
     case "BRIDGE": {
       setTile(t.x, t.y, T.BRIDGE);
       logThrottled("工匠们在海峡上架起了木桥。", 30);
+      // 链式生长：沿 corridor 方向续立下一格（remain 递减到 0 停——桥不无限穿海）
+      if (t.corridor && t.corridor.remain > 0) {
+        const nx3 = t.x + t.corridor.dx, ny3 = t.y + t.corridor.dy;
+        const tt = tileAt(nx3, ny3);
+        if ((tt === T.WATER || tt === T.DEEP) &&
+            !tasks.list.some(k => !k.done && k.x === nx3 && k.y === ny3)) {
+          tasksAdd({ type: "BRIDGE", x: nx3, y: ny3,
+            corridor: { dx: t.corridor.dx, dy: t.corridor.dy, remain: t.corridor.remain - 1 } });
+        }
+      }
       break;
     }
     case "PLANT": {
@@ -1381,8 +1437,10 @@ function tasksFinish(t, agent, was) {
       break;
     }
     case "EXCAV": {
-      // 挖塘：陆格挖成水（灌溉/养鱼的人工水域）
+      // 挖塘：陆格挖成水（灌溉/养鱼的人工水域，显示为池塘）
       setTile(t.x, t.y, T.WATER);
+      world.ponds.add(t.x + "," + t.y);
+      _lastPond = { x: t.x, y: t.y };   // 连击记忆：下一个塘默认贴着这个挖
       logThrottled("居民挖出了新的水塘，水波在塘里荡开。", 30);
       break;
     }
@@ -1866,7 +1924,7 @@ class Agent {
       const px = Math.round(this.x), py = Math.round(this.y);
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         if (tileAt(px + dx, py + dy) === T.VOID) {
-          revealArea(px + dx * 2, py + dy * 2, 4);
+          revealArea(px + dx * 2, py + dy * 2, 6);
           break;
         }
       }
@@ -2040,7 +2098,7 @@ class Agent {
       if (t) {
         // 劳动保护：路程耗能（ENERGY_DECAY 0.9/s ÷ 船速 1.7 格/s 往返）预估不足 → 先睡觉，防止远途过劳死
         const d = Math.abs(t.x - this.x) + Math.abs(t.y - this.y);
-        if (this.energy < Math.min(95, 18 + d * 0.75)) { this.goSleep(); return; }
+        if (this.energy < Math.min(95, 18 + d * (this.job === "explorer" ? 0.4 : 0.75))) { this.goSleep(); return; }   // 探索者耐走（系数减半）
         this.task = t;
         t.workers.add(this);
         if (this.goTo(t.x, t.y)) {
@@ -2087,7 +2145,7 @@ class Agent {
       // 前沿扫描节流：每 2 sim 秒一次，期间复用缓存（deide 高频不重复扫屏）
       if (world.time - (this.frontScanT || -9) > 2) {
         this.frontScanT = world.time;
-        this.frontCache = findFrontier(Math.round(this.x), Math.round(this.y), 40);
+        this.frontCache = findFrontier(Math.round(this.x), Math.round(this.y), 80);   // 扫描 80 格：点亮推进后新前沿仍在视野
       }
       const front = this.frontCache;
       if (front) {
@@ -2095,9 +2153,14 @@ class Agent {
           this.state = "walk";
           this.onArrive = () => {
             this.state = "idle";
-            // 到达前沿：大面积点亮（斑块推进边界），随后由被动点亮与下次前沿扫描接力
+            // 到达前沿：大面积点亮 + 连击（向斑块边缘再点 2 处，一次驻留推进一大片）
             if (tileAt(front.x, front.y) !== T.VOID) {
-              revealArea(front.x, front.y, 8 + Math.round(this.adventure * 4));
+              revealArea(front.x, front.y, 12 + Math.round(this.adventure * 6));
+              for (let k = 0; k < 2; k++) {
+                const ang = rand() * Math.PI * 2, d2 = 10 + rand() * 10;
+                const px = Math.round(front.x + Math.cos(ang) * d2), py = Math.round(front.y + Math.sin(ang) * d2);
+                if (tileAt(px, py) === T.VOID) revealArea(px, py, 10);
+              }
             }
           };
           return;
@@ -2289,7 +2352,7 @@ class Agent {
     const dist = 3 + rand() * 3;
     const tx = Math.round(this.x + this.exploring.dx * dist);
     const ty = Math.round(this.y + this.exploring.dy * dist);
-    revealArea(tx, ty, randRange(5, SIM.REVEAL_RADIUS));
+    revealArea(tx, ty, randRange(7.5, SIM.REVEAL_RADIUS));
     // 走向点亮区前沿（而非跳过它）
     const stepTo = Math.min(dist, 5);
     const gx = Math.round(this.x + this.exploring.dx * stepTo);
@@ -2339,13 +2402,28 @@ class Agent {
       const b = r.blocked;
       const t = tileAt(b.x, b.y);
       const meta = TILE_META[t];
-      if (meta.diggable || meta.fillable) {
+      if (meta.diggable) {
+        // 山/树：单格立项开凿
         const exist = tasks.list.find(k => !k.done && k.x === b.x && k.y === b.y);
         if (!exist) {
-          const type = meta.diggable ? "DIG" : (meta.bridgeable ? "BRIDGE" : "FILL");
-          tasksAdd({ type, x: b.x, y: b.y });
-          logThrottled(`通路受阻：(${b.x},${b.y}) 的${meta.name}挡住了去路，立项${type === "BRIDGE" ? "架桥" : "改造"}。`, 15);
+          tasksAdd({ type: "DIG", x: b.x, y: b.y });
+          logThrottled(`通路受阻：(${b.x},${b.y}) 的${meta.name}挡住了去路，立项改造。`, 15);
         }
+      } else if (t === T.WATER || t === T.DEEP) {
+        // 跨水：链式桥——立项首格（blocked 必邻工人所站格，必可达），带朝目标方向与剩余步数；
+        // 建成后 tasksFinish 沿方向续立下一格（remain 递减到 0 停，桥不无限穿海），
+        // 工人跟进过桥，走到新桥头再续——细长桥线直通对岸
+        const dup = tasks.list.some(k => !k.done && k.x === b.x && k.y === b.y);
+        // 同海峡只架一条桥：25 格内已有桥（在建成线）则不另起炉灶，等它建成即可通行
+        if (!dup && !nearAny(b.x, b.y, [T.BRIDGE], 25) && tasksPending("BRIDGE", true).length < 40) {
+          tasksAdd({ type: "BRIDGE", x: b.x, y: b.y,
+            corridor: { dx: Math.sign(tx - b.x) || 0, dy: Math.sign(ty - b.y) || 0,
+              remain: Math.abs(tx - b.x) + Math.abs(ty - b.y) } });
+          logThrottled(`通路受阻：(${b.x},${b.y}) 的水域挡住了去路，开始架桥。`, 15);
+        }
+      } else if (meta.fillable) {
+        // 其余可填格（罕见）：兜底单格填平
+        if (!tasks.list.some(k => !k.done && k.x === b.x && k.y === b.y)) tasksAdd({ type: "FILL", x: b.x, y: b.y });
       }
     }
     return false;
@@ -2493,6 +2571,25 @@ function findFrontier(cx, cy, maxR) {
     }
   }
   return null;
+}
+
+// 从 (x,y) 的连通浅水格数（只走 WATER）是否 ≤cap——小池塘不需要架桥
+function waterRegionSmall(x, y, cap) {
+  const seen = new Set([x + "," + y]);
+  const q = [[x, y]];
+  let count = 1;
+  while (q.length) {
+    const [cx, cy] = q.pop();
+    for (const p of neighborsOf(cx, cy)) {
+      const k = p.x + "," + p.y;
+      if (seen.has(k)) continue;
+      if (tileAt(p.x, p.y) !== T.WATER) continue;
+      seen.add(k); count++;
+      if (count > cap) return false;
+      q.push([p.x, p.y]);
+    }
+  }
+  return true;
 }
 
 function isDaytime() {
@@ -2683,12 +2780,26 @@ function plannerTick() {
           findSpot(anchor.x, anchor.y, c ? 3 : 4, c ? 16 : 26, T.GRASS, [T.HOUSE, T.SITE]);
     }
     if (s) {
-      // 灌溉约束：农田 5 格内需有水（海/塘均可）；选址无水 → 先在附近挖塘引水（塘成后自然满足）
+      // 灌溉约束：农田 5 格内需有水（海/塘均可）；选址无水 → 先挖塘引水
+      // 挖塘方向性：向最近水源的水缘挖（塘从天然水"长"向农田，连片不零散）；无水可依才贴田独立挖
       if (nearAny(s.x, s.y, [T.WATER, T.DEEP], 5)) {
         tasksAdd({ type: "FARM", x: s.x, y: s.y, need: 9 });
         logThrottled(`规划署：粮食储备吃紧（${Math.floor(totalFood())}），批准开垦 (${s.x},${s.y})。`, 10);
       } else if (tasksPending("EXCAV", true).length < 1) {
-        const pond = expandSpot(s, 2, 6, T.GRASS, new Set()) ||
+        // 找最近水源：以农田为心螺旋 30 格
+        let water = null;
+        outerW:
+        for (let r = 6; r <= 30; r++) {
+          for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+            const t2 = tileAt(s.x + dx, s.y + dy);
+            if (t2 === T.WATER || t2 === T.DEEP) { water = { x: s.x + dx, y: s.y + dy }; break outerW; }
+          }
+        }
+        // 水缘朝农田侧挖（贴着天然水连片）；无水才贴田独立挖
+        const pond = (water && findPondSpot(water, 4)) ||
+                     (water && findPondSpot(s, 6)) ||
+                     expandSpot(s, 2, 6, T.GRASS, new Set()) ||
                      findSpot(s.x, s.y, 2, 5, T.GRASS, [T.FARM, T.HOUSE]);
         if (pond) {
           tasksAdd({ type: "EXCAV", x: pond.x, y: pond.y, need: 8 });
@@ -2784,9 +2895,11 @@ function plannerTick() {
         }
       }
     }
-    // ③ 挖塘
+    // ③ 挖塘：聚簇选址（连击优先贴上次的塘，其次贴天然水，最后独立）
     if (!placed && tasksPending("EXCAV", true).length < 1) {
-      const pond = findSpot(a.x, a.y, 3, 12, T.GRASS, [T.FARM, T.HOUSE]);
+      const pond = (_lastPond && expandSpot(_lastPond, 1, 6, T.GRASS, new Set())) ||
+                   findPondSpot(a, 12) ||
+                   findSpot(a.x, a.y, 3, 12, T.GRASS, [T.FARM, T.HOUSE]);
       if (pond) {
         tasksAdd({ type: "EXCAV", x: pond.x, y: pond.y, need: 8 });
         logThrottled("规划署：近处没有可养鱼的水域，先挖一口鱼塘。", 30);
@@ -2903,6 +3016,32 @@ function plannerTick() {
     }
   }
 
+  // 2h3. 探索者边疆拓殖：探索者的家随前沿迁移（每 30s 检查一次），前沿旁无房则立项建房——城市向星空生长
+  if (world.time - (_frontierCd || -999) > 30) {
+    _frontierCd = world.time;
+    for (const e of agents.filter(a => !a.dead && a.job === "explorer" && a.home && !a.voyaging)) {
+      const front = findFrontier(e.home.x | 0, e.home.y | 0, 60);
+      if (!front) continue;
+      const dHome = Math.abs(front.x - e.home.x) + Math.abs(front.y - e.home.y);
+      if (dHome <= 50) continue;   // 家离前沿足够近
+      // 前沿附近找已有房子迁居
+      const nearHouse = world.houses.find(h => Math.abs(h.x - front.x) + Math.abs(h.y - front.y) < 15 &&
+        !agents.some(a2 => !a2.dead && a2 !== e && a2.home === h));
+      if (nearHouse) {
+        e.home = { x: nearHouse.x, y: nearHouse.y };
+        logMsg(`探索者 ${e.name} 把家搬到了边疆，离世界边界更近了。`);
+      } else if (!tasks.list.some(k => !k.done && k.type === "BUILD" &&
+          Math.abs(k.x - front.x) + Math.abs(k.y - front.y) < 12)) {
+        // 前沿旁无房：立项边疆新居（不与其他建房任务挤在一起）
+        const spot = expandSpot(front, 2, 8, T.GRASS, new Set()) || findSpot(front.x, front.y, 2, 8, T.GRASS);
+        if (spot) {
+          tasksAdd({ type: "BUILD", x: spot.x, y: spot.y, need: 14 });
+          logMsg(`边疆营帐：探索者的新居将立在前沿 (${spot.x},${spot.y}) 旁。`);
+        }
+      }
+    }
+  }
+
   // 3. 饥荒告警（一天最多提醒一次，避免刷屏）
   const days = totalFood() / Math.max(1, pop * 0.9);
   if (days < 1 && pop > 0) { logThrottled(`饥荒告警：存粮仅够 ${days.toFixed(1)} 天！`, SIM.DAY_LEN); emit("famine"); }
@@ -2914,7 +3053,7 @@ function plannerTick() {
   if (pop > 0 && totalFood() > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
     const near = findBirthSpot();
     const birthCity = near && ownerSettle(near.x, near.y);
-    if (near && birthCity && ensureStock(birthCity).food < 20) { /* 出生城市存粮不足：暂缓生育 */ }
+    if (near && birthCity && ensureStock(birthCity).food < 12) { /* 出生城市存粮不足：暂缓生育 */ }
     else if (near) {
       const baby = spawnAgent(near.x, near.y);
       baby.age = 0;   // 新生儿从 0 岁长大（1 游戏年 = 1 岁）
@@ -2924,20 +3063,20 @@ function plannerTick() {
   }
 
   // 5. 疆土随人口生长：每增长约 25 人，规划署主动开辟一片新疆土（无人口上限）
-  if (pop >= (world.expansions + 1) * 25) {
+  if (pop >= (world.expansions + 1) * 20) {   // 每 20 人生长一次疆土
     expand();
   }
 
-  // 6. 冻结任务自愈：冻结超 60 秒的工程，自动把周围 2 格同类障碍补成立项，
-  //    相当于推进前沿自动横向扩宽，避免被凹形海岸卡死。
-  //    建造类任务累计冻结 180 秒仍无法施工 → 放弃，退地恢复草地，释放名额
+  // 6. 冻结任务自愈：冻结超 60 秒的**开凿**工程，自动把周围 2 格同类障碍补成立项（山地走廊保留宽度机制）。
+  //    FILL/BRIDGE 不参与扩散：跨水通路由 goTo 的连续水段桥线一次成型（1 格宽细桥，不再菱形铺沙）。
+  //    建造/填海类任务累计冻结 180 秒仍无法施工 → 放弃（填海恢复为水），释放名额
   for (let i = tasks.list.length - 1; i >= 0; i--) {
     const t = tasks.list[i];
     if ((t.blockedCount || 0) < 3) continue;
     t.freezeAge = (t.freezeAge || 0) + SIM.PLANNER_INTERVAL;
 
-    if (t.freezeAge >= 180 && (t.type === "BUILD" || t.type === "FARM")) {
-      setTile(t.x, t.y, T.GRASS);
+    if (t.freezeAge >= 180 && (t.type === "BUILD" || t.type === "FARM" || t.type === "FILL")) {
+      setTile(t.x, t.y, t.type === "FILL" ? T.WATER : T.GRASS);   // 填海放弃恢复为水
       tasks.list.splice(i, 1);
       logThrottled("规划署放弃了一处无法施工的地块。", 60);
       continue;
@@ -2945,12 +3084,13 @@ function plannerTick() {
     if (t.freezeAge < 60) continue;
     t.freezeAge = 0;
     t.blockedCount = 0;
+    if (t.type !== "DIG") continue;   // 只有开凿需要横向扩宽（凹形山壁卡死），水路已改用桥线
     for (let dy2 = -2; dy2 <= 2; dy2++) {
       for (let dx2 = -2; dx2 <= 2; dx2++) {
         const nx2 = t.x + dx2, ny2 = t.y + dy2;
         const meta2 = TILE_META[tileAt(nx2, ny2)];
-        if ((meta2.diggable || meta2.fillable) && !tasks.list.some(k => !k.done && k.x === nx2 && k.y === ny2)) {
-          tasksAdd({ type: meta2.diggable ? "DIG" : "FILL", x: nx2, y: ny2 });
+        if (meta2.diggable && !tasks.list.some(k => !k.done && k.x === nx2 && k.y === ny2)) {
+          tasksAdd({ type: "DIG", x: nx2, y: ny2 });
         }
       }
     }
@@ -3107,6 +3247,7 @@ function farmTick(dt) {
 // ---- 模拟主步进 ----
 let _plannerCd = SIM.PLANNER_INTERVAL;
 let _lastFeast = -999;
+let _frontierCd = -999;
 
 function simUpdate(dt) {
   world.time += dt;
@@ -3131,9 +3272,11 @@ function simUpdate(dt) {
 
 // 劳动力市场：职业随需求平滑流转——零待办的职业逐渐转出，最缺工的职业逐渐补入
 function jobMarketTick(pop) {
-  // 探索者保底：至少 1 人专职探索（劳动力市场优先级最高——没有探索者，世界边界就停止生长）
-  if (!agents.some(a => !a.dead && a.job === "explorer")) {
-    // 从人数最多的非探索者职业中挑 adventure 最高者转职（不抽独苗职业，避免抽走唯一的渔夫/猎人）
+  // 探索者名额：按人口每 20 人 1 名（世界边界推进的主力），至少 1 人
+  // 缺额时从人数最多的非探索者职业中挑 adventure 最高者转职（不抽独苗职业，避免抽走唯一的渔夫/猎人）
+  const explorerN = agents.filter(a => !a.dead && a.job === "explorer").length;
+  const explorerWant = Math.max(1, Math.floor(agents.length / 20));
+  if (explorerN < explorerWant) {
     const byJob = {};
     for (const a of agents) if (!a.dead && a.job !== "explorer") (byJob[a.job] = byJob[a.job] || []).push(a);
     let pool = null;
@@ -3144,7 +3287,7 @@ function jobMarketTick(pop) {
     if (pool) {
       const best = pool.sort((a, b) => b.adventure - a.adventure)[0];
       best.job = "explorer";
-      logMsg(`${best.name} 放下手中活计，专职成为探索者——去把世界的边界找出来。`);
+      logMsg(`${best.name} 放下手中活计，专职成为探索者——去把世界的边界找出来。（${explorerN + 1}/${explorerWant}）`);
     }
   }
   const demand = {

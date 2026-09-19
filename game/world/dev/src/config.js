@@ -12,7 +12,7 @@ const T = {
 
 const TILE_META = {
   [T.VOID]:     { name: "虚空", color: "#0a0d13", walk: false, h: 0 },
-  [T.DEEP]:     { name: "深海", color: "#123a5e", walk: false, fillable: true, fillTo: T.SAND, hp: 14 },
+  [T.DEEP]:     { name: "深海", color: "#123a5e", walk: false, bridgeable: true, hp: 8 },
   [T.WATER]:    { name: "浅海", color: "#235d96", walk: false, fillable: true, bridgeable: true, fillTo: T.SAND, hp: 8 },
   [T.SAND]:     { name: "沙滩", color: "#cfc08a", walk: true, h: 0 },
   [T.GRASS]:    { name: "草地", color: "#5e8c4f", walk: true, h: 0 },
@@ -56,7 +56,7 @@ const SIM = {
   BRIDGE_HP: 3,         // 架一座桥所需工时（比填海快得多）
   EXPLORE_CHANCE: 0.06, // 探索欲 1.0 的小人每次决策触发探索的概率
   EXPLORE_LEGS: 6,      // 一次探索旅程最多延伸的段数
-  REVEAL_RADIUS: 12,    // 探索点亮的斑块半径上限（格），实际大小随机且边界有噪声扰动
+  REVEAL_RADIUS: 18,    // 探索点亮的斑块半径上限（格），实际大小随机且边界有噪声扰动
   // ---- 食物体系 ----
   BERRY_STOCK: 3,       // 每丛浆果/果树的果量上限
   BERRY_REGEN: 60,      // 每 60 秒再生 1 份
@@ -69,7 +69,7 @@ const SIM = {
   WILD_BREED_CAP: 60,   // 野生可猎动物总量上限
   TURTLE_CAP: 12,       // 海龟总量上限
   WHALE_CAP: 5,         // 鲸总量上限
-  ANIMAL_STRAND_DEATH: 90,  // 动物被困（脚下不再是栖息地）坚持时长（秒），超时死亡
+  ANIMAL_STRAND_DEATH: 180, // 动物被困（脚下不再是栖息地）坚持时长（秒），超时死亡——给救援留足窗口
   // ---- 航海 ----
   SHIP_COST: 10,        // 造一艘远航船耗木材（联合库存）
   SHIP_SPEED: 3,        // 船速（格/秒）

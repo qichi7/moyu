@@ -57,7 +57,7 @@ function findPath(sx, sy, tx, ty, maxNodes) {
         const d = Math.abs(nx - sx) + Math.abs(ny - sy);
         if (d < blockedD) {
           const meta = TILE_META[tileAt(nx, ny)];
-          if (meta.diggable || meta.fillable) { blockedD = d; blocked = { x: nx, y: ny }; }
+          if (meta.diggable || meta.fillable || meta.bridgeable) { blockedD = d; blocked = { x: nx, y: ny }; }
         }
         continue;
       }

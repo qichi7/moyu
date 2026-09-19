@@ -171,12 +171,26 @@ function plannerTick() {
           findSpot(anchor.x, anchor.y, c ? 3 : 4, c ? 16 : 26, T.GRASS, [T.HOUSE, T.SITE]);
     }
     if (s) {
-      // 灌溉约束：农田 5 格内需有水（海/塘均可）；选址无水 → 先在附近挖塘引水（塘成后自然满足）
+      // 灌溉约束：农田 5 格内需有水（海/塘均可）；选址无水 → 先挖塘引水
+      // 挖塘方向性：向最近水源的水缘挖（塘从天然水"长"向农田，连片不零散）；无水可依才贴田独立挖
       if (nearAny(s.x, s.y, [T.WATER, T.DEEP], 5)) {
         tasksAdd({ type: "FARM", x: s.x, y: s.y, need: 9 });
         logThrottled(`规划署：粮食储备吃紧（${Math.floor(totalFood())}），批准开垦 (${s.x},${s.y})。`, 10);
       } else if (tasksPending("EXCAV", true).length < 1) {
-        const pond = expandSpot(s, 2, 6, T.GRASS, new Set()) ||
+        // 找最近水源：以农田为心螺旋 30 格
+        let water = null;
+        outerW:
+        for (let r = 6; r <= 30; r++) {
+          for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+            const t2 = tileAt(s.x + dx, s.y + dy);
+            if (t2 === T.WATER || t2 === T.DEEP) { water = { x: s.x + dx, y: s.y + dy }; break outerW; }
+          }
+        }
+        // 水缘朝农田侧挖（贴着天然水连片）；无水才贴田独立挖
+        const pond = (water && findPondSpot(water, 4)) ||
+                     (water && findPondSpot(s, 6)) ||
+                     expandSpot(s, 2, 6, T.GRASS, new Set()) ||
                      findSpot(s.x, s.y, 2, 5, T.GRASS, [T.FARM, T.HOUSE]);
         if (pond) {
           tasksAdd({ type: "EXCAV", x: pond.x, y: pond.y, need: 8 });
@@ -272,9 +286,11 @@ function plannerTick() {
         }
       }
     }
-    // ③ 挖塘
+    // ③ 挖塘：聚簇选址（连击优先贴上次的塘，其次贴天然水，最后独立）
     if (!placed && tasksPending("EXCAV", true).length < 1) {
-      const pond = findSpot(a.x, a.y, 3, 12, T.GRASS, [T.FARM, T.HOUSE]);
+      const pond = (_lastPond && expandSpot(_lastPond, 1, 6, T.GRASS, new Set())) ||
+                   findPondSpot(a, 12) ||
+                   findSpot(a.x, a.y, 3, 12, T.GRASS, [T.FARM, T.HOUSE]);
       if (pond) {
         tasksAdd({ type: "EXCAV", x: pond.x, y: pond.y, need: 8 });
         logThrottled("规划署：近处没有可养鱼的水域，先挖一口鱼塘。", 30);
@@ -391,6 +407,32 @@ function plannerTick() {
     }
   }
 
+  // 2h3. 探索者边疆拓殖：探索者的家随前沿迁移（每 30s 检查一次），前沿旁无房则立项建房——城市向星空生长
+  if (world.time - (_frontierCd || -999) > 30) {
+    _frontierCd = world.time;
+    for (const e of agents.filter(a => !a.dead && a.job === "explorer" && a.home && !a.voyaging)) {
+      const front = findFrontier(e.home.x | 0, e.home.y | 0, 60);
+      if (!front) continue;
+      const dHome = Math.abs(front.x - e.home.x) + Math.abs(front.y - e.home.y);
+      if (dHome <= 50) continue;   // 家离前沿足够近
+      // 前沿附近找已有房子迁居
+      const nearHouse = world.houses.find(h => Math.abs(h.x - front.x) + Math.abs(h.y - front.y) < 15 &&
+        !agents.some(a2 => !a2.dead && a2 !== e && a2.home === h));
+      if (nearHouse) {
+        e.home = { x: nearHouse.x, y: nearHouse.y };
+        logMsg(`探索者 ${e.name} 把家搬到了边疆，离世界边界更近了。`);
+      } else if (!tasks.list.some(k => !k.done && k.type === "BUILD" &&
+          Math.abs(k.x - front.x) + Math.abs(k.y - front.y) < 12)) {
+        // 前沿旁无房：立项边疆新居（不与其他建房任务挤在一起）
+        const spot = expandSpot(front, 2, 8, T.GRASS, new Set()) || findSpot(front.x, front.y, 2, 8, T.GRASS);
+        if (spot) {
+          tasksAdd({ type: "BUILD", x: spot.x, y: spot.y, need: 14 });
+          logMsg(`边疆营帐：探索者的新居将立在前沿 (${spot.x},${spot.y}) 旁。`);
+        }
+      }
+    }
+  }
+
   // 3. 饥荒告警（一天最多提醒一次，避免刷屏）
   const days = totalFood() / Math.max(1, pop * 0.9);
   if (days < 1 && pop > 0) { logThrottled(`饥荒告警：存粮仅够 ${days.toFixed(1)} 天！`, SIM.DAY_LEN); emit("famine"); }
@@ -402,7 +444,7 @@ function plannerTick() {
   if (pop > 0 && totalFood() > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
     const near = findBirthSpot();
     const birthCity = near && ownerSettle(near.x, near.y);
-    if (near && birthCity && ensureStock(birthCity).food < 20) { /* 出生城市存粮不足：暂缓生育 */ }
+    if (near && birthCity && ensureStock(birthCity).food < 12) { /* 出生城市存粮不足：暂缓生育 */ }
     else if (near) {
       const baby = spawnAgent(near.x, near.y);
       baby.age = 0;   // 新生儿从 0 岁长大（1 游戏年 = 1 岁）
@@ -412,20 +454,20 @@ function plannerTick() {
   }
 
   // 5. 疆土随人口生长：每增长约 25 人，规划署主动开辟一片新疆土（无人口上限）
-  if (pop >= (world.expansions + 1) * 25) {
+  if (pop >= (world.expansions + 1) * 20) {   // 每 20 人生长一次疆土
     expand();
   }
 
-  // 6. 冻结任务自愈：冻结超 60 秒的工程，自动把周围 2 格同类障碍补成立项，
-  //    相当于推进前沿自动横向扩宽，避免被凹形海岸卡死。
-  //    建造类任务累计冻结 180 秒仍无法施工 → 放弃，退地恢复草地，释放名额
+  // 6. 冻结任务自愈：冻结超 60 秒的**开凿**工程，自动把周围 2 格同类障碍补成立项（山地走廊保留宽度机制）。
+  //    FILL/BRIDGE 不参与扩散：跨水通路由 goTo 的连续水段桥线一次成型（1 格宽细桥，不再菱形铺沙）。
+  //    建造/填海类任务累计冻结 180 秒仍无法施工 → 放弃（填海恢复为水），释放名额
   for (let i = tasks.list.length - 1; i >= 0; i--) {
     const t = tasks.list[i];
     if ((t.blockedCount || 0) < 3) continue;
     t.freezeAge = (t.freezeAge || 0) + SIM.PLANNER_INTERVAL;
 
-    if (t.freezeAge >= 180 && (t.type === "BUILD" || t.type === "FARM")) {
-      setTile(t.x, t.y, T.GRASS);
+    if (t.freezeAge >= 180 && (t.type === "BUILD" || t.type === "FARM" || t.type === "FILL")) {
+      setTile(t.x, t.y, t.type === "FILL" ? T.WATER : T.GRASS);   // 填海放弃恢复为水
       tasks.list.splice(i, 1);
       logThrottled("规划署放弃了一处无法施工的地块。", 60);
       continue;
@@ -433,12 +475,13 @@ function plannerTick() {
     if (t.freezeAge < 60) continue;
     t.freezeAge = 0;
     t.blockedCount = 0;
+    if (t.type !== "DIG") continue;   // 只有开凿需要横向扩宽（凹形山壁卡死），水路已改用桥线
     for (let dy2 = -2; dy2 <= 2; dy2++) {
       for (let dx2 = -2; dx2 <= 2; dx2++) {
         const nx2 = t.x + dx2, ny2 = t.y + dy2;
         const meta2 = TILE_META[tileAt(nx2, ny2)];
-        if ((meta2.diggable || meta2.fillable) && !tasks.list.some(k => !k.done && k.x === nx2 && k.y === ny2)) {
-          tasksAdd({ type: meta2.diggable ? "DIG" : "FILL", x: nx2, y: ny2 });
+        if (meta2.diggable && !tasks.list.some(k => !k.done && k.x === nx2 && k.y === ny2)) {
+          tasksAdd({ type: "DIG", x: nx2, y: ny2 });
         }
       }
     }
@@ -595,6 +638,7 @@ function farmTick(dt) {
 // ---- 模拟主步进 ----
 let _plannerCd = SIM.PLANNER_INTERVAL;
 let _lastFeast = -999;
+let _frontierCd = -999;
 
 function simUpdate(dt) {
   world.time += dt;
@@ -619,9 +663,11 @@ function simUpdate(dt) {
 
 // 劳动力市场：职业随需求平滑流转——零待办的职业逐渐转出，最缺工的职业逐渐补入
 function jobMarketTick(pop) {
-  // 探索者保底：至少 1 人专职探索（劳动力市场优先级最高——没有探索者，世界边界就停止生长）
-  if (!agents.some(a => !a.dead && a.job === "explorer")) {
-    // 从人数最多的非探索者职业中挑 adventure 最高者转职（不抽独苗职业，避免抽走唯一的渔夫/猎人）
+  // 探索者名额：按人口每 20 人 1 名（世界边界推进的主力），至少 1 人
+  // 缺额时从人数最多的非探索者职业中挑 adventure 最高者转职（不抽独苗职业，避免抽走唯一的渔夫/猎人）
+  const explorerN = agents.filter(a => !a.dead && a.job === "explorer").length;
+  const explorerWant = Math.max(1, Math.floor(agents.length / 20));
+  if (explorerN < explorerWant) {
     const byJob = {};
     for (const a of agents) if (!a.dead && a.job !== "explorer") (byJob[a.job] = byJob[a.job] || []).push(a);
     let pool = null;
@@ -632,7 +678,7 @@ function jobMarketTick(pop) {
     if (pool) {
       const best = pool.sort((a, b) => b.adventure - a.adventure)[0];
       best.job = "explorer";
-      logMsg(`${best.name} 放下手中活计，专职成为探索者——去把世界的边界找出来。`);
+      logMsg(`${best.name} 放下手中活计，专职成为探索者——去把世界的边界找出来。（${explorerN + 1}/${explorerWant}）`);
     }
   }
   const demand = {

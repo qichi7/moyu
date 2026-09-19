@@ -14,6 +14,7 @@ function shade(hex, f) {
 const TILE_VARIANTS = {};
 const TILE_ELEV_VARIANTS = {};  // 按海拔 5 档预调亮度：地势差用坐标海拔直接体现在底色明暗上
 const TILE_GLEAM = {};          // 波光高亮色，预计算（无限深海下逐帧 parseInt 会卡）
+const POND_VARIANTS = ["#2a6e5c", "#2e7562", "#317c68", "#35836e"].map(c => c);  // 人工池塘青绿色（区别海蓝）
 const ELEV_TIERS = [0.76, 0.88, 1.0, 1.12, 1.24];  // 各海拔档的亮度系数
 (function initVariants() {
   for (const k in TILE_META) {
@@ -68,24 +69,31 @@ function zoneAt(x, y) {
 }
 
 // 远景 chunk 缩略图缓存：zoom<0.4 时整块 drawImage，避免逐格绘制百万 tile 卡死
+// thumbDirty 失效机制：tile 被点亮/施工改写后 chunk 标脏，渲染帧内限流重建——缩略图与实际地图保持一致
 const _chunkThumbs = new Map();
+let _thumbBudget = 6;   // 每帧最多重建 6 块（防点亮风暴时的重建尖峰）
 function chunkThumb(cx, cy, c) {
   const k = cx + "," + cy;
   let cv = _chunkThumbs.get(k);
-  if (!cv) {
-    cv = document.createElement("canvas");
-    cv.width = CHUNK; cv.height = CHUNK;
-    const c2 = cv.getContext("2d");
-    for (let y = 0; y < CHUNK; y++) {
-      for (let x = 0; x < CHUNK; x++) {
-        const t = c.tiles[y * CHUNK + x];
-        const eT = c.elev ? elevTierOf(c.elev[y * CHUNK + x]) : 2;
-        c2.fillStyle = t === T.VOID ? "#05070c" : TILE_ELEV_VARIANTS[t][eT][(hash2(cx * CHUNK + x, cy * CHUNK + y) * 4) | 0];
-        c2.fillRect(x, y, 1, 1);
-      }
+  if (cv && !c.thumbDirty) return cv;
+  if (_thumbBudget <= 0 && cv) return cv;   // 预算耗尽：先用旧图（下一帧补上）
+  _thumbBudget--;
+  cv = cv || document.createElement("canvas");
+  cv.width = CHUNK; cv.height = CHUNK;
+  const c2 = cv.getContext("2d");
+  for (let y = 0; y < CHUNK; y++) {
+    for (let x = 0; x < CHUNK; x++) {
+      const t = c.tiles[y * CHUNK + x];
+      const eT = c.elev ? elevTierOf(c.elev[y * CHUNK + x]) : 2;
+      const isPond = t === T.WATER && world.ponds.has((cx * CHUNK + x) + "," + (cy * CHUNK + y));
+      c2.fillStyle = t === T.VOID ? "#05070c"
+        : isPond ? POND_VARIANTS[(hash2(cx * CHUNK + x, cy * CHUNK + y) * 4) | 0]
+        : TILE_ELEV_VARIANTS[t][eT][(hash2(cx * CHUNK + x, cy * CHUNK + y) * 4) | 0];
+      c2.fillRect(x, y, 1, 1);
     }
-    _chunkThumbs.set(k, cv);
   }
+  c.thumbDirty = false;
+  _chunkThumbs.set(k, cv);
   return cv;
 }
 
@@ -112,6 +120,7 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
 
   // ---- 远景路径（zoom<0.4）：chunk 缩略图，只生成相机中心附近，防内存/帧率爆炸 ----
   if (camera.zoom < 0.4) {
+    _thumbBudget = 6;   // 每帧重建预算
     const R = 40;   // 中心 ±40 格范围内保证生成，更远保持虚空等待探索
     ensureChunksFor(Math.floor(camera.x - R), Math.floor(camera.y - R), Math.ceil(camera.x + R), Math.ceil(camera.y + R));
     const cs = CHUNK * s;
@@ -146,6 +155,10 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
         eTier = elevTierOf(cHere.elev[cIdx(x, y)]);
       }
       let variant = TILE_ELEV_VARIANTS[tile][eTier][(h * 4) | 0];
+      // 人工池塘：青绿色区分天然浅海（world.ponds 标记）
+      if (tile === T.WATER && world.ponds.has(x + "," + y)) {
+        variant = POND_VARIANTS[(h * 4) | 0];
+      }
       // 水面波光：相位用波光时钟（暂停即静止，倍速不影响频率），高亮更柔和
       if ((tile === T.WATER || tile === T.DEEP) && ((h * 7 + waveT) % 1) < 0.08) {
         variant = TILE_GLEAM[tile];
@@ -364,10 +377,12 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
         ctx.moveTo(px + s * 0.5, py + s * 0.15); ctx.lineTo(px + s * 0.5, py + s * 0.85);
         ctx.stroke();
       } else if (tile === T.BRIDGE) {
-        ctx.fillStyle = "#8a6238"; // 桥墩底
+        ctx.fillStyle = "#235d96"; // 桥下水面（透出蓝色，一眼可见桥在水上）
         ctx.fillRect(px, py, s + 0.5, s + 0.5);
-        ctx.fillStyle = "#a97b48"; // 木板
-        for (let i = 0; i < 3; i++) ctx.fillRect(px, py + s * (0.1 + i * 0.3), s + 0.5, s * 0.18);
+        ctx.fillStyle = "rgba(255,255,255,0.18)"; // 水面波纹
+        for (let i = 0; i < 2; i++) ctx.fillRect(px + s * 0.15, py + s * (0.22 + i * 0.45), s * 0.7, s * 0.05);
+        ctx.fillStyle = "#a97b48"; // 木板（留缝露水）
+        for (let i = 0; i < 3; i++) ctx.fillRect(px + s * 0.06, py + s * (0.12 + i * 0.3), s * 0.88, s * 0.16);
         ctx.fillStyle = "#5c3d1e"; // 两侧栏杆
         ctx.fillRect(px, py, s + 0.5, s * 0.07);
         ctx.fillRect(px, py + s * 0.93, s + 0.5, s * 0.07);

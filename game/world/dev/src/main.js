@@ -353,6 +353,7 @@
     infoPanel.classList.remove("hidden");
     infoPanel.style.left = Math.min(CW - 230, px + 14) + "px";
     infoPanel.style.top = Math.max(48, Math.min(CH - 160, py - 20)) + "px";
+    syncFollowBtn();   // 面板打开时同步跟随按钮（否则死亡清理等残留的 display:none 会带到下一个面板）
   }
 
   function handlePick(e) {
@@ -391,6 +392,8 @@
   function showTilePanel(tx, ty, cx, cy) {
     const t = tileAt(tx, ty);
     const meta = TILE_META[t];
+    // 人工水格：EXCAV 挖出来的显示为池塘（水源），天然水仍叫浅海
+    const name = (t === T.WATER && world.ponds.has(tx + "," + ty)) ? "池塘 · 水源" : meta.name;
     const lines = [];
     // 所属地区：岛屿归属 + 聚落辖区
     for (const o of world.islands) {
@@ -412,7 +415,7 @@
       lines.push("工程：" + TASK_CN[task.type] + p);
     }
     if (t === T.VOID) lines.push("未知的虚空 · 尚未探索");
-    showPanel(meta.name + ` (${tx}, ${ty})`, lines.map(l => "· " + l).join("<br>") || "寻常土地", cx, cy);
+    showPanel(name + ` (${tx}, ${ty})`, lines.map(l => "· " + l).join("<br>") || "寻常土地", cx, cy);
   }
 
   const JOBS_CN = { farmer: "农夫", lumberjack: "伐木工", miner: "采石工", hunter: "猎人", fisher: "渔民", builder: "工匠", explorer: "探险家" };

@@ -60,11 +60,13 @@ for (let i = 0; i < 3000; i++) simUpdate(STEP);   // 预热世界
 // 岛缘草地（确定性扫描，不用 rand——跨场景轨迹分叉下保持稳定）：小人可达且 30 格内有深海可放归
 let beachSpot = null;
 outerC:
-for (let r = 4; r <= 14; r++) {
+for (let r = 4; r <= 10; r++) {   // 近圈：靠近聚落人群，救援响应快
   for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
     if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
     const x = world.store.x + dx, y = world.store.y + dy;
-    if (tileAt(x, y) === T.GRASS && walkable(x, y) && !nearAny(x, y, [T.HOUSE, T.FARM, T.SITE], 2)) {
+    // 内陆草地（4 邻至少 3 格 GRASS）：救援小人必然可达，且放归点 30 格内通常有深海
+    const landN = neighborsOf(x, y).filter(p => tileAt(p.x, p.y) === T.GRASS).length;
+    if (tileAt(x, y) === T.GRASS && walkable(x, y) && landN >= 3 && !nearAny(x, y, [T.HOUSE, T.FARM, T.SITE], 2)) {
       beachSpot = { x, y };
       break outerC;
     }
@@ -75,7 +77,7 @@ if (!beachSpot) { assert(true, "场景C：无构造点（跳过）"); } else {
   rescueWhale.strandT = 5;   // 已搁浅片刻（可被认领）
   // 断言只考察"认领搬运 → 放归"事件链（放归点需 30 格内有深海；放归后世界持续生成地形，鲸可能再次被困——真实行为）
   let rescued = false;
-  for (let i = 0; i < 20000; i++) {   // 2000s：认领+赶路+送回
+  for (let i = 0; i < 9000; i++) {   // 900s：认领+赶路+送回（搁浅死亡线 180s 内必须完成认领，之后是搬运余量）
     simUpdate(STEP);
     if (rescueWhale.rescuer || rescueWhale.carriedBy) rescued = true;
     if (rescued && !rescueWhale.carriedBy && world.logs.some(l => l.text.includes("送回了安全的栖息地"))) break;
@@ -135,32 +137,49 @@ world.settlements.forEach(function (s) { ensureStock(s).food = 500; });
 world.settlements.forEach(function (s) { ensureStock(s).wood = 200; });
 jointStockDirty();   // 手动改库存后失效联合库存缓存
 revealArea(world.store.x, world.store.y, 50);
-// 保证有码头
-let gDock = world.docks[0];
+// 保证有"邻水"码头（点亮范围变化可能让既有码头旁的水被填——悬空码头无法出港）
+// 确定性圈扫描海岸草地，直接建码头
+let gDock = world.docks.find(d => neighborsOf(d.x, d.y).some(p => tileAt(p.x, p.y) === T.WATER));
 if (!gDock) {
-  const cand = findSpot(world.store.x, world.store.y, 3, 20, T.GRASS, [T.HOUSE, T.FARM]);
-  if (cand && neighborsOf(cand.x, cand.y).some(p => tileAt(p.x, p.y) === T.WATER)) {
-    gDock = cand;
-    world.docks.push(gDock);
+  outerG:
+  for (let r = 3; r <= 25; r++) {
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const x = world.store.x + dx, y = world.store.y + dy;
+      if (tileAt(x, y) === T.GRASS && walkable(x, y) &&
+          neighborsOf(x, y).some(p => tileAt(p.x, p.y) === T.WATER) &&
+          !nearAny(x, y, [T.HOUSE], 1)) {
+        gDock = { x, y };
+        setTile(x, y, T.DOCK);
+        world.docks.push(gDock);
+        break outerG;
+      }
+    }
   }
 }
 if (!gDock || world.fishStock.size === 0) {
   assert(true, "场景G：地理不满足（无临水格或无鱼点），跳过");
 } else {
-  const fisher = agents.find(x => !x.dead && !x.voyaging && (x.hobby === "fishing" || x.job === "fisher"));
+  let fisher = agents.find(x => !x.dead && !x.voyaging && (x.hobby === "fishing" || x.job === "fisher"));
+  if (!fisher) {   // E1 探索者扩容可能抽走渔民：确定性指派一名（测试聚焦渔船机制本身）
+    fisher = agents.find(x => !x.dead && !x.voyaging && x.job !== "explorer");
+    if (fisher) fisher.hobby = "fishing";
+  }
   if (!fisher) { assert(true, "场景G：无人选为渔民，跳过"); } else {
     fisher.x = gDock.x + 0.5; fisher.y = gDock.y + 0.5;
     const ok = fisher.startFishingTrip(gDock);
     if (!ok) console.log("DBG 场景G fail: dock=", JSON.stringify(gDock),
       "dockTile=", tileAt(gDock.x, gDock.y),
       "neigh=", JSON.stringify(neighborsOf(gDock.x, gDock.y).map(p => tileAt(p.x, p.y))),
-      "wood=", jointStock("wood"), "fisher=", fisher.name, fisher.job, "state=", fisher.state);
+      "wood=", jointStock("wood"), "fisher=", fisher.name, fisher.job, "state=", fisher.state,
+      "voyaging=", fisher.voyaging, "ships=", world.ships.length,
+      "fishStock=", world.fishStock.size);
     assert(ok, "场景G：渔民出港（渔船启动）");
     if (ok) {
       const boat = world.ships[world.ships.length - 1];
       assert(boat.boat === true && boat.state === "fishing", "场景G：渔船出海捕捞中");
       let harvested = false;
-      for (let i = 0; i < 40000; i++) {   // 4000s：捕满 20 粮 + 返航
+      for (let i = 0; i < 8000; i++) {   // 800s：一个航次（捕捞 ~100s + 航程 ~60s）绰绰有余
         simUpdate(STEP);
         if (boat.hold >= SIM.BOAT_HOLD_CAP) harvested = true;
         if (boat.state === "docked") break;

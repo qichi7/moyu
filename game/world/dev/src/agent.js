@@ -100,7 +100,7 @@ class Agent {
       const px = Math.round(this.x), py = Math.round(this.y);
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         if (tileAt(px + dx, py + dy) === T.VOID) {
-          revealArea(px + dx * 2, py + dy * 2, 4);
+          revealArea(px + dx * 2, py + dy * 2, 6);
           break;
         }
       }
@@ -274,7 +274,7 @@ class Agent {
       if (t) {
         // 劳动保护：路程耗能（ENERGY_DECAY 0.9/s ÷ 船速 1.7 格/s 往返）预估不足 → 先睡觉，防止远途过劳死
         const d = Math.abs(t.x - this.x) + Math.abs(t.y - this.y);
-        if (this.energy < Math.min(95, 18 + d * 0.75)) { this.goSleep(); return; }
+        if (this.energy < Math.min(95, 18 + d * (this.job === "explorer" ? 0.4 : 0.75))) { this.goSleep(); return; }   // 探索者耐走（系数减半）
         this.task = t;
         t.workers.add(this);
         if (this.goTo(t.x, t.y)) {
@@ -321,7 +321,7 @@ class Agent {
       // 前沿扫描节流：每 2 sim 秒一次，期间复用缓存（deide 高频不重复扫屏）
       if (world.time - (this.frontScanT || -9) > 2) {
         this.frontScanT = world.time;
-        this.frontCache = findFrontier(Math.round(this.x), Math.round(this.y), 40);
+        this.frontCache = findFrontier(Math.round(this.x), Math.round(this.y), 80);   // 扫描 80 格：点亮推进后新前沿仍在视野
       }
       const front = this.frontCache;
       if (front) {
@@ -329,9 +329,14 @@ class Agent {
           this.state = "walk";
           this.onArrive = () => {
             this.state = "idle";
-            // 到达前沿：大面积点亮（斑块推进边界），随后由被动点亮与下次前沿扫描接力
+            // 到达前沿：大面积点亮 + 连击（向斑块边缘再点 2 处，一次驻留推进一大片）
             if (tileAt(front.x, front.y) !== T.VOID) {
-              revealArea(front.x, front.y, 8 + Math.round(this.adventure * 4));
+              revealArea(front.x, front.y, 12 + Math.round(this.adventure * 6));
+              for (let k = 0; k < 2; k++) {
+                const ang = rand() * Math.PI * 2, d2 = 10 + rand() * 10;
+                const px = Math.round(front.x + Math.cos(ang) * d2), py = Math.round(front.y + Math.sin(ang) * d2);
+                if (tileAt(px, py) === T.VOID) revealArea(px, py, 10);
+              }
             }
           };
           return;
@@ -523,7 +528,7 @@ class Agent {
     const dist = 3 + rand() * 3;
     const tx = Math.round(this.x + this.exploring.dx * dist);
     const ty = Math.round(this.y + this.exploring.dy * dist);
-    revealArea(tx, ty, randRange(5, SIM.REVEAL_RADIUS));
+    revealArea(tx, ty, randRange(7.5, SIM.REVEAL_RADIUS));
     // 走向点亮区前沿（而非跳过它）
     const stepTo = Math.min(dist, 5);
     const gx = Math.round(this.x + this.exploring.dx * stepTo);
@@ -573,13 +578,28 @@ class Agent {
       const b = r.blocked;
       const t = tileAt(b.x, b.y);
       const meta = TILE_META[t];
-      if (meta.diggable || meta.fillable) {
+      if (meta.diggable) {
+        // 山/树：单格立项开凿
         const exist = tasks.list.find(k => !k.done && k.x === b.x && k.y === b.y);
         if (!exist) {
-          const type = meta.diggable ? "DIG" : (meta.bridgeable ? "BRIDGE" : "FILL");
-          tasksAdd({ type, x: b.x, y: b.y });
-          logThrottled(`通路受阻：(${b.x},${b.y}) 的${meta.name}挡住了去路，立项${type === "BRIDGE" ? "架桥" : "改造"}。`, 15);
+          tasksAdd({ type: "DIG", x: b.x, y: b.y });
+          logThrottled(`通路受阻：(${b.x},${b.y}) 的${meta.name}挡住了去路，立项改造。`, 15);
         }
+      } else if (t === T.WATER || t === T.DEEP) {
+        // 跨水：链式桥——立项首格（blocked 必邻工人所站格，必可达），带朝目标方向与剩余步数；
+        // 建成后 tasksFinish 沿方向续立下一格（remain 递减到 0 停，桥不无限穿海），
+        // 工人跟进过桥，走到新桥头再续——细长桥线直通对岸
+        const dup = tasks.list.some(k => !k.done && k.x === b.x && k.y === b.y);
+        // 同海峡只架一条桥：25 格内已有桥（在建成线）则不另起炉灶，等它建成即可通行
+        if (!dup && !nearAny(b.x, b.y, [T.BRIDGE], 25) && tasksPending("BRIDGE", true).length < 40) {
+          tasksAdd({ type: "BRIDGE", x: b.x, y: b.y,
+            corridor: { dx: Math.sign(tx - b.x) || 0, dy: Math.sign(ty - b.y) || 0,
+              remain: Math.abs(tx - b.x) + Math.abs(ty - b.y) } });
+          logThrottled(`通路受阻：(${b.x},${b.y}) 的水域挡住了去路，开始架桥。`, 15);
+        }
+      } else if (meta.fillable) {
+        // 其余可填格（罕见）：兜底单格填平
+        if (!tasks.list.some(k => !k.done && k.x === b.x && k.y === b.y)) tasksAdd({ type: "FILL", x: b.x, y: b.y });
       }
     }
     return false;
@@ -727,6 +747,25 @@ function findFrontier(cx, cy, maxR) {
     }
   }
   return null;
+}
+
+// 从 (x,y) 的连通浅水格数（只走 WATER）是否 ≤cap——小池塘不需要架桥
+function waterRegionSmall(x, y, cap) {
+  const seen = new Set([x + "," + y]);
+  const q = [[x, y]];
+  let count = 1;
+  while (q.length) {
+    const [cx, cy] = q.pop();
+    for (const p of neighborsOf(cx, cy)) {
+      const k = p.x + "," + p.y;
+      if (seen.has(k)) continue;
+      if (tileAt(p.x, p.y) !== T.WATER) continue;
+      seen.add(k); count++;
+      if (count > cap) return false;
+      q.push([p.x, p.y]);
+    }
+  }
+  return true;
 }
 
 function isDaytime() {

@@ -2,6 +2,7 @@
 // ============ 任务系统：建造 / 开荒 / 移山 / 填海 ============
 
 let _taskId = 1;
+let _lastPond = null;   // 最近挖的塘（池塘聚簇：下一个塘贴着它挖）
 const tasks = {
   list: [],
 };
@@ -60,7 +61,9 @@ function tasksTake(agent) {
     const age = world.time - (t.born || world.time);   // 任务老化：立项越久越优先，远任务不饿死
     // 资源危机升权：联合木材枯竭时伐木任务急速提级（否则桥/船工程全饿死）
     const crisis = (t.type === "DIG" && t.res === "wood") ? Math.max(0, 8 - jointStock("wood")) * 200 : 0;
-    const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000 - age * 3 - crisis;
+    // 走廊桥是国家工程（两岛间唯一通路），优先级高于日常任务
+    const natl = t.type === "BRIDGE" && t.corridor ? 1500 : 0;
+    const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000 - age * 3 - crisis - natl;
     if (score < bestScore) { bestScore = score; best = t; }
   }
   return best;
@@ -129,6 +132,16 @@ function tasksFinish(t, agent, was) {
     case "BRIDGE": {
       setTile(t.x, t.y, T.BRIDGE);
       logThrottled("工匠们在海峡上架起了木桥。", 30);
+      // 链式生长：沿 corridor 方向续立下一格（remain 递减到 0 停——桥不无限穿海）
+      if (t.corridor && t.corridor.remain > 0) {
+        const nx3 = t.x + t.corridor.dx, ny3 = t.y + t.corridor.dy;
+        const tt = tileAt(nx3, ny3);
+        if ((tt === T.WATER || tt === T.DEEP) &&
+            !tasks.list.some(k => !k.done && k.x === nx3 && k.y === ny3)) {
+          tasksAdd({ type: "BRIDGE", x: nx3, y: ny3,
+            corridor: { dx: t.corridor.dx, dy: t.corridor.dy, remain: t.corridor.remain - 1 } });
+        }
+      }
       break;
     }
     case "PLANT": {
@@ -202,8 +215,10 @@ function tasksFinish(t, agent, was) {
       break;
     }
     case "EXCAV": {
-      // 挖塘：陆格挖成水（灌溉/养鱼的人工水域）
+      // 挖塘：陆格挖成水（灌溉/养鱼的人工水域，显示为池塘）
       setTile(t.x, t.y, T.WATER);
+      world.ponds.add(t.x + "," + t.y);
+      _lastPond = { x: t.x, y: t.y };   // 连击记忆：下一个塘默认贴着这个挖
       logThrottled("居民挖出了新的水塘，水波在塘里荡开。", 30);
       break;
     }
