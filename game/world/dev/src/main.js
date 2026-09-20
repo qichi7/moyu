@@ -8,8 +8,15 @@
   let CW = 0, CH = 0;
 
   function resize() {
-    CW = canvas.width = window.innerWidth;
-    CH = canvas.height = window.innerHeight;
+    // DPR 适配：canvas 按设备像素烘焙，CSS 尺寸保持逻辑像素——retina 上像素画更细腻
+    const dpr = window.devicePixelRatio || 1;
+    CW = window.innerWidth;
+    CH = window.innerHeight;
+    canvas.width = Math.max(1, Math.round(CW * dpr));
+    canvas.height = Math.max(1, Math.round(CH * dpr));
+    canvas.style.width = CW + "px";
+    canvas.style.height = CH + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   window.addEventListener("resize", resize);
   resize();

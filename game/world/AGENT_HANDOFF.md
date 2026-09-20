@@ -18,6 +18,7 @@ node dev/test/entry.js   # 入口冒烟：stub DOM 跑构建产物启动链，7 
 node dev/test/voyage.js  # 航海专项：满载返航 / 低补给被困救援闭环，17 项断言
 node dev/test/creature.js # 动物专项：老死 / 搁浅死亡与救援 / 繁衍 / 渔场 / 渔船 / 挖塘 / 运鱼 / 灌溉 / 岛数随机，27 项断言
 node dev/test/explorer.js # 探索者专项：保底转职 / 前沿点亮 / 腿数解除，6 项断言
+node dev/test/pixel.js   # 渲染专项：软件光栅化跑 drawScene 与全套 sprite 烘焙，33 项断言
 open index.html          # 人工验收（agent 每次修改完成后必须自动执行，见第 6 节）
 ```
 
@@ -29,7 +30,7 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 
 1. **逻辑层零 DOM 依赖**：`src/` 中 events/config/noise/path/world/tasks/creature/agent/sim 必须能在 node 里 headless 跑（`test/smoke.js` 依赖这一点）。禁止在逻辑层引用 `document/window/canvas`。表现层是 audio/render/main。
 2. **通信只走事件总线**（`events.js` 的 `onEvent/emit`）：逻辑层 emit、表现层订阅。逻辑层**不知道**音频/UI 的存在。事件数据必须真的传（历史上 emit("discovery") 漏传岛对象导致原住民系统崩）。
-3. **加载顺序即拼接顺序**（`build.js` 的 `logicFiles`）：events → config → noise → path → world → tasks → **creature** → agent → sim。同作用域拼接，函数声明提升可用，但 **const/let 有 TDZ**——`main.js` 里曾因 `const el` 在使用后才声明导致整个入口崩（黑屏/全零），`test/entry.js` 就是为防这类问题存在的。新增文件必须同时加进 `logicFiles`。
+3. **加载顺序即拼接顺序**（`build.js` 的 `logicFiles`）：events → config → noise → path → world → tasks → **creature** → agent → sim；表现层拼接序：audio → **sprites** → render → main。同作用域拼接，函数声明提升可用，但 **const/let 有 TDZ**——`main.js` 里曾因 `const el` 在使用后才声明导致整个入口崩（黑屏/全零），`test/entry.js` 就是为防这类问题存在的。新增文件必须同时加进 `logicFiles`（或 render 拼接串）。
 4. **新任务类型必须**：a) 加进 `tasks.js` 的 `TASK_DEFAULT_NEED`（漏了 = `need===undefined` 永不完工、占死名额——历史死锁 #1）；b) 进度类任务加进 `agent.js` `doWork` 的进度分支列表；c) 需要 tile 改造的走 `workTile`，需要圈地的加入 `tasksAdd` 的 SITE 列表。
 5. **区域生成必须 chunk 对齐**：`generateRegion` 内部已做对齐扩展——绕过它直接写 chunk 会产生「半写 chunk」（bounding 只盖 chunk 一部分，其余格保持默认值 0 = VOID 且永不修复——历史死锁 #2）。
 6. **点亮永不黑回**：VOID→DEEP 的转换记录在 `world.litCells`，`settleFarTile` 的三分支语义（reveal 点亮 / 首次 VOID / 重算保持原值）不要动。**发现岛显现必须用 combined litTest（探索斑块 ∪ 岛缘海圆）**——直接对矩形 bounding 做 reveal 全亮会留下方形亮海块（历史 bug）。
@@ -39,6 +40,7 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 10. **视觉与逻辑时钟分离**：昼夜明暗用 `visualTod`（main.js 维护，增速封顶 **10×**）、波光用 `waveT`（暂停即静止）——两者经参数传入 `drawScene`，**勿在渲染层直接读 `world.timeOfDay` 或 `performance.now()`**；小人作息等逻辑仍用 `world.timeOfDay`（模拟时间，`isDaytime()` 勿动）。
 11. **航海状态冻结需求**：`agent.state === "voyage"` 时 `update` 提前 return（坐标由船携带、hunger/energy 不衰减）——防止远航饿死；船实体在 `world.ships`（sailing/return/docked 三态 + 航程上限），靠岸/返航/清理见 `shipTick`；造船消耗联合木材 `SIM.SHIP_COST`。
 12. **出生与测试种子**：`main.js` 用随机种子开局（每次新地图），`dev/test/*.js` 固定 `simInit(42)`——新增断言必须对任意 seed 稳定（禁止依赖具体人口数值，用范围/趋势断言；entry.js 的出生断言即因此用 `>= 12`）。
+13. **Sprite 图集（sprites.js）三条铁律**：a) **缓存键 = 全部视觉输入**（tile/海拔档/hash 变体/动画帧/楼层/石砌/粮仓/亮窗/姿态/果量），漏键 = 复用错图；b) **`shade()` 只吃 hex**——产出的 `rgb(...)` 字符串再喂回 `shade()`/`stampArt` 调色板会变 NaN 色（必须走 `shadeHex` 或由调用方预着色，历史 bug ×2：池塘波纹、小人暗部）；c) 渲染缩放语义：zoom≥1 关平滑（方块感）、0.4~1 开平滑、<0.4 缩略图关平滑——勿在 drawScene 外部改 `imageSmoothingEnabled`。渲染回归用 `test/pixel.js`（软件光栅化，能抓全空 sprite/NaN 色）。
 
 ## 3. 代码地图
 
@@ -53,8 +55,9 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 | creature.js | 十种生物实体（栖息地系统 `habitatOk`：游荡/逃跑疲劳/跟随/驯化/圈养/繁殖/狼捕食；野生繁衍分栖息地上限；老死；搁浅被困死亡——施工改变地形后等待救援或死亡，`carriedBy` 被人搬运） | `creatures` 数组、`populateIslandCreatures`、`habitatOk`、`wildBreedTick` |
 | agent.js | 小人：个体属性（探索欲/勤劳）、喜好（explore/homebody/animal/fishing/none）、职业（7 种可转职）、状态机、探索旅程、**航海（startVoyage）**、迁居、登岛命名即定居化、年龄死亡 | `Agent.update → decide / die / startVoyage` |
 | sim.js | 调度核心：`plannerTick`（10 分支需求聚合 + 死任务清理）、**劳动力市场 `jobMarketTick`**、聚落演化、时代、出生、宴席、死亡清理、船舶 `shipTick` | `simInit / simUpdate / plannerTick / shipTick` |
-| render.js | Canvas 渲染：tile 细节、小人/十种动物、工程进度、昼夜（visualTod）、地势亮度梯度、地区名标注、chunk 缩略图（zoom<0.4） | `drawScene` |
+| render.js | 场景编排：drawScene 贴 sprite 图集 + 动态叠加层（工程进度/昼夜/分区底纹/地区名标注/选中环/瀑布）、chunk 缩略图（zoom<0.4）、缩放平滑语义（≥1 关/0.4~1 开） | `drawScene` |
 | audio.js | 程序化音效（振荡器合成，无音频文件） | `sfx.play(name)` |
+| sprites.js | 像素 Sprite 图集：全部 tile/房屋 24 变体/小人 4 色×6 姿态/十种动物/4 种船/浪花抖动叠加层的 16×16 点阵惰性烘焙；色彩基建（shade/shadeHex/ELEV_TIERS/TILE_ELEV_VARIANTS/POND_VARIANTS）在此 | `tileSprite/waterSprite/pondSprite/houseSprite/propSprite/agentSprite/creatureSprite/shipSprite/foamSprite/ditherSprite` |
 | main.js | 主循环（固定步长，速度 0/1/2/10/100/1000 档）、Pointer Events 相机（拖拽/捏合/点按）、视觉昼夜 `visualTod`、波光时钟 `waveT`、视角跟随、点击拾取、信息面板、居民名册 | `focusAgent / handlePick / updateRoster / followMode` |
 
 ## 4. 已校准的死锁（改相关代码前必读）
@@ -108,6 +111,7 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 → node dev/test/voyage.js  （航海回归，17 项）
 → node dev/test/creature.js（动物回归，27 项）
 → node dev/test/explorer.js（探索者回归，6 项）
+→ node dev/test/pixel.js   （渲染回归，33 项）
 → open index.html          （运行游戏，只开一次）
 ```
 
@@ -117,6 +121,7 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 
 ## 7. 当前状态快照（2026-09-20 交接）
 
+- **像素画风（v0.2.0）**：全画面 16×16 细像素点阵——`sprites.js` 程序化烘焙（tile 21 种 × 海拔 5 档 × hash 4 变体惰性缓存、房屋 24 变体、小人 4 状态色 × 6 姿态（含躺睡/抡锤两帧）、十种动物、船 4 种、海岸浪花/草沙抖动叠加层）；`TILE_PX=16`；main.js resize 按 devicePixelRatio 烘焙 + template `image-rendering: pixelated`；缩放语义：zoom≥1 关平滑 / 0.4~1 开平滑 / <0.4 像素缩略图；水面 4 帧波纹动画（waveT 驱动，暂停冻结）；夜间亮窗（night>0.3）；鱼/鸟/鲸动画改用 `world.time`（旧版误用缩放值）；渲染回归 `test/pixel.js`（软件光栅化 stub：可重设尺寸 canvas + fillRect/drawImage/getImageData，断言全部 sprite 非空 + 场景帧色系）
 - 已实现：无限 chunk 地图（探索点亮不规则斑块 + 发现岛 + 原住民 + 登岛命名即定居化 + 河流/悬崖/洞穴/瀑布/地势亮度渲染）、小人个体属性（探索欲/勤劳）与喜好（向往远方/恋家/喜爱牲畜/垂钓）、职业分工（7 职业 + 劳动力市场自动转职）、任务系统 **15 种**、四线食物体系（农田/浆果采集与培育/捕鱼/狩猎畜牧围栏）、聚落资源库存（木/石/沙/粮，搬运回仓制 + 联合库存；**粮食城市内共享**，各城独立粮仓）、聚落 4 级演化+功能分区+高楼社区、时代 5 档、**死亡机制（老死/病亡/痊愈）**、十种生物图鉴（含狼捕食生态、鲸、驯化狗）、**航海系统（码头/坐船出海/点亮开拓/靠岸定居 + 补给/被困/救援）**、居民名册（地区定位+人物对话框+视角跟随 F，跟随已在主循环实现平滑追踪）、程序化音效、历法（昼夜=月/12 月=年）、变速 0/1/2/10/100/1000×、缩放 0.1~6×（远景缩略图）、昼夜明暗封顶 10×、波光暂停即静止、移动端触摸适配（单指拖拽/双指捏合/点按）、人口不设上限（疆土每 20 人生长，走廊 1 格细线）
 - 航海补给机制：船带 `prov`（粮）按 `SHIP_PROVISION_RATE` 每秒消耗；出海装粮 `min(SHIP_PROVISION_LOAD, 码头所属城市库存)`，不足也出海（警告）；余量 < 回程所需×1.3 → 预留返航（正常情况永远够回家）；补给归零 → `stranded` 被困呼救（水手 voyage 冻结不会饿死）→ 主港城市存粮足够时自动派救援船（红旗）→ 会合送达 `SHIP_RESCUE_RESUPPLY` → 双双返航；救援船使命必达（prov 不设预留）
 - 动物生态：野生繁衍分栖息地（陆生可猎+狼 ≤60 / 海龟 ≤12 / 鲸 ≤5）；老死（寿命耗尽后平均 3 天内离世）；施工改变地形致动物脚下失去栖息地 → 搁浅（不可移动 + 求救标记），180 秒无人救援死亡；居民（`decide` 分支 2.8，**优先于领任务**）认领救援 → `carriedBy` 搬运 → 从岸边送回最近栖息地；接近失败冷却 60s 重试；**鱼群可被 CAPTURE 圈养进水上渔场**（原地水域，圈养产粮+繁衍，`updatePasture` 水生分支走 `habitatOk`）；初始岛屿 3~7 随机（`genWorld`）

@@ -2,8 +2,8 @@
 
 一个在浏览器中运行的**群岛文明模拟沙盒**：小人在无限延伸的世界里自主生活，世界会根据他们的需求自动生成新区域——建造房屋、开垦农田、架桥填海、开辟新岛，聚落逐步演化成城市。全程零依赖、零资源文件，单 HTML 文件双击即玩。
 
-- 当前版本：v0.1.0（`BUILD_ID`，顶栏可见；已迭代至航海时代——无限世界、生老病死、职业流转、航海开拓、移动端适配）
-- 技术栈：原生 JavaScript + Canvas 2D + Web Audio API，无任何框架与外部资源
+- 当前版本：v0.2.0（`BUILD_ID`，顶栏可见；已迭代至航海时代——无限世界、生老病死、职业流转、航海开拓、移动端适配；**v0.2.0 起画面为 16×16 细像素画风**）
+- 技术栈：原生 JavaScript + Canvas 2D + Web Audio API，无任何框架与外部资源（全部像素画由代码程序化烘焙）
 
 ---
 
@@ -15,7 +15,7 @@
 |------|----------|
 | 玩 | 双击 `index.html`（file:// 打开，无缓存问题） |
 | 构建产物 | `node dev/build.js`（dev/src 拼接 → 根目录 index.html） |
-| 全量测试 | `node dev/test/smoke.js && node dev/test/entry.js`（逻辑冒烟 10 项 + 入口冒烟 7 项） |
+| 全量测试 | `node dev/test/smoke.js && node dev/test/entry.js && node dev/test/voyage.js && node dev/test/creature.js && node dev/test/explorer.js && node dev/test/pixel.js`（逻辑 10 项 + 入口 7 项 + 航海 17 项 + 动物 27 项 + 探索者 6 项 + 渲染 33 项） |
 | 开发热刷新 | 起 http 服务访问时页面自动检测文件变化并刷新；file:// 下手动 `Cmd+R` |
 
 改任何 `dev/src/*.js` 后必须重新 `node dev/build.js`，`index.html` 是构建产物不直接编辑。
@@ -35,7 +35,11 @@ world/
     ├── package.json      scripts: build / test
     ├── test/
     │   ├── smoke.js      逻辑冒烟：headless 跑 4000 sim 秒，10 项断言（增长/建造/架桥/扩张/聚落升级…）
-    │   └── entry.js      入口冒烟：stub DOM 跑构建产物完整启动链，7 项断言（防 TDZ 类黑屏回归）
+    │   ├── entry.js      入口冒烟：stub DOM 跑构建产物完整启动链，7 项断言（防 TDZ 类黑屏回归）
+    │   ├── voyage.js     航海专项：满载返航/低补给被困救援闭环，17 项断言
+    │   ├── creature.js   动物专项：老死/搁浅救援/繁衍/渔场/渔船/挖塘/灌溉，27 项断言
+    │   ├── explorer.js   探索者专项：保底转职/前沿点亮/腿数解除，6 项断言
+    │   └── pixel.js      渲染冒烟：软件光栅化跑 drawScene 与全套 sprite 烘焙，33 项断言（防全空 sprite/无效色回归）
     └── src/
         ├── events.js     事件总线（逻辑层发事件，表现层订阅；headless 下 emit 空转）
         ├── config.js     全局配置：tile 定义、模拟参数、聚落阈值、时代
@@ -46,12 +50,20 @@ world/
         ├── creature.js   动物实体：牛/羊/狗/鹿/野猪/狼/鱼群/海龟/鲸/鸟（栖息地系统+生态链+驯化+圈养）
         ├── agent.js      小人 Agent（个体属性/喜好/职业 + 状态机 + 探索航海 + 年龄死亡 + 迁居）
         ├── sim.js        模拟调度：出生、规划器（需求聚合）、聚落演化、时代、劳动力市场、宴席、死亡、船舶、主更新
-        ├── render.js     Canvas 渲染：tile 细节/小人/动物/工程进度/昼夜/虚空/chunk 缩略图
         ├── audio.js      Web Audio 程序化音效（振荡器+噪声合成，零资源文件）
-        └── main.js       主入口：主循环、相机/缩放、点击拾取、信息面板、居民名册
+        ├── sprites.js    像素 Sprite 图集：全部 tile/小人/动物/船 的 16×16 点阵惰性烘焙（缓存键=全部视觉输入）
+        └── main.js       主入口：主循环、相机/缩放（DPR 适配）、点击拾取、信息面板、居民名册
 ```
 
-**架构原则**：逻辑层（events/config/noise/path/world/tasks/creature/agent/sim）零 DOM 依赖，可在 node 中 headless 运行；表现层（audio/render/main）通过 `onEvent` 订阅逻辑事件，不反向侵入。
+**架构原则**：逻辑层（events/config/noise/path/world/tasks/creature/agent/sim）零 DOM 依赖，可在 node 中 headless 运行；表现层（audio/sprites/render/main）通过 `onEvent` 订阅逻辑事件，不反向侵入。
+
+### 0. 像素画风（v0.2.0）
+
+- 全部画面为 **16×16 细像素点阵**：`sprites.js` 在运行时把每种 tile（含海拔档 5 × hash 变体 4）、房屋 24 变体（楼层×石砌×粮仓×亮窗）、小人 4 状态色 × 6 姿态、十种动物、4 种船**程序化烘焙**到离屏 canvas，渲染帧只做 `drawImage`
+- 缩放语义：zoom≥1 关闭平滑（锐利方块感）、0.4~1 开启平滑（缩小防闪烁）、<0.4 走 1 格=1 像素的 chunk 缩略图（同为像素风）
+- 细节层：水面 4 帧波纹动画（暂停即冻结）、海岸浪花描边、草地→沙滩抖动过渡、夜间亮窗、瀑布水帘、草地点缀小花
+- `TILE_PX=16`，canvas 按 devicePixelRatio 烘焙 + `image-rendering: pixelated`——retina 屏上像素更细腻
+- 动画修正：鱼群绕游/鸟扑翼/鲸喷水改用模拟时钟（旧版误用缩放值当时间）
 
 ---
 
@@ -367,6 +379,7 @@ elevation = fbm(x,y) × 0.55 + bump
 | 生命与航海 | 历法（1 昼夜=1 月）、年龄与死亡（老死/病亡）、个体属性与喜好、职业分工与劳动力市场、十种生物图鉴（栖息地系统）、围栏畜牧、狩猎采集捕鱼四线食物、码头航海（坐船出海开拓）、1000× 档 |
 | 文明聚居 | 设施聚簇（房挨房/田连片，跨聚落独立）、粮食城市内共享（各城粮仓/宴席/出生城内结算）、挖塘引水与农田灌溉（5 格内有水）、渔夫运鱼放养、探索者保底转职（前沿螺旋探索+航海回退）、航海补给与海上救援、动物繁衍/老死/搁浅救援、名字全局唯一、地形生成永不覆盖已建房屋与道路 |
 | 移动端 | 触摸操作（单指拖拽/双指捏合/点按拾取）、窄屏布局、视角跟随（F 键）、地形信息框（岛屿归属/档位命名）、远景地区名标注 |
+| 像素画风 v0.2.0 | 全画面 16×16 细像素点阵（程序化 sprite 图集：地形/建筑/小人/动物/船）、水面 4 帧动画、海岸浪花与草沙过渡、夜间亮窗、DPR 适配 + pixelated、渲染冒烟测试 pixel.js |
 
 ## 已知边界与后续方向
 

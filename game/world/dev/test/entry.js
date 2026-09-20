@@ -25,9 +25,12 @@ function makeElement(id) {
   return e;
 }
 
-// ctx 所有方法 no-op，属性可写
+// ctx 所有方法 no-op，属性可写；getImageData 返回空透明位图（sprite 轮廓扫描用）
 const ctxStub = new Proxy({}, {
-  get: (t, k) => (k in t ? t[k] : () => {}),
+  get: (t, k) => {
+    if (k === "getImageData") return (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) });
+    return k in t ? t[k] : () => {};
+  },
   set: (t, k, v) => { t[k] = v; return true; },
 });
 
@@ -36,6 +39,16 @@ const docStub = {
   getElementById(id) {
     if (!elements[id]) elements[id] = makeElement(id);
     return elements[id];
+  },
+  // sprite 图集烘焙用：创建离屏 canvas（sprites.js 启动后惰性调用）
+  createElement(tag) {
+    const key = "@" + tag;
+    if (!elements[key]) {
+      const e = makeElement(key);
+      if (tag === "canvas") { e.width = 0; e.height = 0; e.getContext = () => ctxStub; }
+      elements[key] = e;
+    }
+    return elements[key];
   },
 };
 const rafCbs = [];
