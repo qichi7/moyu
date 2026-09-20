@@ -1,18 +1,34 @@
 "use strict";
 // ============ 小人 Agent ============
 
-// 命名：尽量不重复（池约 8000 组合，耗尽后允许重名）
-const _SURNAMES = ["张", "王", "李", "陈", "杨", "赵", "周", "吴", "郑", "孙", "林", "何", "高", "苏", "叶", "宋", "罗", "程", "袁", "许"];
-const _GIVEN = ["石", "禾", "安", "松", "竹", "梅", "青", "远", "川", "云", "枫", "桥", "岚", "星", "野", "宁", "秋", "白", "舟", "棠"];
+// 命名：尽量不重复；单姓 56 个、复姓 20 个（抽取占比约 9%，稀有感）；名用字分男女池（各 24 字）
+const _SURNAMES = ["张", "王", "李", "陈", "杨", "赵", "周", "吴", "郑", "孙", "林", "何", "高", "苏", "叶", "宋", "罗", "程", "袁", "许",
+  "黄", "谢", "唐", "韩", "曹", "萧", "石", "冯", "蒋", "沈", "卢", "崔", "姜", "邹", "孟", "秦", "严", "薛", "杜", "魏",
+  "范", "彭", "吕", "董", "贾", "毛", "邓", "康", "傅", "邵", "温", "于", "徐", "马", "朱", "胡"];
+const _SURNAMES_CP = ["欧阳", "司马", "诸葛", "上官", "东方", "独孤", "南宫", "西门", "慕容", "皇甫",
+  "尉迟", "公孙", "长孙", "宇文", "轩辕", "令狐", "夏侯", "钟离", "闻人", "澹台"];
+const _GIVEN_M = ["石", "安", "松", "青", "远", "川", "枫", "桥", "野", "舟",
+  "岳", "峰", "磊", "恒", "铮", "弘", "毅", "昊", "霆", "潮", "湃", "澈", "瀚", "煜"];   // 男名用字
+const _GIVEN_F = ["禾", "梅", "竹", "云", "岚", "星", "宁", "秋", "白", "棠",
+  "汀", "芷", "若", "蕙", "萱", "蓉", "莺", "湘", "沁", "潇", "澜", "玥", "珊", "瑶"];   // 女名用字
 const _usedNames = new Set();
-function pickAgentName() {
+function pickAgentName(sex, surname) {
+  const pool = sex === "f" ? _GIVEN_F : _GIVEN_M;
   for (let i = 0; i < 40; i++) {
-    const n = _SURNAMES[randInt(0, _SURNAMES.length - 1)] +
-              _GIVEN[randInt(0, _GIVEN.length - 1)] +
-              (rand() < 0.4 ? _GIVEN[randInt(0, _GIVEN.length - 1)] : "");
+    // 随机姓槽：单姓×3 + 复姓 合并索引上抽一次（复姓占比约 9%，稀有感）；恒定消耗，保持随机流调用点与旧版一致
+    const si = randInt(0, _SURNAMES.length * 3 + _SURNAMES_CP.length - 1);
+    const sn = si < _SURNAMES.length * 3 ? _SURNAMES[si % _SURNAMES.length] : _SURNAMES_CP[si - _SURNAMES.length * 3];
+    const n = (surname || sn) + pool[randInt(0, pool.length - 1)] +
+              (rand() < 0.4 ? pool[randInt(0, pool.length - 1)] : "");
     if (!_usedNames.has(n)) { _usedNames.add(n); return n; }
   }
   return "居民" + (agents.length + 1);
+}
+
+// 姓氏：命中复姓前缀取前两字，否则取首字
+function surnameOf(name) {
+  for (const s of _SURNAMES_CP) if (name.startsWith(s)) return s;
+  return name[0];
 }
 
 // 原住民部落小名（查重：原住民多，12 个单字必重，扩展双字组合 + 池尽编号）
@@ -52,12 +68,16 @@ const _HOBBY_ROLL = () => {
 };
 
 class Agent {
-  constructor(x, y, native) {
+  constructor(x, y, native, opts) {
     this.x = x + 0.5; this.y = y + 0.5;   // 浮点 tile 坐标，格中心
     this.id = _agentIdSeq++;               // 稳定唯一 id（名册引用，不受数组增删影响）
     this.dead = false;
     this.native = !!native;                // 原住民（被发现岛屿上的部落居民）
-    this.name = this.native ? pickNativeName() : pickAgentName();
+    this.sex = hash2(this.id, 9172) < 0.5 ? "f" : "m";   // 性别：id 确定性推导（不消耗 rand 流），出生定死
+    this.name = this.native ? pickNativeName() : pickAgentName(this.sex, opts && opts.surname);
+    this.surname = (opts && opts.surname) || surnameOf(this.name);   // 姓氏字段：固定姓优先，否则从名字推导（复姓取前两字；原住民「阿」无害）
+    this.father = (opts && opts.father) || null;   // 父名（字符串）
+    this.mother = (opts && opts.mother) || null;   // 母名（字符串）
 
     // 个体属性（0~1，人各不同）
     this.adventure = this.native ? randRange(0.5, 1) : randRange(0.05, 1); // 探索欲：高的常远行，低的恋家

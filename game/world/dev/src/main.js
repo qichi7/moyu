@@ -440,6 +440,8 @@
     return `职业：${JOBS_CN[a.job] || a.job}<br>` +
       `状态：${a.sick ? "生病了" : (STATE_CN[a.state] || a.state)}${a.task ? "（" + TASK_CN[a.task.type] + "）" : ""}<br>` +
       `年龄：${Math.floor(a.age)} 岁 · ${ageTier(a.age, "human")}<br>` +
+      `性别：${a.sex === "f" ? "女" : "男"}<br>` +
+      ((a.father || a.mother) ? `父母：${[a.father, a.mother].filter(Boolean).join(" · ")}<br>` : "") +
       `健康：${healthTier(a)}<br>` +
       `饱食：${hungerTier(a.hunger)}<div class="ip-bar"><div style="width:${a.hunger}%;background:${foodC}"></div></div>` +
       `精力：${energyTier(a.energy)}<div class="ip-bar"><div style="width:${a.energy}%;background:${enC}"></div></div>` +
@@ -571,7 +573,7 @@
     rosterCd = 0.6;
 
     const nameLine = a =>
-      `<div class="roster-name${a === selectedAgent ? " selected" : ""}" data-id="${agents.indexOf(a)}">${a.name}<span class="nat">·${JOBS_CN[a.job] || ""}</span></div>`;
+      `<div class="roster-name${a === selectedAgent ? " selected" : ""}" data-id="${agents.indexOf(a)}">${a.name}<span class="nat">·${JOBS_CN[a.job] || ""} ${a.sex === "f" ? "♀" : "♂"}</span></div>`;
     const flyBtn = (x, y) => `<span class="fly-btn" data-fx="${x}" data-fy="${y}">⌖</span>`;
 
     let html = "";
@@ -633,7 +635,7 @@
       const open = expandedGroups.has(key);
       html += `<div class="roster-group-head" data-g="${key}"><span>${open ? "▾" : "▸"} ${key}</span><span class="cnt">×${list.length}</span></div>`;
       if (open) html += `<div class="roster-names">` + list.map(a =>
-        `<div class="roster-name${a === selectedAgent ? " selected" : ""}" data-id="${agents.indexOf(a)}">${a.name}<span class="nat">·${JOBS_CN[a.job] || ""}</span></div>`
+        `<div class="roster-name${a === selectedAgent ? " selected" : ""}" data-id="${agents.indexOf(a)}">${a.name}<span class="nat">·${JOBS_CN[a.job] || ""} ${a.sex === "f" ? "♀" : "♂"}</span></div>`
       ).join("") + `</div>`;
     }
     rosterBody.innerHTML = html;

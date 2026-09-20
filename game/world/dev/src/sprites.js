@@ -472,55 +472,261 @@ function houseSprite(floors, stone, granary, lit) {
 }
 
 // ============================================================
-// 小人：4 状态色 × 6 姿态（B=状态色，b=暗部，t=锤柄，k=锤头）
-// 姿态：0 站立 / 1-2 走路两帧 / 3 躺睡 / 4-5 干活抡锤两帧
+// 小人：分层像素系统（head rows2-7 / body rows8-12 / pants rows13-15，脚底锚定 row15）
+// 渲染叠加顺序：pants → 背包 → body → head；各层独立缓存，缓存键含全部视觉输入
 // ============================================================
-const AGENT_COLORS = { idle: "#f2ede0", work: "#ff9f43", eat: "#ffd166", sleep: "#8fa3e8" };
-const _A_BODY = [
-  "................",
-  "................",
-  "................",
-  "......BBBB......",
-  "......BBBB......",
-  "......BBBB......",
-  "......BBBB......",
-  ".....BBBBBB.....",
-  "....BBBBBBBB....",
-  "....BBBBBBBB....",
-  "....BBBBBBBB....",
-  "....bBBBBBBb....",
-];
-const AGENT_POSES = [
-  _A_BODY.concat([".....BB..BB.....", ".....BB..BB.....", ".....BB..BB.....", "................"]),
-  _A_BODY.concat([".....BB..BB.....", "....BB....BB....", "....BB.....BB...", "................"]),
-  _A_BODY.concat([".....BB..BB.....", ".....BBBB.......", "....BB...BB.....", "................"]),
-  [
-    "................", "................", "................", "................",
-    "................", "................", "................", "................",
-    "................", "..........BBBB..", "....BBBBBBBBBB..", "....BBBBBBBBBB..",
-    "....bBBBBBBBbb..", "................", "................", "................",
-  ],
-  [
-    "................", "................", "..........kk....", "..........kk....",
-    "......BBBB..t...", "......BBBB..t...", "......BBBB..t...", ".....BBBBBBBt...",
-    "....BBBBBBBB....", "....BBBBBBBB....", "....BBBBBBBB....", "....bBBBBBBb....",
-    ".....BB..BB.....", ".....BB..BB.....", ".....BB..BB.....", "................",
-  ],
-  [
-    "................", "................", "................", "................",
-    "................", "................", "................", ".....BBBBBB.....",
-    "....BBBBBBBB....", "....BBBBBBBB....", "....BBBBBBBBt...", "....bBBBBBBBt...",
-    ".....BB..BBkk...", ".....BB..BB.....", ".....BB..BB.....", "................",
-  ],
-];
-const NATIVE_FEATHER = [".......F........", ".......F........", ".......F........"];
+const AGENT_SKINS  = ["#f2d9b8", "#e6c39a", "#c99b6f"];                              // 肤色 3 档
+const AGENT_SHIRTS = ["#e8e2d2","#c96f4a","#4a6fa0","#6f8f4a","#c9a24a","#8a5a8a","#4a8a8a","#a05a5a","#5a6a7a","#7a6a4a"]; // 日常衣 10 色
+const AGENT_PANTS  = ["#3a4a6b","#5a4632","#6b3a3a","#3d5a46","#4a4a52","#6b5a3a"]; // 裤色 6 档
+const AGENT_HAIRS  = ["#2a2018","#4a3220","#6b4a2a","#c9a05a","#8a3a2a"];            // 发色 5 档
+const HAIR_STYLES_F = ["long", "bun", "short", "hat"];   // 女：长发/发髻+头花/短发/草帽
+const HAIR_STYLES_M = ["short", "bald", "hat", "kasa"];  // 男：短发/光头/草帽/斗笠
 
-function agentSprite(colorKey, pose, native) {
-  return sprGet(`a${colorKey}_${pose}_${native ? 1 : 0}`, () => {
-    const col = AGENT_COLORS[colorKey];
-    const cv = bakeArt(SPR, SPR, AGENT_POSES[pose] || AGENT_POSES[0],
-      { B: col, b: shadeHex(col, 0.78), t: "#7a5a30", k: "#9aa0a8" }, 1);
-    if (native) stampArt(cv.getContext("2d"), NATIVE_FEATHER, { F: "#f5f0e0" }, 1, 0, pose === 3 ? 6 : 1);
+// 外观随机：id 确定性 hash 五路取档（同 id 永远同款，与存档/位置无关）
+function agentLook(id) {
+  return {
+    skin: AGENT_SKINS[(hash2(id, 11) * AGENT_SKINS.length) | 0],
+    shirt: AGENT_SHIRTS[(hash2(id, 23) * AGENT_SHIRTS.length) | 0],
+    pants: AGENT_PANTS[(hash2(id, 37) * AGENT_PANTS.length) | 0],
+    hairC: AGENT_HAIRS[(hash2(id, 41) * AGENT_HAIRS.length) | 0],
+    hairStyle: (hash2(id, 53) * 4) | 0,
+  };
+}
+
+// ---- body 层：20 姿态 × 2 性别（top=最终衣色；f=连衣裙锥形下摆，m=直身摆）----
+// 手部用通用肤色常量（不随个体肤色，保缓存键精简）；工具柄 #7a5a30
+function agentBodySprite(top, pose, sex) {
+  return sprGet(`b${top}_${pose}_${sex}`, () => {
+    const { cv, g } = sprCtx(SPR, SPR);
+    const f = sex === "f";
+    const dark = shadeHex(top, 0.78);
+    const hand = "#f2d9b8";
+    const H = "#7a5a30";
+    const armSide = (x, y0, y1) => {   // 竖臂：袖 y0..y1-1 衣色、手 y1 肤色
+      for (let y = y0; y < y1; y++) pxF(g, x, y, top);
+      pxF(g, x, y1, hand);
+    };
+    // f 基础连衣裙：肩 row8 → 摆 rows11-13（盖住腿上部 row13）
+    const dress = (hx, lw) => {
+      rectF(g, 6, 8, 4, 1, top);
+      rectF(g, 5, 9, 6, 2, top);
+      rectF(g, hx, 11, lw, 3, top);
+      rectF(g, hx, 13, lw, 1, dark);
+    };
+    // m 基础直身：躯干 rows8-12 宽6，底行暗部
+    const torso = (lean) => {
+      rectF(g, lean ? 6 : 5, 8, 6, 1, top);
+      rectF(g, 5, 9, 6, 3, top);
+      rectF(g, 5, 12, 6, 1, dark);
+    };
+    const fArms = () => { pxF(g, 4, 9, top); pxF(g, 4, 10, hand); pxF(g, 11, 9, top); pxF(g, 11, 10, hand); };
+    switch (pose) {
+      case "stand":
+        if (f) { dress(4, 8); fArms(); }
+        else { torso(false); armSide(4, 9, 12); armSide(11, 9, 12); }
+        break;
+      case "walk1": case "walk2": case "run1": case "run2": {
+        const run = pose === "run1" || pose === "run2";
+        const swayL = pose === "walk1" || pose === "run1";   // 裙摆左右 1px 摆动
+        if (f) {
+          dress(swayL ? 3 : 5, 8);
+          if (run) rectF(g, 7, 8, 4, 1, top);   // 跑：肩部前倾错位
+          fArms();
+        } else {
+          torso(run);
+          if (pose === "walk1") { pxF(g, 4, 9, top); armSide(3, 9, 12); armSide(11, 9, 12); }
+          else if (pose === "walk2") { armSide(4, 9, 12); pxF(g, 11, 9, top); armSide(12, 9, 12); }
+          else if (pose === "run1") {   // 大幅摆：一臂前上、一臂后下
+            pxF(g, 3, 8, top); pxF(g, 3, 9, top); pxF(g, 4, 9, top); pxF(g, 3, 10, hand);
+            pxF(g, 11, 10, top); pxF(g, 12, 11, top); pxF(g, 12, 12, hand);
+          } else {
+            pxF(g, 12, 8, top); pxF(g, 12, 9, top); pxF(g, 11, 9, top); pxF(g, 12, 10, hand);
+            pxF(g, 4, 10, top); pxF(g, 3, 11, top); pxF(g, 3, 12, hand);
+          }
+        }
+        break;
+      }
+      case "sleep":   // 躺睡：身体横躺 rows9-13 宽8（f 裙摆平铺更宽）
+        if (f) {
+          rectF(g, 5, 9, 6, 2, top);
+          rectF(g, 4, 11, 8, 1, top);
+          rectF(g, 3, 12, 10, 2, top);
+          rectF(g, 3, 13, 10, 1, dark);
+        } else {
+          rectF(g, 4, 9, 8, 5, top);
+          rectF(g, 5, 13, 6, 1, dark);
+        }
+        break;
+      case "hammer1": case "hammer2": case "axe1": case "axe2":
+      case "hoe1": case "hoe2": case "shovel1": case "shovel2": {
+        const up = pose.endsWith("1");
+        if (f) {
+          dress(4, 8);
+          pxF(g, 4, 9, top); pxF(g, 4, 10, hand);
+          if (up) { pxF(g, 11, 9, top); pxF(g, 12, 8, top); pxF(g, 12, 7, hand); }
+          else { pxF(g, 11, 9, top); pxF(g, 11, 10, top); pxF(g, 11, 11, hand); }
+        } else {
+          torso(false);
+          armSide(4, 9, 12);
+          if (up) { pxF(g, 11, 9, top); pxF(g, 12, 8, top); pxF(g, 12, 7, hand); }
+          else armSide(11, 9, 12);
+        }
+        // 工具：抡起（上举）/砸下（近地）两帧；柄棕、锤灰/斧白/锄青/锹土黄
+        if (up) {
+          if (pose === "hammer1") { rectF(g, 12, 2, 1, 5, H); rectF(g, 11, 1, 3, 2, "#9aa0a8"); }
+          else if (pose === "axe1") { rectF(g, 12, 2, 1, 5, H); rectF(g, 12, 1, 2, 2, "#c9cdd4"); pxF(g, 11, 2, "#c9cdd4"); }
+          else if (pose === "hoe1") { rectF(g, 12, 3, 1, 4, H); rectF(g, 11, 2, 3, 1, "#8a8a92"); }
+          else { rectF(g, 12, 3, 1, 4, H); rectF(g, 12, 0, 2, 3, "#b8a266"); }
+        } else {
+          if (pose === "hammer2") { rectF(g, 12, 10, 1, 3, H); rectF(g, 11, 13, 3, 1, "#9aa0a8"); }
+          else if (pose === "axe2") { rectF(g, 12, 10, 1, 3, H); rectF(g, 12, 13, 2, 2, "#c9cdd4"); }
+          else if (pose === "hoe2") { rectF(g, 12, 9, 1, 4, H); rectF(g, 11, 13, 3, 1, "#8a8a92"); }
+          else { rectF(g, 12, 10, 1, 3, H); rectF(g, 11, 13, 3, 2, "#b8a266"); }
+        }
+        break;
+      }
+      case "eat1": case "eat2":   // 进食：手弯到嘴边（脸 row7 下方 1px）/放下
+        if (f) {
+          dress(4, 8);
+          pxF(g, 4, 9, top); pxF(g, 4, 10, hand); pxF(g, 11, 9, top); pxF(g, 11, 10, hand);
+          if (pose === "eat1") { pxF(g, 10, 9, top); pxF(g, 8, 8, hand); }
+        } else {
+          torso(false);
+          armSide(4, 9, 12); armSide(11, 9, 12);
+          if (pose === "eat1") { pxF(g, 11, 10, top); pxF(g, 10, 9, top); pxF(g, 9, 8, top); pxF(g, 8, 8, hand); }
+        }
+        break;
+      case "fish1": case "fish2": {   // 持竿：双臂前伸握竿（竿体由渲染层画），两帧微摆
+        const yA = pose === "fish1" ? 9 : 10, yB = pose === "fish1" ? 11 : 12;
+        if (f) dress(4, 8); else torso(false);
+        pxF(g, 11, yA, top); pxF(g, 12, yA, top); pxF(g, 13, yA, hand);
+        pxF(g, 11, yB, top); pxF(g, 12, yB, top); pxF(g, 13, yB, hand);
+        break;
+      }
+      case "row1": case "row2": {   // 划船坐姿：身体矮 rows9-13、坐姿展宽，双臂前伸抓握（桨由渲染层画）
+        if (f) {   // 裙摆覆盖坐姿
+          rectF(g, 6, 8, 4, 1, top);
+          rectF(g, 5, 9, 6, 2, top);
+          rectF(g, 4, 11, 8, 1, top);
+          rectF(g, 3, 12, 10, 2, top);
+          rectF(g, 3, 13, 10, 1, dark);
+        } else {
+          rectF(g, 5, 9, 6, 2, top);
+          rectF(g, 4, 11, 8, 3, top);
+          rectF(g, 4, 13, 8, 1, dark);
+        }
+        if (pose === "row1") {
+          pxF(g, 11, 10, top); pxF(g, 12, 10, top); pxF(g, 13, 10, hand);
+          pxF(g, 11, 11, top); pxF(g, 12, 11, top); pxF(g, 13, 11, hand);
+        } else {
+          pxF(g, 11, 10, top); pxF(g, 12, 10, hand);
+          pxF(g, 11, 11, top); pxF(g, 12, 11, hand);
+        }
+        break;
+      }
+    }
+    return outlineSprite(cv, "#1a1a26");
+  });
+}
+
+// ---- pants 层：双腿 rows13-15 各 2px（x5-6 / x9-10）；sleep 无腿层 ----
+// f 传 skin：裙下露腿用肤色（pants 参数不用于 f）；缓存键对 f 追加 skin（缓存键=全部视觉输入）
+function agentPantsSprite(pants, poseKey, sex, skin) {
+  return sprGet(`p${pants}_${poseKey}_${sex}${sex === "f" ? "_" + skin : ""}`, () => {
+    const { cv, g } = sprCtx(SPR, SPR);
+    const base = sex === "f" ? skin : pants;
+    const leg = (x, y0, y1) => {
+      if (y1 - y0 >= 2) rectF(g, x, y0, 2, y1 - y0 - 1, base);   // 裤腿 2px 宽
+      rectF(g, x, y1 - 1, 3, 2, shadeHex(base, 0.75));           // 鞋 3×2（脚底锚定 row15）
+      pxF(g, x + 2, y1, shadeHex(base, 0.6));                    // 鞋尖暗
+    };
+    switch (poseKey) {
+      case "stand": leg(5, 13, 15); leg(9, 13, 15); break;
+      case "walk1": leg(4, 13, 15); leg(9, 13, 15); break;
+      case "walk2": leg(5, 13, 15); leg(10, 13, 15); break;
+      case "run1":  leg(3, 13, 15); leg(10, 13, 15); break;   // 大步幅前后错位
+      case "run2":  leg(5, 13, 14); leg(9, 13, 15); break;
+      case "fish":  leg(4, 13, 15); leg(10, 13, 15); break;   // 站立微开
+      case "row":   leg(4, 12, 14); leg(10, 12, 14); break;   // 坐姿腿前收 rows12-14
+    }
+    return outlineSprite(cv, "#1a1a26");
+  });
+}
+
+// ---- head 层：大头 6×6 圆角 rows2-7（x5-10）+ 发型/帽饰；native=头顶白羽 1×3 ----
+function agentHeadSprite(skin, style, hairC, sex, native) {
+  return sprGet(`h${skin}_${style}_${hairC}_${sex}_${native ? 1 : 0}`, () => {
+    const { cv, g } = sprCtx(SPR, SPR);
+    rectF(g, 6, 2, 4, 1, skin);       // 圆角头顶
+    rectF(g, 5, 3, 6, 5, skin);       // 脸 rows3-7
+    pxF(g, 4, 5, skin); pxF(g, 11, 5, skin);   // 耳
+    rectF(g, 7, 8, 2, 1, skin);       // 脖子
+    pxF(g, 7, 5, "#1a1a26"); pxF(g, 9, 5, "#1a1a26");   // 双眼
+    switch (style) {
+      case "long":   // 头顶发 + 两侧垂发到 rows8-9
+        rectF(g, 6, 1, 4, 1, hairC);
+        rectF(g, 5, 2, 6, 1, hairC);
+        pxF(g, 4, 3, hairC); pxF(g, 5, 3, hairC); pxF(g, 10, 3, hairC); pxF(g, 11, 3, hairC);
+        rectF(g, 4, 4, 1, 6, hairC); rectF(g, 11, 4, 1, 6, hairC);
+        break;
+      case "bun":    // 发髻 2×2 + 头花
+        rectF(g, 7, 0, 2, 2, hairC);
+        rectF(g, 5, 2, 6, 1, hairC);
+        pxF(g, 9, 1, "#d9708a");
+        break;
+      case "short":  // 头顶 2px 发
+        rectF(g, 5, 2, 6, 1, hairC);
+        rectF(g, 6, 3, 4, 1, hairC);
+        break;
+      case "hat":    // 草帽：宽檐 8px + 帽顶
+        rectF(g, 4, 2, 8, 1, "#d9b84a");
+        rectF(g, 6, 0, 4, 2, "#c9a83e");
+        break;
+      case "kasa":   // 斗笠：三角
+        rectF(g, 7, 0, 2, 1, "#a88a5a");
+        rectF(g, 6, 1, 4, 1, "#a88a5a");
+        rectF(g, 5, 2, 6, 1, "#a88a5a");
+        break;
+      // bald：无发
+    }
+    if (native) rectF(g, 8, 0, 1, 3, "#f5f0e0");   // 原住民羽饰
+    return outlineSprite(cv, "#1a1a26");
+  });
+}
+
+// 躺睡侧头：4×4 侧脸 + 后脑发色 2px（与 sleep 横躺身体对位 x0-3 rows9-12）
+function agentHeadLieSprite(skin, hairC) {
+  return sprGet(`hl${skin}_${hairC}`, () => {
+    const { cv, g } = sprCtx(SPR, SPR);
+    rectF(g, 0, 9, 4, 4, skin);
+    rectF(g, 0, 9, 2, 4, hairC);
+    pxF(g, 2, 10, "#1a1a26");
+    return outlineSprite(cv, "#1a1a26");
+  });
+}
+
+// ---- 背包：8×8 点阵（carrying.res → 麻袋/柴捆/灰石/沙袋）----
+function agentPackSprite(res) {
+  return sprGet(`k${res}`, () => {
+    const { cv, g } = sprCtx(8, 8);
+    if (res === "food") {
+      rectF(g, 1, 2, 6, 5, "#d9c27a");
+      rectF(g, 2, 1, 4, 1, "#b8a05a");       // 袋口扎绳
+      rectF(g, 1, 6, 6, 1, "#bfa76a");
+    } else if (res === "wood") {
+      rectF(g, 1, 3, 6, 4, "#8a6236");
+      rectF(g, 2, 3, 1, 4, "#5c4426"); rectF(g, 5, 3, 1, 4, "#5c4426");   // 捆绳
+      pxF(g, 1, 4, "#a87c4a"); pxF(g, 6, 4, "#a87c4a");                    // 木段截面
+    } else if (res === "stone") {
+      rectF(g, 2, 3, 4, 1, "#9a9a92");
+      rectF(g, 1, 4, 6, 3, "#9a9a92");
+      pxF(g, 2, 4, "#c2c2ba");
+      rectF(g, 2, 6, 4, 1, "#7e7e78");
+    } else {
+      rectF(g, 1, 2, 6, 5, "#d8c890");
+      rectF(g, 2, 1, 4, 1, "#b8a860");
+      pxF(g, 3, 4, "#b8a860"); pxF(g, 4, 5, "#b8a860");   // 沙袋褶皱
+    }
     return outlineSprite(cv, "#1a1a26");
   });
 }

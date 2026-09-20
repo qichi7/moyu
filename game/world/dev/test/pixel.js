@@ -165,10 +165,56 @@ assert(vm.runInContext(`
   [1,2,3].every(f => [false,true].every(s => [false,true].every(g =>
     [false,true].every(l => sprStats(houseSprite(f, s, g, l)).opaque >= 120))))
 `, ctx), "房屋 24 种变体（楼层×石砌×粮仓×亮窗）全部非空");
+// ---- 2b. 分层小人：外观随机 / 20 姿态身体 / 腿层 / 头层 / 背包 ----
 assert(vm.runInContext(`
-  Object.keys(AGENT_COLORS).every(ck => AGENT_POSES.every((_, p) =>
-    sprStats(agentSprite(ck, p, false)).opaque >= 60))
-`, ctx), "小人 4 状态色 × 6 姿态全部非空");
+  (() => {
+    const a1 = agentLook(7), a2 = agentLook(7);
+    if (JSON.stringify(a1) !== JSON.stringify(a2)) return false;   // 同 id 两次结果全等
+    const shirts = new Set();
+    for (let id = 0; id < 50; id++) shirts.add(agentLook(id).shirt);
+    return shirts.size >= 4;   // 50 个 id 衣色至少 4 种（随机性）
+  })()
+`, ctx), "agentLook 确定性 + 50 id 衣色 ≥4 种");
+assert(vm.runInContext(`
+  (() => {
+    const POSES = ["stand","walk1","walk2","run1","run2","sleep","hammer1","hammer2",
+      "axe1","axe2","hoe1","hoe2","shovel1","shovel2","eat1","eat2","fish1","fish2","row1","row2"];
+    for (const p of POSES) for (const sx of ["f", "m"])
+      for (const c of [agentLook(3).shirt, "#ff9f43"])
+        if (sprStats(agentBodySprite(c, p, sx)).opaque < 60) return false;
+    return true;
+  })()
+`, ctx), "身体 20 姿态 × 2 性别 × 2 衣色全部非空（≥60px）");
+assert(vm.runInContext(`
+  ["stand","walk1","walk2","run1","run2","fish","row"].every(pk =>
+    ["f", "m"].every(sx => [agentLook(5).pants, "#3a4a6b"].every(c =>
+      sprStats(agentPantsSprite(c, pk, sx, agentLook(5).skin)).opaque >= 30)))
+`, ctx), "腿层 7 姿态 × 2 性别 × 2 裤色全部非空（≥30px）");
+assert(vm.runInContext(`
+  (() => {
+    for (const pool of [HAIR_STYLES_F, HAIR_STYLES_M])
+      for (const st of pool) for (const sx of ["f", "m"])
+        for (const sk of AGENT_SKINS) for (const hc of [AGENT_HAIRS[0], AGENT_HAIRS[3]])
+          for (const nv of [false, true])
+            if (sprStats(agentHeadSprite(sk, st, hc, sx, nv)).opaque < 40) return false;
+    return true;
+  })()
+`, ctx), "头层 两性发型池 × 肤色 × 发色 × 羽饰 全组合非空（≥40px）");
+assert(vm.runInContext(`
+  AGENT_SKINS.every(sk => AGENT_HAIRS.every(hc => sprStats(agentHeadLieSprite(sk, hc)).opaque >= 20))
+`, ctx), "躺睡侧头 15 组合全部非空（≥20px）");
+assert(vm.runInContext(`
+  ["food","wood","stone","sand"].every(r => sprStats(agentPackSprite(r)).opaque >= 20)
+`, ctx), "背包 4 种资源全部非空（≥20px）");
+assert(vm.runInContext(`
+  agentPoseOf({ state: "idle" }).key === "stand" &&
+  agentPoseOf({ state: "sleep" }).legs === null &&
+  agentPoseOf({ state: "walk", phase: 0.5, speed: 1.7 }).key === "walk2" &&
+  agentPoseOf({ state: "walk", phase: 0.3, speed: 1.7, exploring: {} }).key === "run2" &&
+  agentPoseOf({ state: "eat", phase: 0.4 }).legs === "stand" &&
+  agentPoseOf({ state: "work", phase: 0.2, task: { type: "FARM" } }).key === "hoe1" &&
+  agentPoseOf({ state: "work", phase: 0.4, task: { type: "FISH" } }).fishing === true
+`, ctx), "agentPoseOf 姿态分发（跑/睡/吃/农/钓）分支正确");
 assert(vm.runInContext(`
   Object.keys(CREATURE_META).every(k => sprStats(creatureSprite(k, 0)).opaque >= 8)
 `, ctx), "十种动物 sprite 全部非空");

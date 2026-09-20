@@ -78,6 +78,33 @@ function neighborTile(x, y, d) {
   return tileAt(x + (d === 2 ? -1 : d === 3 ? 1 : 0), y + (d === 0 ? -1 : d === 1 ? 1 : 0));
 }
 
+// 小人姿态分发（纯函数，全部读现有字段）：key=body 层姿态，legs=pants 层姿态，fishing=叠加钓竿
+// a.sex 未定义（旧存档/测试）自动落男款
+function agentPoseOf(a) {
+  if (a.state === "sleep") return { key: "sleep", legs: null };
+  if (a.state === "eat") return { key: Math.floor(a.phase * 2) % 2 ? "eat2" : "eat1", legs: "stand" };
+  if (a.state === "work") {
+    const tt = a.task && a.task.type;
+    if (tt === "FISH") {
+      const f = Math.floor(a.phase * 1.5) % 2;
+      return { key: f ? "fish2" : "fish1", legs: "fish", fishing: true };
+    }
+    const f = Math.floor(a.phase * 3) % 2;
+    let tool = "hammer";   // 兜底抡锤（BUILD/QUARRY/SANDPIT/GATHER/PASTURE/HUNT 站桩等）
+    if (tt === "FARM") tool = "hoe";
+    else if (tt === "DIG" && tileAt(a.task.x, a.task.y) === T.TREE) tool = "axe";
+    else if (tt === "FILL" || tt === "BRIDGE" || tt === "EXCAV" || tt === "PLANT" || tt === "PLANT_BERRY") tool = "shovel";
+    return { key: tool + (f ? "2" : "1"), legs: "stand" };
+  }
+  if (a.state === "walk") {
+    const running = a.exploring || a.speed > 1.85 ||
+      (a.task && (a.task.type === "HUNT" || a.task.type === "CAPTURE"));
+    const n = Math.floor(a.phase * (running ? 4 : 3)) % 2 ? "2" : "1";
+    return running ? { key: "run" + n, legs: "run" + n } : { key: "walk" + n, legs: "walk" + n };
+  }
+  return { key: "stand", legs: "stand" };
+}
+
 function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
   // 背景为虚空深渊色：未生成区域（VOID）露出此色，探索到后显现海与岛屿
   ctx.fillStyle = "#05070c";
@@ -326,6 +353,26 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     ctx.translate(px, py);
     ctx.rotate(sh.ang);
     ctx.drawImage(spr, -L / 2, -W2 / 2, L, W2);
+    // 船内划手：同锚叠三层（船体之上、随船旋转）；靠岸后水手已下船（state 非 voyage）不重复画
+    if (sh.sailor && !sh.sailor.dead && sh.sailor.state === "voyage") {
+      const k2 = (s / SPR) * 0.8;
+      const look2 = agentLook(sh.sailor.id);
+      const rf = Math.floor(world.time * 2) % 2;
+      const ax2 = -8 * k2, ay2 = -0.7 * s * 0.8;
+      ctx.drawImage(agentPantsSprite(look2.pants, "row", sh.sailor.sex, look2.skin), ax2, ay2, 16 * k2, 16 * k2);
+      ctx.drawImage(agentBodySprite(look2.shirt, rf ? "row2" : "row1", sh.sailor.sex), ax2, ay2, 16 * k2, 16 * k2);
+      ctx.drawImage(agentHeadSprite(look2.skin,
+        (sh.sailor.sex === "f" ? HAIR_STYLES_F : HAIR_STYLES_M)[look2.hairStyle] || "short",
+        look2.hairC, sh.sailor.sex, sh.sailor.native), ax2, ay2, 16 * k2, 16 * k2);
+      // 双桨：两帧摆动的两条线段，桨尖超出船舷
+      const oarY = rf ? 5 : -5;
+      ctx.strokeStyle = "#7a5a30";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-3 * k2, 2 * k2); ctx.lineTo(-13 * k2, oarY * k2);
+      ctx.moveTo(3 * k2, 2 * k2); ctx.lineTo(13 * k2, oarY * k2);
+      ctx.stroke();
+    }
     ctx.restore();
     if (sh.state === "stranded") {   // 被困求救标记
       ctx.fillStyle = "#e74c3c";
@@ -342,7 +389,7 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     }
   }
 
-  // 小人：像素 sprite（状态着色 + 走路/干活双帧摆动 + 睡觉躺平）
+  // 小人：分层像素小人（pants → 背包 → body → head 同锚叠加），衣色随状态
   for (const a of agents) {
     if (a.state === "voyage") continue;   // 航海中的人在船上
     const px = ox + a.x * s, py = oy + a.y * s;
@@ -359,22 +406,45 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
       ctx.beginPath(); ctx.ellipse(px, py + s * 0.12, r * 2.2, r * 1.5, 0, 0, 7); ctx.stroke();
     }
 
-    if (s < 6) { // 极小缩放：单点降级
-      ctx.fillStyle = AGENT_COLORS[a.state === "work" ? "work" : a.state === "eat" ? "eat" : a.state === "sleep" ? "sleep" : "idle"];
+    const look = agentLook(a.id);
+    const pose = agentPoseOf(a);
+    const top = a.state === "work" ? "#ff9f43" : a.state === "sleep" ? "#8fa3e8" : look.shirt;
+
+    if (s < 6) { // 极小缩放：单点降级（衣色点）
+      ctx.fillStyle = top;
       ctx.beginPath(); ctx.arc(px, py, Math.max(1.5, r), 0, 7); ctx.fill();
       continue;
     }
 
-    const colorKey = a.state === "work" ? "work" : a.state === "eat" ? "eat" : a.state === "sleep" ? "sleep" : "idle";
-    let pose = 0;
-    if (a.state === "walk") pose = 1 + (Math.floor(a.phase * 3) % 2);
-    else if (a.state === "work") pose = 4 + (Math.floor(a.phase * 3) % 2);
-    else if (a.state === "sleep") pose = 3;
-    const spr = agentSprite(colorKey, pose, a.native);
-    const scale = s / SPR;
-    const sh2 = spr.height * scale;
-    const bob = a.state === "walk" ? Math.abs(Math.sin(a.phase * 9)) * r * 0.3 : 0;
-    ctx.drawImage(spr, px - 8 * scale, py - sh2 * 0.62 - bob, 16 * scale, sh2);
+    const k = s / SPR;
+    const bob = (pose.key === "walk1" || pose.key === "walk2" || pose.key === "run1" || pose.key === "run2")
+      ? Math.abs(Math.sin(a.phase * 9)) * r * 0.3 : 0;
+    const ax = px - 8 * k, ay = py - 0.7 * s - bob;   // 统一锚点：脚底 row15 对齐地面
+
+    if (pose.legs)   // 腿层（sleep 无腿层）
+      ctx.drawImage(agentPantsSprite(look.pants, pose.legs, a.sex, look.skin), ax, ay, s + 0.5, s + 0.5);
+    if (a.carrying) {   // 资源背包：身体左后、略上移露包顶
+      const pk = agentPackSprite(a.carrying.res);
+      ctx.drawImage(pk, ax, ay + 3 * k, 8 * k, 8 * k);
+    }
+    ctx.drawImage(agentBodySprite(top, pose.key, a.sex), ax, ay, s + 0.5, s + 0.5);
+    const headSpr = pose.key === "sleep"
+      ? agentHeadLieSprite(look.skin, look.hairC)
+      : agentHeadSprite(look.skin,
+          (a.sex === "f" ? HAIR_STYLES_F : HAIR_STYLES_M)[look.hairStyle] || "short",
+          look.hairC, a.sex, a.native);
+    ctx.drawImage(headSpr, ax, ay, s + 0.5, s + 0.5);
+
+    // 钓竿叠加：竿线从手到鱼点，浮标在鱼点上方随波浮动
+    if (pose.fishing && s >= 8 && a.task && a.task.fishX !== undefined) {
+      const wx = ox + (a.task.fishX + 0.5) * s, wy = oy + (a.task.fishY + 0.5) * s;
+      const by = wy - 2 + Math.sin(world.time * 2.5) * 1.5;
+      ctx.strokeStyle = "#5c4426";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(px, py - 0.3 * s); ctx.lineTo(wx, by); ctx.stroke();
+      ctx.fillStyle = "#d9483b"; ctx.fillRect(wx - 1, by - 2, 2, 2);   // 浮标红
+      ctx.fillStyle = "#f0ead8"; ctx.fillRect(wx - 1, by, 2, 1);       // 浮标白
+    }
 
     // 状态标记
     if (a.state === "work") {          // 敲击火花
@@ -387,7 +457,7 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     } else if (a.state === "sleep" && s >= 10) { // 睡觉冒 z
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       ctx.font = `${Math.max(7, s * 0.45)}px sans-serif`;
-      ctx.fillText("z", px + r * 0.8, py - sh2 * 0.5);
+      ctx.fillText("z", px + r * 0.8, py - 0.7 * s);
     }
   }
 

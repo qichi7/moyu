@@ -40,7 +40,7 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 10. **视觉与逻辑时钟分离**：昼夜明暗用 `visualTod`（main.js 维护，增速封顶 **10×**）、波光用 `waveT`（暂停即静止）——两者经参数传入 `drawScene`，**勿在渲染层直接读 `world.timeOfDay` 或 `performance.now()`**；小人作息等逻辑仍用 `world.timeOfDay`（模拟时间，`isDaytime()` 勿动）。
 11. **航海状态冻结需求**：`agent.state === "voyage"` 时 `update` 提前 return（坐标由船携带、hunger/energy 不衰减）——防止远航饿死；船实体在 `world.ships`（sailing/return/docked 三态 + 航程上限），靠岸/返航/清理见 `shipTick`；造船消耗联合木材 `SIM.SHIP_COST`。
 12. **出生与测试种子**：`main.js` 用随机种子开局（每次新地图），`dev/test/*.js` 固定 `simInit(42)`——新增断言必须对任意 seed 稳定（禁止依赖具体人口数值，用范围/趋势断言；entry.js 的出生断言即因此用 `>= 12`）。
-13. **Sprite 图集（sprites.js）三条铁律**：a) **缓存键 = 全部视觉输入**（tile/海拔档/hash 变体/动画帧/楼层/石砌/粮仓/亮窗/姿态/果量），漏键 = 复用错图；b) **`shade()` 只吃 hex**——产出的 `rgb(...)` 字符串再喂回 `shade()`/`stampArt` 调色板会变 NaN 色（必须走 `shadeHex` 或由调用方预着色，历史 bug ×2：池塘波纹、小人暗部）；c) 渲染缩放语义：zoom≥1 关平滑（方块感）、0.4~1 开平滑、<0.4 缩略图关平滑——勿在 drawScene 外部改 `imageSmoothingEnabled`。渲染回归用 `test/pixel.js`（软件光栅化，能抓全空 sprite/NaN 色）。
+13. **Sprite 图集（sprites.js）三条铁律**：a) **缓存键 = 全部视觉输入**（tile/海拔档/hash 变体/动画帧/楼层/石砌/粮仓/亮窗/姿态/果量；小人分层缓存键含 pose/性别/发型/背包资源，f 腿层另含肤色），漏键 = 复用错图；b) **`shade()` 只吃 hex**——产出的 `rgb(...)` 字符串再喂回 `shade()`/`stampArt` 调色板会变 NaN 色（必须走 `shadeHex` 或由调用方预着色，历史 bug ×2：池塘波纹、小人暗部）；c) 渲染缩放语义：zoom≥1 关平滑（方块感）、0.4~1 开平滑、<0.4 缩略图关平滑——勿在 drawScene 外部改 `imageSmoothingEnabled`。渲染回归用 `test/pixel.js`（软件光栅化，能抓全空 sprite/NaN 色）。
 
 ## 3. 代码地图
 
@@ -53,11 +53,11 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 | world.js | chunk 系统、`generateRegion`（两遍生成：海拔场+悬崖/洞穴，岛公式+发现网格+点亮）、`carveRiver` 河流、`expand` 扩张、tile 读写、资源库存与联合库存 | `tileAt/setTile/findSpot/ensureStock/revealArea/jointStock/jointConsume/carveRiver` |
 | tasks.js | 任务系统 15 种（含 EXCAV 挖塘）：立项/领任务（职业匹配+任务老化+资源过滤）/完成结算（产出搬运语义） | `tasksAdd/tasksTake/tasksFinish/TASK_RESOURCE_COST` |
 | creature.js | 十种生物实体（栖息地系统 `habitatOk`：游荡/逃跑疲劳/跟随/驯化/圈养/繁殖/狼捕食；野生繁衍分栖息地上限；老死；搁浅被困死亡——施工改变地形后等待救援或死亡，`carriedBy` 被人搬运） | `creatures` 数组、`populateIslandCreatures`、`habitatOk`、`wildBreedTick` |
-| agent.js | 小人：个体属性（探索欲/勤劳）、喜好（explore/homebody/animal/fishing/none）、职业（7 种可转职）、状态机、探索旅程、**航海（startVoyage）**、迁居、登岛命名即定居化、年龄死亡 | `Agent.update → decide / die / startVoyage` |
-| sim.js | 调度核心：`plannerTick`（10 分支需求聚合 + 死任务清理）、**劳动力市场 `jobMarketTick`**、聚落演化、时代、出生、宴席、死亡清理、船舶 `shipTick` | `simInit / simUpdate / plannerTick / shipTick` |
-| render.js | 场景编排：drawScene 贴 sprite 图集 + 动态叠加层（工程进度/昼夜/分区底纹/地区名标注/选中环/瀑布）、chunk 缩略图（zoom<0.4）、缩放平滑语义（≥1 关/0.4~1 开） | `drawScene` |
+| agent.js | 小人：个体属性（探索欲/勤劳）、喜好（explore/homebody/animal/fishing/none）、职业（7 种可转职）、状态机、探索旅程、**航海（startVoyage）**、迁居、登岛命名即定居化、年龄死亡；**性别（id hash 确定性）/父姓母姓记录/性别化名字池（56 单姓+20 复姓，surname 字段化）** | `Agent.update → decide / die / startVoyage` |
+| sim.js | 调度核心：`plannerTick`（10 分支需求聚合 + 死任务清理 + **亲子确定**）、**劳动力市场 `jobMarketTick`**、聚落演化、时代、出生、宴席、死亡清理、船舶 `shipTick` | `simInit / simUpdate / plannerTick / shipTick` |
+| render.js | 场景编排：drawScene 贴 sprite 图集 + 动态叠加层（工程进度/昼夜/分区底纹/地区名标注/选中环/瀑布）、**小人分层绘制与姿态分发 `agentPoseOf`（走/跑/吃/工具两帧/钓竿浮标/船内划手双桨）**、chunk 缩略图（zoom<0.4）、缩放平滑语义（≥1 关/0.4~1 开） | `drawScene / agentPoseOf` |
 | audio.js | 程序化音效（振荡器合成，无音频文件） | `sfx.play(name)` |
-| sprites.js | 像素 Sprite 图集：全部 tile/房屋 24 变体/小人 4 色×6 姿态/十种动物/4 种船/浪花抖动叠加层的 16×16 点阵惰性烘焙；色彩基建（shade/shadeHex/ELEV_TIERS/TILE_ELEV_VARIANTS/POND_VARIANTS）在此 | `tileSprite/waterSprite/pondSprite/houseSprite/propSprite/agentSprite/creatureSprite/shipSprite/foamSprite/ditherSprite` |
+| sprites.js | 像素 Sprite 图集：全部 tile/房屋 24 变体/**小人分层像素系统（`agentLook` 外观随机 + head/body/pants 三层 20 姿态 × 2 性别 + 背包 4 种 + 躺睡侧头）**/十种动物/4 种船/浪花抖动叠加层的 16×16 点阵惰性烘焙；色彩基建（shade/shadeHex/ELEV_TIERS/TILE_ELEV_VARIANTS/POND_VARIANTS）在此 | `tileSprite/waterSprite/pondSprite/houseSprite/propSprite/agentLook/agentBodySprite/agentPantsSprite/agentHeadSprite/agentHeadLieSprite/agentPackSprite/creatureSprite/shipSprite/foamSprite/ditherSprite` |
 | main.js | 主循环（固定步长，速度 0/1/2/10/100/1000 档）、Pointer Events 相机（拖拽/捏合/点按）、视觉昼夜 `visualTod`、波光时钟 `waveT`、视角跟随、点击拾取、信息面板、居民名册 | `focusAgent / handlePick / updateRoster / followMode` |
 
 ## 4. 已校准的死锁（改相关代码前必读）
@@ -133,6 +133,7 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 - **性能护栏**：点亮半径平方效应（1.5 倍半径 = 2.25 倍格数）曾拖垮 sim（15 分钟/测试）——`generateRegion` 海拔 fbm 按 `chunk.elev` 缓存（**仅 bump=0 的无岛影响格**用缓存，岛缘格必须重算否则发现岛会生成为海）；已生成格有海拔数据即跳过 fbm
 - **地形保护（重要）**：`generateRegion` 的 inInfluence 重算与 `settleFarTile` 的 reveal 分支**只对 `tiles[i]===T.VOID` 的格生效**——已生成的房屋/道路/桥/农田/已点亮地形绝不被改写（此前洞穴/山体重算会吞房屋、点亮海域会吞人工路，且 houses 数组不回滚导致"隐形房屋"）；改地形生成逻辑必须保持这一语义
 - **名字唯一**：人名（`_usedNames`）、原住民名（`_usedNative`，含双字扩展+编号兜底）、地名（`pickName` 查聚落+已命名岛屿；两字池 120 用尽自动三字 1200，再尽编号兜底——无限扩张不死循环）
+- **亲子与性别（v0.2.1）**：sex 由 id hash 确定性推导（`hash2(this.id, 9172)`，不消耗 rand 流）、名字分男女池（`_GIVEN_M`/`_GIVEN_F` 各 10 字）、新生儿随父姓或母姓（`world.birthSeq` + `hash2(seq, salt)` 选亲，零 rand 消耗保持随机流逐位一致；父亲选取：同屋→同聚落（SETTLEMENT_RADIUS）→全体成年男，单亲随在世方）；出生点偏向母亲家（`findSpot(母亲家, 1, 4)`，无房走 findBirthSpot 兜底）；信息框显示性别与父母，名册带 ♀♂（`updateRoster` 两处名字条）；回归测试 `dev/test/family.js`。**v0.2.2：56 单姓+20 复姓（占比约 9%）、名池 24/24、agent.surname 字段化（复姓前缀检测），选亲直接继承 surname 字段**
 - **粮食城市内共享**：`settlement.stock.food`（`ensureStock` 兜底），产出（农田/牧场/渔船/采集）进 `ownerSettle`（无半径最近聚落），进食只吃所在城市库存，出生检查出生城市存粮 ≥12，宴席由存粮最多的城市承担；HUD/闸门/告警用 `totalFood()`（全局视角指标）；world.food 已移除
 - **挖塘/运鱼/灌溉**：`EXCAV` 任务（进度制）把陆格挖成水塘；渔场三级策略——①近岸野生鱼群原地圈养 ②`CAPTURE` 带 `dest` 从远处鱼群捕苗运往聚落近处水域圈养 ③无水域先挖塘；**农田 5 格内有水才能生长**（`farmTick` 门控 + `irrigated` 缓存 2s 节流，缺水停滞不倒退），FARM 立项先查水、无水先挖塘（`expandSpot(s, 2, 6)` 紧贴选址）
 - **设施聚簇**：房挨房（`expandSpot` rMin=2 留走道）、田连田（rMin=1 紧贴），基准点=同聚落内最近的同类设施（`localFacilities` 用 `ownerSettle` 无半径归属——注意 nearestSettlement 有 SETTLEMENT_RADIUS 上限会误判无主）；新区预置（expand/登岛）围绕粮仓聚簇 + `planned` Set 防撞位；跨聚落天然不聚集

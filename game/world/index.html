@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>小世界 · v0.2.0</title>
+<title>小世界 · v0.2.2</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #07090e; }
@@ -1995,18 +1995,34 @@ function huntReward(c) {
 "use strict";
 // ============ 小人 Agent ============
 
-// 命名：尽量不重复（池约 8000 组合，耗尽后允许重名）
-const _SURNAMES = ["张", "王", "李", "陈", "杨", "赵", "周", "吴", "郑", "孙", "林", "何", "高", "苏", "叶", "宋", "罗", "程", "袁", "许"];
-const _GIVEN = ["石", "禾", "安", "松", "竹", "梅", "青", "远", "川", "云", "枫", "桥", "岚", "星", "野", "宁", "秋", "白", "舟", "棠"];
+// 命名：尽量不重复；单姓 56 个、复姓 20 个（抽取占比约 9%，稀有感）；名用字分男女池（各 24 字）
+const _SURNAMES = ["张", "王", "李", "陈", "杨", "赵", "周", "吴", "郑", "孙", "林", "何", "高", "苏", "叶", "宋", "罗", "程", "袁", "许",
+  "黄", "谢", "唐", "韩", "曹", "萧", "石", "冯", "蒋", "沈", "卢", "崔", "姜", "邹", "孟", "秦", "严", "薛", "杜", "魏",
+  "范", "彭", "吕", "董", "贾", "毛", "邓", "康", "傅", "邵", "温", "于", "徐", "马", "朱", "胡"];
+const _SURNAMES_CP = ["欧阳", "司马", "诸葛", "上官", "东方", "独孤", "南宫", "西门", "慕容", "皇甫",
+  "尉迟", "公孙", "长孙", "宇文", "轩辕", "令狐", "夏侯", "钟离", "闻人", "澹台"];
+const _GIVEN_M = ["石", "安", "松", "青", "远", "川", "枫", "桥", "野", "舟",
+  "岳", "峰", "磊", "恒", "铮", "弘", "毅", "昊", "霆", "潮", "湃", "澈", "瀚", "煜"];   // 男名用字
+const _GIVEN_F = ["禾", "梅", "竹", "云", "岚", "星", "宁", "秋", "白", "棠",
+  "汀", "芷", "若", "蕙", "萱", "蓉", "莺", "湘", "沁", "潇", "澜", "玥", "珊", "瑶"];   // 女名用字
 const _usedNames = new Set();
-function pickAgentName() {
+function pickAgentName(sex, surname) {
+  const pool = sex === "f" ? _GIVEN_F : _GIVEN_M;
   for (let i = 0; i < 40; i++) {
-    const n = _SURNAMES[randInt(0, _SURNAMES.length - 1)] +
-              _GIVEN[randInt(0, _GIVEN.length - 1)] +
-              (rand() < 0.4 ? _GIVEN[randInt(0, _GIVEN.length - 1)] : "");
+    // 随机姓槽：单姓×3 + 复姓 合并索引上抽一次（复姓占比约 9%，稀有感）；恒定消耗，保持随机流调用点与旧版一致
+    const si = randInt(0, _SURNAMES.length * 3 + _SURNAMES_CP.length - 1);
+    const sn = si < _SURNAMES.length * 3 ? _SURNAMES[si % _SURNAMES.length] : _SURNAMES_CP[si - _SURNAMES.length * 3];
+    const n = (surname || sn) + pool[randInt(0, pool.length - 1)] +
+              (rand() < 0.4 ? pool[randInt(0, pool.length - 1)] : "");
     if (!_usedNames.has(n)) { _usedNames.add(n); return n; }
   }
   return "居民" + (agents.length + 1);
+}
+
+// 姓氏：命中复姓前缀取前两字，否则取首字
+function surnameOf(name) {
+  for (const s of _SURNAMES_CP) if (name.startsWith(s)) return s;
+  return name[0];
 }
 
 // 原住民部落小名（查重：原住民多，12 个单字必重，扩展双字组合 + 池尽编号）
@@ -2046,12 +2062,16 @@ const _HOBBY_ROLL = () => {
 };
 
 class Agent {
-  constructor(x, y, native) {
+  constructor(x, y, native, opts) {
     this.x = x + 0.5; this.y = y + 0.5;   // 浮点 tile 坐标，格中心
     this.id = _agentIdSeq++;               // 稳定唯一 id（名册引用，不受数组增删影响）
     this.dead = false;
     this.native = !!native;                // 原住民（被发现岛屿上的部落居民）
-    this.name = this.native ? pickNativeName() : pickAgentName();
+    this.sex = hash2(this.id, 9172) < 0.5 ? "f" : "m";   // 性别：id 确定性推导（不消耗 rand 流），出生定死
+    this.name = this.native ? pickNativeName() : pickAgentName(this.sex, opts && opts.surname);
+    this.surname = (opts && opts.surname) || surnameOf(this.name);   // 姓氏字段：固定姓优先，否则从名字推导（复姓取前两字；原住民「阿」无害）
+    this.father = (opts && opts.father) || null;   // 父名（字符串）
+    this.mother = (opts && opts.mother) || null;   // 母名（字符串）
 
     // 个体属性（0~1，人各不同）
     this.adventure = this.native ? randRange(0.5, 1) : randRange(0.05, 1); // 探索欲：高的常远行，低的恋家
@@ -2782,8 +2802,8 @@ function logThrottled(text, minGap) {
 
 const agents = [];
 
-function spawnAgent(x, y, native) {
-  const a = new Agent(x, y, native);
+function spawnAgent(x, y, native, opts) {
+  const a = new Agent(x, y, native, opts);
   agents.push(a);
   return a;
 }
@@ -3221,13 +3241,35 @@ function plannerTick() {
   //    BIRTH_CHECK 是每秒概率，规划器每 PLANNER_INTERVAL 秒才判一次，需换算成窗口概率
   const hasRoom = world.houses.length * 3 > pop;
   if (pop > 0 && totalFood() > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
-    const near = findBirthSpot();
+    // 亲子：出生序号确定性选亲（hash2 不消耗 rand 流，保证固定种子回归与旧版逐位一致）
+    const seq = (world.birthSeq = (world.birthSeq || 0) + 1);
+    const mothers = agents.filter(a => !a.dead && a.sex === "f" && a.age >= 16 && a.age <= 45);   // 育龄母池（0 岁新生儿天然不在内）
+    const mother = mothers.length ? mothers[(hash2(seq, 7717) * mothers.length) | 0] : null;
+    let father = null;
+    const adultM = agents.filter(a => !a.dead && a.sex === "m" && a.age >= 16);
+    if (mother && adultM.length) {
+      // 父亲选取：同屋优先 → 同聚落次之 → 全体成年男兜底（home 按坐标比较：各人 home 是独立对象，引用永不相同）
+      const sameHouse = mother.home ? adultM.filter(a => a.home &&
+          a.home.x === mother.home.x && a.home.y === mother.home.y) : [];
+      const nearHome = sameHouse.length ? sameHouse
+        : mother.home ? adultM.filter(a => a.home &&
+            Math.abs(a.home.x - mother.home.x) + Math.abs(a.home.y - mother.home.y) <= SIM.SETTLEMENT_RADIUS) : [];
+      const pool = nearHome.length ? nearHome : adultM;
+      father = pool[(hash2(seq, 8819) * pool.length) | 0];
+    }
+    // 姓：50/50 随父姓或母姓（直接继承姓氏字段，支持复姓）；单亲随在世一方；双缺 null → 构造函数回退随机姓
+    const sn = father && mother ? (hash2(seq, 9283) < 0.5 ? father.surname : mother.surname)
+      : mother ? mother.surname : father ? father.surname : null;
+    // 出生点：生在母亲家旁（母亲无房或选址失败 → 走原兜底），选址计算在选亲之后
+    let near = null;
+    if (mother && mother.home) near = findSpot(mother.home.x, mother.home.y, 1, 4, T.GRASS);   // 生在母亲家旁
+    if (!near) near = findBirthSpot();
     const birthCity = near && ownerSettle(near.x, near.y);
     if (near && birthCity && ensureStock(birthCity).food < 12) { /* 出生城市存粮不足：暂缓生育 */ }
     else if (near) {
-      const baby = spawnAgent(near.x, near.y);
+      const baby = spawnAgent(near.x, near.y, false, { surname: sn, father: father && father.name, mother: mother && mother.name });
       baby.age = 0;   // 新生儿从 0 岁长大（1 游戏年 = 1 岁）
-      logThrottled(`新生命降临，人口达到 ${pop + 1}。`, 8);
+      logThrottled(`新生命降临${mother ? `（${mother.name}${father ? " 与 " + father.name + " 之家" : "家"}）` : ""}，人口达到 ${pop + 1}。`, 8);
       emit("birth");
     }
   }
@@ -4135,55 +4177,261 @@ function houseSprite(floors, stone, granary, lit) {
 }
 
 // ============================================================
-// 小人：4 状态色 × 6 姿态（B=状态色，b=暗部，t=锤柄，k=锤头）
-// 姿态：0 站立 / 1-2 走路两帧 / 3 躺睡 / 4-5 干活抡锤两帧
+// 小人：分层像素系统（head rows2-7 / body rows8-12 / pants rows13-15，脚底锚定 row15）
+// 渲染叠加顺序：pants → 背包 → body → head；各层独立缓存，缓存键含全部视觉输入
 // ============================================================
-const AGENT_COLORS = { idle: "#f2ede0", work: "#ff9f43", eat: "#ffd166", sleep: "#8fa3e8" };
-const _A_BODY = [
-  "................",
-  "................",
-  "................",
-  "......BBBB......",
-  "......BBBB......",
-  "......BBBB......",
-  "......BBBB......",
-  ".....BBBBBB.....",
-  "....BBBBBBBB....",
-  "....BBBBBBBB....",
-  "....BBBBBBBB....",
-  "....bBBBBBBb....",
-];
-const AGENT_POSES = [
-  _A_BODY.concat([".....BB..BB.....", ".....BB..BB.....", ".....BB..BB.....", "................"]),
-  _A_BODY.concat([".....BB..BB.....", "....BB....BB....", "....BB.....BB...", "................"]),
-  _A_BODY.concat([".....BB..BB.....", ".....BBBB.......", "....BB...BB.....", "................"]),
-  [
-    "................", "................", "................", "................",
-    "................", "................", "................", "................",
-    "................", "..........BBBB..", "....BBBBBBBBBB..", "....BBBBBBBBBB..",
-    "....bBBBBBBBbb..", "................", "................", "................",
-  ],
-  [
-    "................", "................", "..........kk....", "..........kk....",
-    "......BBBB..t...", "......BBBB..t...", "......BBBB..t...", ".....BBBBBBBt...",
-    "....BBBBBBBB....", "....BBBBBBBB....", "....BBBBBBBB....", "....bBBBBBBb....",
-    ".....BB..BB.....", ".....BB..BB.....", ".....BB..BB.....", "................",
-  ],
-  [
-    "................", "................", "................", "................",
-    "................", "................", "................", ".....BBBBBB.....",
-    "....BBBBBBBB....", "....BBBBBBBB....", "....BBBBBBBBt...", "....bBBBBBBBt...",
-    ".....BB..BBkk...", ".....BB..BB.....", ".....BB..BB.....", "................",
-  ],
-];
-const NATIVE_FEATHER = [".......F........", ".......F........", ".......F........"];
+const AGENT_SKINS  = ["#f2d9b8", "#e6c39a", "#c99b6f"];                              // 肤色 3 档
+const AGENT_SHIRTS = ["#e8e2d2","#c96f4a","#4a6fa0","#6f8f4a","#c9a24a","#8a5a8a","#4a8a8a","#a05a5a","#5a6a7a","#7a6a4a"]; // 日常衣 10 色
+const AGENT_PANTS  = ["#3a4a6b","#5a4632","#6b3a3a","#3d5a46","#4a4a52","#6b5a3a"]; // 裤色 6 档
+const AGENT_HAIRS  = ["#2a2018","#4a3220","#6b4a2a","#c9a05a","#8a3a2a"];            // 发色 5 档
+const HAIR_STYLES_F = ["long", "bun", "short", "hat"];   // 女：长发/发髻+头花/短发/草帽
+const HAIR_STYLES_M = ["short", "bald", "hat", "kasa"];  // 男：短发/光头/草帽/斗笠
 
-function agentSprite(colorKey, pose, native) {
-  return sprGet(`a${colorKey}_${pose}_${native ? 1 : 0}`, () => {
-    const col = AGENT_COLORS[colorKey];
-    const cv = bakeArt(SPR, SPR, AGENT_POSES[pose] || AGENT_POSES[0],
-      { B: col, b: shadeHex(col, 0.78), t: "#7a5a30", k: "#9aa0a8" }, 1);
-    if (native) stampArt(cv.getContext("2d"), NATIVE_FEATHER, { F: "#f5f0e0" }, 1, 0, pose === 3 ? 6 : 1);
+// 外观随机：id 确定性 hash 五路取档（同 id 永远同款，与存档/位置无关）
+function agentLook(id) {
+  return {
+    skin: AGENT_SKINS[(hash2(id, 11) * AGENT_SKINS.length) | 0],
+    shirt: AGENT_SHIRTS[(hash2(id, 23) * AGENT_SHIRTS.length) | 0],
+    pants: AGENT_PANTS[(hash2(id, 37) * AGENT_PANTS.length) | 0],
+    hairC: AGENT_HAIRS[(hash2(id, 41) * AGENT_HAIRS.length) | 0],
+    hairStyle: (hash2(id, 53) * 4) | 0,
+  };
+}
+
+// ---- body 层：20 姿态 × 2 性别（top=最终衣色；f=连衣裙锥形下摆，m=直身摆）----
+// 手部用通用肤色常量（不随个体肤色，保缓存键精简）；工具柄 #7a5a30
+function agentBodySprite(top, pose, sex) {
+  return sprGet(`b${top}_${pose}_${sex}`, () => {
+    const { cv, g } = sprCtx(SPR, SPR);
+    const f = sex === "f";
+    const dark = shadeHex(top, 0.78);
+    const hand = "#f2d9b8";
+    const H = "#7a5a30";
+    const armSide = (x, y0, y1) => {   // 竖臂：袖 y0..y1-1 衣色、手 y1 肤色
+      for (let y = y0; y < y1; y++) pxF(g, x, y, top);
+      pxF(g, x, y1, hand);
+    };
+    // f 基础连衣裙：肩 row8 → 摆 rows11-13（盖住腿上部 row13）
+    const dress = (hx, lw) => {
+      rectF(g, 6, 8, 4, 1, top);
+      rectF(g, 5, 9, 6, 2, top);
+      rectF(g, hx, 11, lw, 3, top);
+      rectF(g, hx, 13, lw, 1, dark);
+    };
+    // m 基础直身：躯干 rows8-12 宽6，底行暗部
+    const torso = (lean) => {
+      rectF(g, lean ? 6 : 5, 8, 6, 1, top);
+      rectF(g, 5, 9, 6, 3, top);
+      rectF(g, 5, 12, 6, 1, dark);
+    };
+    const fArms = () => { pxF(g, 4, 9, top); pxF(g, 4, 10, hand); pxF(g, 11, 9, top); pxF(g, 11, 10, hand); };
+    switch (pose) {
+      case "stand":
+        if (f) { dress(4, 8); fArms(); }
+        else { torso(false); armSide(4, 9, 12); armSide(11, 9, 12); }
+        break;
+      case "walk1": case "walk2": case "run1": case "run2": {
+        const run = pose === "run1" || pose === "run2";
+        const swayL = pose === "walk1" || pose === "run1";   // 裙摆左右 1px 摆动
+        if (f) {
+          dress(swayL ? 3 : 5, 8);
+          if (run) rectF(g, 7, 8, 4, 1, top);   // 跑：肩部前倾错位
+          fArms();
+        } else {
+          torso(run);
+          if (pose === "walk1") { pxF(g, 4, 9, top); armSide(3, 9, 12); armSide(11, 9, 12); }
+          else if (pose === "walk2") { armSide(4, 9, 12); pxF(g, 11, 9, top); armSide(12, 9, 12); }
+          else if (pose === "run1") {   // 大幅摆：一臂前上、一臂后下
+            pxF(g, 3, 8, top); pxF(g, 3, 9, top); pxF(g, 4, 9, top); pxF(g, 3, 10, hand);
+            pxF(g, 11, 10, top); pxF(g, 12, 11, top); pxF(g, 12, 12, hand);
+          } else {
+            pxF(g, 12, 8, top); pxF(g, 12, 9, top); pxF(g, 11, 9, top); pxF(g, 12, 10, hand);
+            pxF(g, 4, 10, top); pxF(g, 3, 11, top); pxF(g, 3, 12, hand);
+          }
+        }
+        break;
+      }
+      case "sleep":   // 躺睡：身体横躺 rows9-13 宽8（f 裙摆平铺更宽）
+        if (f) {
+          rectF(g, 5, 9, 6, 2, top);
+          rectF(g, 4, 11, 8, 1, top);
+          rectF(g, 3, 12, 10, 2, top);
+          rectF(g, 3, 13, 10, 1, dark);
+        } else {
+          rectF(g, 4, 9, 8, 5, top);
+          rectF(g, 5, 13, 6, 1, dark);
+        }
+        break;
+      case "hammer1": case "hammer2": case "axe1": case "axe2":
+      case "hoe1": case "hoe2": case "shovel1": case "shovel2": {
+        const up = pose.endsWith("1");
+        if (f) {
+          dress(4, 8);
+          pxF(g, 4, 9, top); pxF(g, 4, 10, hand);
+          if (up) { pxF(g, 11, 9, top); pxF(g, 12, 8, top); pxF(g, 12, 7, hand); }
+          else { pxF(g, 11, 9, top); pxF(g, 11, 10, top); pxF(g, 11, 11, hand); }
+        } else {
+          torso(false);
+          armSide(4, 9, 12);
+          if (up) { pxF(g, 11, 9, top); pxF(g, 12, 8, top); pxF(g, 12, 7, hand); }
+          else armSide(11, 9, 12);
+        }
+        // 工具：抡起（上举）/砸下（近地）两帧；柄棕、锤灰/斧白/锄青/锹土黄
+        if (up) {
+          if (pose === "hammer1") { rectF(g, 12, 2, 1, 5, H); rectF(g, 11, 1, 3, 2, "#9aa0a8"); }
+          else if (pose === "axe1") { rectF(g, 12, 2, 1, 5, H); rectF(g, 12, 1, 2, 2, "#c9cdd4"); pxF(g, 11, 2, "#c9cdd4"); }
+          else if (pose === "hoe1") { rectF(g, 12, 3, 1, 4, H); rectF(g, 11, 2, 3, 1, "#8a8a92"); }
+          else { rectF(g, 12, 3, 1, 4, H); rectF(g, 12, 0, 2, 3, "#b8a266"); }
+        } else {
+          if (pose === "hammer2") { rectF(g, 12, 10, 1, 3, H); rectF(g, 11, 13, 3, 1, "#9aa0a8"); }
+          else if (pose === "axe2") { rectF(g, 12, 10, 1, 3, H); rectF(g, 12, 13, 2, 2, "#c9cdd4"); }
+          else if (pose === "hoe2") { rectF(g, 12, 9, 1, 4, H); rectF(g, 11, 13, 3, 1, "#8a8a92"); }
+          else { rectF(g, 12, 10, 1, 3, H); rectF(g, 11, 13, 3, 2, "#b8a266"); }
+        }
+        break;
+      }
+      case "eat1": case "eat2":   // 进食：手弯到嘴边（脸 row7 下方 1px）/放下
+        if (f) {
+          dress(4, 8);
+          pxF(g, 4, 9, top); pxF(g, 4, 10, hand); pxF(g, 11, 9, top); pxF(g, 11, 10, hand);
+          if (pose === "eat1") { pxF(g, 10, 9, top); pxF(g, 8, 8, hand); }
+        } else {
+          torso(false);
+          armSide(4, 9, 12); armSide(11, 9, 12);
+          if (pose === "eat1") { pxF(g, 11, 10, top); pxF(g, 10, 9, top); pxF(g, 9, 8, top); pxF(g, 8, 8, hand); }
+        }
+        break;
+      case "fish1": case "fish2": {   // 持竿：双臂前伸握竿（竿体由渲染层画），两帧微摆
+        const yA = pose === "fish1" ? 9 : 10, yB = pose === "fish1" ? 11 : 12;
+        if (f) dress(4, 8); else torso(false);
+        pxF(g, 11, yA, top); pxF(g, 12, yA, top); pxF(g, 13, yA, hand);
+        pxF(g, 11, yB, top); pxF(g, 12, yB, top); pxF(g, 13, yB, hand);
+        break;
+      }
+      case "row1": case "row2": {   // 划船坐姿：身体矮 rows9-13、坐姿展宽，双臂前伸抓握（桨由渲染层画）
+        if (f) {   // 裙摆覆盖坐姿
+          rectF(g, 6, 8, 4, 1, top);
+          rectF(g, 5, 9, 6, 2, top);
+          rectF(g, 4, 11, 8, 1, top);
+          rectF(g, 3, 12, 10, 2, top);
+          rectF(g, 3, 13, 10, 1, dark);
+        } else {
+          rectF(g, 5, 9, 6, 2, top);
+          rectF(g, 4, 11, 8, 3, top);
+          rectF(g, 4, 13, 8, 1, dark);
+        }
+        if (pose === "row1") {
+          pxF(g, 11, 10, top); pxF(g, 12, 10, top); pxF(g, 13, 10, hand);
+          pxF(g, 11, 11, top); pxF(g, 12, 11, top); pxF(g, 13, 11, hand);
+        } else {
+          pxF(g, 11, 10, top); pxF(g, 12, 10, hand);
+          pxF(g, 11, 11, top); pxF(g, 12, 11, hand);
+        }
+        break;
+      }
+    }
+    return outlineSprite(cv, "#1a1a26");
+  });
+}
+
+// ---- pants 层：双腿 rows13-15 各 2px（x5-6 / x9-10）；sleep 无腿层 ----
+// f 传 skin：裙下露腿用肤色（pants 参数不用于 f）；缓存键对 f 追加 skin（缓存键=全部视觉输入）
+function agentPantsSprite(pants, poseKey, sex, skin) {
+  return sprGet(`p${pants}_${poseKey}_${sex}${sex === "f" ? "_" + skin : ""}`, () => {
+    const { cv, g } = sprCtx(SPR, SPR);
+    const base = sex === "f" ? skin : pants;
+    const leg = (x, y0, y1) => {
+      if (y1 - y0 >= 2) rectF(g, x, y0, 2, y1 - y0 - 1, base);   // 裤腿 2px 宽
+      rectF(g, x, y1 - 1, 3, 2, shadeHex(base, 0.75));           // 鞋 3×2（脚底锚定 row15）
+      pxF(g, x + 2, y1, shadeHex(base, 0.6));                    // 鞋尖暗
+    };
+    switch (poseKey) {
+      case "stand": leg(5, 13, 15); leg(9, 13, 15); break;
+      case "walk1": leg(4, 13, 15); leg(9, 13, 15); break;
+      case "walk2": leg(5, 13, 15); leg(10, 13, 15); break;
+      case "run1":  leg(3, 13, 15); leg(10, 13, 15); break;   // 大步幅前后错位
+      case "run2":  leg(5, 13, 14); leg(9, 13, 15); break;
+      case "fish":  leg(4, 13, 15); leg(10, 13, 15); break;   // 站立微开
+      case "row":   leg(4, 12, 14); leg(10, 12, 14); break;   // 坐姿腿前收 rows12-14
+    }
+    return outlineSprite(cv, "#1a1a26");
+  });
+}
+
+// ---- head 层：大头 6×6 圆角 rows2-7（x5-10）+ 发型/帽饰；native=头顶白羽 1×3 ----
+function agentHeadSprite(skin, style, hairC, sex, native) {
+  return sprGet(`h${skin}_${style}_${hairC}_${sex}_${native ? 1 : 0}`, () => {
+    const { cv, g } = sprCtx(SPR, SPR);
+    rectF(g, 6, 2, 4, 1, skin);       // 圆角头顶
+    rectF(g, 5, 3, 6, 5, skin);       // 脸 rows3-7
+    pxF(g, 4, 5, skin); pxF(g, 11, 5, skin);   // 耳
+    rectF(g, 7, 8, 2, 1, skin);       // 脖子
+    pxF(g, 7, 5, "#1a1a26"); pxF(g, 9, 5, "#1a1a26");   // 双眼
+    switch (style) {
+      case "long":   // 头顶发 + 两侧垂发到 rows8-9
+        rectF(g, 6, 1, 4, 1, hairC);
+        rectF(g, 5, 2, 6, 1, hairC);
+        pxF(g, 4, 3, hairC); pxF(g, 5, 3, hairC); pxF(g, 10, 3, hairC); pxF(g, 11, 3, hairC);
+        rectF(g, 4, 4, 1, 6, hairC); rectF(g, 11, 4, 1, 6, hairC);
+        break;
+      case "bun":    // 发髻 2×2 + 头花
+        rectF(g, 7, 0, 2, 2, hairC);
+        rectF(g, 5, 2, 6, 1, hairC);
+        pxF(g, 9, 1, "#d9708a");
+        break;
+      case "short":  // 头顶 2px 发
+        rectF(g, 5, 2, 6, 1, hairC);
+        rectF(g, 6, 3, 4, 1, hairC);
+        break;
+      case "hat":    // 草帽：宽檐 8px + 帽顶
+        rectF(g, 4, 2, 8, 1, "#d9b84a");
+        rectF(g, 6, 0, 4, 2, "#c9a83e");
+        break;
+      case "kasa":   // 斗笠：三角
+        rectF(g, 7, 0, 2, 1, "#a88a5a");
+        rectF(g, 6, 1, 4, 1, "#a88a5a");
+        rectF(g, 5, 2, 6, 1, "#a88a5a");
+        break;
+      // bald：无发
+    }
+    if (native) rectF(g, 8, 0, 1, 3, "#f5f0e0");   // 原住民羽饰
+    return outlineSprite(cv, "#1a1a26");
+  });
+}
+
+// 躺睡侧头：4×4 侧脸 + 后脑发色 2px（与 sleep 横躺身体对位 x0-3 rows9-12）
+function agentHeadLieSprite(skin, hairC) {
+  return sprGet(`hl${skin}_${hairC}`, () => {
+    const { cv, g } = sprCtx(SPR, SPR);
+    rectF(g, 0, 9, 4, 4, skin);
+    rectF(g, 0, 9, 2, 4, hairC);
+    pxF(g, 2, 10, "#1a1a26");
+    return outlineSprite(cv, "#1a1a26");
+  });
+}
+
+// ---- 背包：8×8 点阵（carrying.res → 麻袋/柴捆/灰石/沙袋）----
+function agentPackSprite(res) {
+  return sprGet(`k${res}`, () => {
+    const { cv, g } = sprCtx(8, 8);
+    if (res === "food") {
+      rectF(g, 1, 2, 6, 5, "#d9c27a");
+      rectF(g, 2, 1, 4, 1, "#b8a05a");       // 袋口扎绳
+      rectF(g, 1, 6, 6, 1, "#bfa76a");
+    } else if (res === "wood") {
+      rectF(g, 1, 3, 6, 4, "#8a6236");
+      rectF(g, 2, 3, 1, 4, "#5c4426"); rectF(g, 5, 3, 1, 4, "#5c4426");   // 捆绳
+      pxF(g, 1, 4, "#a87c4a"); pxF(g, 6, 4, "#a87c4a");                    // 木段截面
+    } else if (res === "stone") {
+      rectF(g, 2, 3, 4, 1, "#9a9a92");
+      rectF(g, 1, 4, 6, 3, "#9a9a92");
+      pxF(g, 2, 4, "#c2c2ba");
+      rectF(g, 2, 6, 4, 1, "#7e7e78");
+    } else {
+      rectF(g, 1, 2, 6, 5, "#d8c890");
+      rectF(g, 2, 1, 4, 1, "#b8a860");
+      pxF(g, 3, 4, "#b8a860"); pxF(g, 4, 5, "#b8a860");   // 沙袋褶皱
+    }
     return outlineSprite(cv, "#1a1a26");
   });
 }
@@ -4467,6 +4715,33 @@ function neighborTile(x, y, d) {
   return tileAt(x + (d === 2 ? -1 : d === 3 ? 1 : 0), y + (d === 0 ? -1 : d === 1 ? 1 : 0));
 }
 
+// 小人姿态分发（纯函数，全部读现有字段）：key=body 层姿态，legs=pants 层姿态，fishing=叠加钓竿
+// a.sex 未定义（旧存档/测试）自动落男款
+function agentPoseOf(a) {
+  if (a.state === "sleep") return { key: "sleep", legs: null };
+  if (a.state === "eat") return { key: Math.floor(a.phase * 2) % 2 ? "eat2" : "eat1", legs: "stand" };
+  if (a.state === "work") {
+    const tt = a.task && a.task.type;
+    if (tt === "FISH") {
+      const f = Math.floor(a.phase * 1.5) % 2;
+      return { key: f ? "fish2" : "fish1", legs: "fish", fishing: true };
+    }
+    const f = Math.floor(a.phase * 3) % 2;
+    let tool = "hammer";   // 兜底抡锤（BUILD/QUARRY/SANDPIT/GATHER/PASTURE/HUNT 站桩等）
+    if (tt === "FARM") tool = "hoe";
+    else if (tt === "DIG" && tileAt(a.task.x, a.task.y) === T.TREE) tool = "axe";
+    else if (tt === "FILL" || tt === "BRIDGE" || tt === "EXCAV" || tt === "PLANT" || tt === "PLANT_BERRY") tool = "shovel";
+    return { key: tool + (f ? "2" : "1"), legs: "stand" };
+  }
+  if (a.state === "walk") {
+    const running = a.exploring || a.speed > 1.85 ||
+      (a.task && (a.task.type === "HUNT" || a.task.type === "CAPTURE"));
+    const n = Math.floor(a.phase * (running ? 4 : 3)) % 2 ? "2" : "1";
+    return running ? { key: "run" + n, legs: "run" + n } : { key: "walk" + n, legs: "walk" + n };
+  }
+  return { key: "stand", legs: "stand" };
+}
+
 function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
   // 背景为虚空深渊色：未生成区域（VOID）露出此色，探索到后显现海与岛屿
   ctx.fillStyle = "#05070c";
@@ -4715,6 +4990,26 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     ctx.translate(px, py);
     ctx.rotate(sh.ang);
     ctx.drawImage(spr, -L / 2, -W2 / 2, L, W2);
+    // 船内划手：同锚叠三层（船体之上、随船旋转）；靠岸后水手已下船（state 非 voyage）不重复画
+    if (sh.sailor && !sh.sailor.dead && sh.sailor.state === "voyage") {
+      const k2 = (s / SPR) * 0.8;
+      const look2 = agentLook(sh.sailor.id);
+      const rf = Math.floor(world.time * 2) % 2;
+      const ax2 = -8 * k2, ay2 = -0.7 * s * 0.8;
+      ctx.drawImage(agentPantsSprite(look2.pants, "row", sh.sailor.sex, look2.skin), ax2, ay2, 16 * k2, 16 * k2);
+      ctx.drawImage(agentBodySprite(look2.shirt, rf ? "row2" : "row1", sh.sailor.sex), ax2, ay2, 16 * k2, 16 * k2);
+      ctx.drawImage(agentHeadSprite(look2.skin,
+        (sh.sailor.sex === "f" ? HAIR_STYLES_F : HAIR_STYLES_M)[look2.hairStyle] || "short",
+        look2.hairC, sh.sailor.sex, sh.sailor.native), ax2, ay2, 16 * k2, 16 * k2);
+      // 双桨：两帧摆动的两条线段，桨尖超出船舷
+      const oarY = rf ? 5 : -5;
+      ctx.strokeStyle = "#7a5a30";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-3 * k2, 2 * k2); ctx.lineTo(-13 * k2, oarY * k2);
+      ctx.moveTo(3 * k2, 2 * k2); ctx.lineTo(13 * k2, oarY * k2);
+      ctx.stroke();
+    }
     ctx.restore();
     if (sh.state === "stranded") {   // 被困求救标记
       ctx.fillStyle = "#e74c3c";
@@ -4731,7 +5026,7 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     }
   }
 
-  // 小人：像素 sprite（状态着色 + 走路/干活双帧摆动 + 睡觉躺平）
+  // 小人：分层像素小人（pants → 背包 → body → head 同锚叠加），衣色随状态
   for (const a of agents) {
     if (a.state === "voyage") continue;   // 航海中的人在船上
     const px = ox + a.x * s, py = oy + a.y * s;
@@ -4748,22 +5043,45 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
       ctx.beginPath(); ctx.ellipse(px, py + s * 0.12, r * 2.2, r * 1.5, 0, 0, 7); ctx.stroke();
     }
 
-    if (s < 6) { // 极小缩放：单点降级
-      ctx.fillStyle = AGENT_COLORS[a.state === "work" ? "work" : a.state === "eat" ? "eat" : a.state === "sleep" ? "sleep" : "idle"];
+    const look = agentLook(a.id);
+    const pose = agentPoseOf(a);
+    const top = a.state === "work" ? "#ff9f43" : a.state === "sleep" ? "#8fa3e8" : look.shirt;
+
+    if (s < 6) { // 极小缩放：单点降级（衣色点）
+      ctx.fillStyle = top;
       ctx.beginPath(); ctx.arc(px, py, Math.max(1.5, r), 0, 7); ctx.fill();
       continue;
     }
 
-    const colorKey = a.state === "work" ? "work" : a.state === "eat" ? "eat" : a.state === "sleep" ? "sleep" : "idle";
-    let pose = 0;
-    if (a.state === "walk") pose = 1 + (Math.floor(a.phase * 3) % 2);
-    else if (a.state === "work") pose = 4 + (Math.floor(a.phase * 3) % 2);
-    else if (a.state === "sleep") pose = 3;
-    const spr = agentSprite(colorKey, pose, a.native);
-    const scale = s / SPR;
-    const sh2 = spr.height * scale;
-    const bob = a.state === "walk" ? Math.abs(Math.sin(a.phase * 9)) * r * 0.3 : 0;
-    ctx.drawImage(spr, px - 8 * scale, py - sh2 * 0.62 - bob, 16 * scale, sh2);
+    const k = s / SPR;
+    const bob = (pose.key === "walk1" || pose.key === "walk2" || pose.key === "run1" || pose.key === "run2")
+      ? Math.abs(Math.sin(a.phase * 9)) * r * 0.3 : 0;
+    const ax = px - 8 * k, ay = py - 0.7 * s - bob;   // 统一锚点：脚底 row15 对齐地面
+
+    if (pose.legs)   // 腿层（sleep 无腿层）
+      ctx.drawImage(agentPantsSprite(look.pants, pose.legs, a.sex, look.skin), ax, ay, s + 0.5, s + 0.5);
+    if (a.carrying) {   // 资源背包：身体左后、略上移露包顶
+      const pk = agentPackSprite(a.carrying.res);
+      ctx.drawImage(pk, ax, ay + 3 * k, 8 * k, 8 * k);
+    }
+    ctx.drawImage(agentBodySprite(top, pose.key, a.sex), ax, ay, s + 0.5, s + 0.5);
+    const headSpr = pose.key === "sleep"
+      ? agentHeadLieSprite(look.skin, look.hairC)
+      : agentHeadSprite(look.skin,
+          (a.sex === "f" ? HAIR_STYLES_F : HAIR_STYLES_M)[look.hairStyle] || "short",
+          look.hairC, a.sex, a.native);
+    ctx.drawImage(headSpr, ax, ay, s + 0.5, s + 0.5);
+
+    // 钓竿叠加：竿线从手到鱼点，浮标在鱼点上方随波浮动
+    if (pose.fishing && s >= 8 && a.task && a.task.fishX !== undefined) {
+      const wx = ox + (a.task.fishX + 0.5) * s, wy = oy + (a.task.fishY + 0.5) * s;
+      const by = wy - 2 + Math.sin(world.time * 2.5) * 1.5;
+      ctx.strokeStyle = "#5c4426";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(px, py - 0.3 * s); ctx.lineTo(wx, by); ctx.stroke();
+      ctx.fillStyle = "#d9483b"; ctx.fillRect(wx - 1, by - 2, 2, 2);   // 浮标红
+      ctx.fillStyle = "#f0ead8"; ctx.fillRect(wx - 1, by, 2, 1);       // 浮标白
+    }
 
     // 状态标记
     if (a.state === "work") {          // 敲击火花
@@ -4776,7 +5094,7 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     } else if (a.state === "sleep" && s >= 10) { // 睡觉冒 z
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       ctx.font = `${Math.max(7, s * 0.45)}px sans-serif`;
-      ctx.fillText("z", px + r * 0.8, py - sh2 * 0.5);
+      ctx.fillText("z", px + r * 0.8, py - 0.7 * s);
     }
   }
 
@@ -5229,6 +5547,8 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     return `职业：${JOBS_CN[a.job] || a.job}<br>` +
       `状态：${a.sick ? "生病了" : (STATE_CN[a.state] || a.state)}${a.task ? "（" + TASK_CN[a.task.type] + "）" : ""}<br>` +
       `年龄：${Math.floor(a.age)} 岁 · ${ageTier(a.age, "human")}<br>` +
+      `性别：${a.sex === "f" ? "女" : "男"}<br>` +
+      ((a.father || a.mother) ? `父母：${[a.father, a.mother].filter(Boolean).join(" · ")}<br>` : "") +
       `健康：${healthTier(a)}<br>` +
       `饱食：${hungerTier(a.hunger)}<div class="ip-bar"><div style="width:${a.hunger}%;background:${foodC}"></div></div>` +
       `精力：${energyTier(a.energy)}<div class="ip-bar"><div style="width:${a.energy}%;background:${enC}"></div></div>` +
@@ -5360,7 +5680,7 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     rosterCd = 0.6;
 
     const nameLine = a =>
-      `<div class="roster-name${a === selectedAgent ? " selected" : ""}" data-id="${agents.indexOf(a)}">${a.name}<span class="nat">·${JOBS_CN[a.job] || ""}</span></div>`;
+      `<div class="roster-name${a === selectedAgent ? " selected" : ""}" data-id="${agents.indexOf(a)}">${a.name}<span class="nat">·${JOBS_CN[a.job] || ""} ${a.sex === "f" ? "♀" : "♂"}</span></div>`;
     const flyBtn = (x, y) => `<span class="fly-btn" data-fx="${x}" data-fy="${y}">⌖</span>`;
 
     let html = "";
@@ -5422,7 +5742,7 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
       const open = expandedGroups.has(key);
       html += `<div class="roster-group-head" data-g="${key}"><span>${open ? "▾" : "▸"} ${key}</span><span class="cnt">×${list.length}</span></div>`;
       if (open) html += `<div class="roster-names">` + list.map(a =>
-        `<div class="roster-name${a === selectedAgent ? " selected" : ""}" data-id="${agents.indexOf(a)}">${a.name}<span class="nat">·${JOBS_CN[a.job] || ""}</span></div>`
+        `<div class="roster-name${a === selectedAgent ? " selected" : ""}" data-id="${agents.indexOf(a)}">${a.name}<span class="nat">·${JOBS_CN[a.job] || ""} ${a.sex === "f" ? "♀" : "♂"}</span></div>`
       ).join("") + `</div>`;
     }
     rosterBody.innerHTML = html;

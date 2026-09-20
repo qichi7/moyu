@@ -3,8 +3,8 @@
 
 const agents = [];
 
-function spawnAgent(x, y, native) {
-  const a = new Agent(x, y, native);
+function spawnAgent(x, y, native, opts) {
+  const a = new Agent(x, y, native, opts);
   agents.push(a);
   return a;
 }
@@ -442,13 +442,35 @@ function plannerTick() {
   //    BIRTH_CHECK 是每秒概率，规划器每 PLANNER_INTERVAL 秒才判一次，需换算成窗口概率
   const hasRoom = world.houses.length * 3 > pop;
   if (pop > 0 && totalFood() > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
-    const near = findBirthSpot();
+    // 亲子：出生序号确定性选亲（hash2 不消耗 rand 流，保证固定种子回归与旧版逐位一致）
+    const seq = (world.birthSeq = (world.birthSeq || 0) + 1);
+    const mothers = agents.filter(a => !a.dead && a.sex === "f" && a.age >= 16 && a.age <= 45);   // 育龄母池（0 岁新生儿天然不在内）
+    const mother = mothers.length ? mothers[(hash2(seq, 7717) * mothers.length) | 0] : null;
+    let father = null;
+    const adultM = agents.filter(a => !a.dead && a.sex === "m" && a.age >= 16);
+    if (mother && adultM.length) {
+      // 父亲选取：同屋优先 → 同聚落次之 → 全体成年男兜底（home 按坐标比较：各人 home 是独立对象，引用永不相同）
+      const sameHouse = mother.home ? adultM.filter(a => a.home &&
+          a.home.x === mother.home.x && a.home.y === mother.home.y) : [];
+      const nearHome = sameHouse.length ? sameHouse
+        : mother.home ? adultM.filter(a => a.home &&
+            Math.abs(a.home.x - mother.home.x) + Math.abs(a.home.y - mother.home.y) <= SIM.SETTLEMENT_RADIUS) : [];
+      const pool = nearHome.length ? nearHome : adultM;
+      father = pool[(hash2(seq, 8819) * pool.length) | 0];
+    }
+    // 姓：50/50 随父姓或母姓（直接继承姓氏字段，支持复姓）；单亲随在世一方；双缺 null → 构造函数回退随机姓
+    const sn = father && mother ? (hash2(seq, 9283) < 0.5 ? father.surname : mother.surname)
+      : mother ? mother.surname : father ? father.surname : null;
+    // 出生点：生在母亲家旁（母亲无房或选址失败 → 走原兜底），选址计算在选亲之后
+    let near = null;
+    if (mother && mother.home) near = findSpot(mother.home.x, mother.home.y, 1, 4, T.GRASS);   // 生在母亲家旁
+    if (!near) near = findBirthSpot();
     const birthCity = near && ownerSettle(near.x, near.y);
     if (near && birthCity && ensureStock(birthCity).food < 12) { /* 出生城市存粮不足：暂缓生育 */ }
     else if (near) {
-      const baby = spawnAgent(near.x, near.y);
+      const baby = spawnAgent(near.x, near.y, false, { surname: sn, father: father && father.name, mother: mother && mother.name });
       baby.age = 0;   // 新生儿从 0 岁长大（1 游戏年 = 1 岁）
-      logThrottled(`新生命降临，人口达到 ${pop + 1}。`, 8);
+      logThrottled(`新生命降临${mother ? `（${mother.name}${father ? " 与 " + father.name + " 之家" : "家"}）` : ""}，人口达到 ${pop + 1}。`, 8);
       emit("birth");
     }
   }
