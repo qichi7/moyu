@@ -110,42 +110,10 @@ class Creature {
     this.updateWild(dt);
   }
 
-  // 野生：游荡（栖息地内）；可猎物种会被猎人逼近而逃离（附近有狗则被围堵减速）
+  // 野生：游荡（栖息地内）。v0.5.6：可猎兽不再躲避人类——猎物从容吃草，猎人技艺只看工时
+  // （原逃跑/疲劳/猎犬围堵逻辑整体移除，顺带省掉每只可猎兽的逐帧威胁扫描）
   updateWild(dt) {
     const meta = CREATURE_META[this.type];
-    // 逃跑判定：只对可猎物种生效（0.3s 节流 v0.5.0——45 小人 × 每只可猎兽逐帧扫描是热点；
-    // 威胁与狗缓存 0.3s，逃跑移动仍逐帧进行）
-    if (meta.hunt) {
-      this.threatCd = (this.threatCd || 0) - dt;
-      if (this.threatCd <= 0) {
-        this.threatCd = 0.3;
-        let threat = null, threatD = 2.8;
-        for (const a of agents) {
-          const d = Math.hypot(a.x - this.x, a.y - this.y);
-          if (d < threatD) { threatD = d; threat = a; }
-        }
-        let dogNear = false;
-        for (const c of creatures) {
-          if (c.type === "dog" && !c.dead && Math.hypot(c.x - this.x, c.y - this.y) < 4) { dogNear = true; break; }
-        }
-        this.threat = threat;
-        this.dogNear = dogNear;
-      }
-      const threat = (this.threat && !this.threat.dead && Math.hypot(this.threat.x - this.x, this.threat.y - this.y) < 3.5)
-        ? this.threat : null;
-      if (threat) {
-        this.fleeT = (this.fleeT || 0) + dt;
-        const tired = this.fleeT > 8 ? 0.4 : 1;
-        const sp = ((this.dogNear ? 0.55 : meta.flee) * tired) * dt;
-        const dx = this.x - threat.x, dy = this.y - threat.y;
-        const d = Math.hypot(dx, dy) || 1;
-        const fox = this.x, foy = this.y;
-        this.moveBy((dx / d) * sp, (dy / d) * sp);
-        if (this.x !== fox || this.y !== foy) this.updateFace(dx, dy);   // 朝向=逃跑方向（dx/dy 本就是背离威胁的背向向量）；实际位移才更新——与 stepToward 同口径
-        return;
-      }
-      this.fleeT = 0;
-    }
     // 游荡：栖息地内随机走
     this.moveCd -= dt;
     if (this.moveCd <= 0) {
@@ -261,14 +229,16 @@ class Creature {
     this.updateWild(dt);
   }
 
-  // 圈养：在栏内小范围活动，定期产粮 + 繁殖（水生物种圈养于水域渔场，游荡判定走栖息地）
+  // 圈养：栏内小范围活动 + 定期产粮 + 繁殖（水生物种圈养于水域渔场，游荡判定走栖息地）。
+  // v0.5.3：牧场有门（T.GATE 可走），牲畜会自己出门在牧场附近 5 格内溜达，不再全程圈死
   updatePasture(dt) {
     const waterBound = CREATURE_META[this.type].habitat === "water" || CREATURE_META[this.type].habitat === "deep";
     this.moveCd -= dt;
     if (this.moveCd <= 0) {
       this.moveCd = 1.5 + rand() * 2;
       const a = rand() * Math.PI * 2;
-      const tx = this.pasture.x + 0.5 + Math.cos(a) * 2.5, ty = this.pasture.y + 0.5 + Math.sin(a) * 2.5;
+      const roam = waterBound ? 2.5 : 5;   // 陆生牲畜走得更远（从门出去），水生仍在水域内
+      const tx = this.pasture.x + 0.5 + Math.cos(a) * roam, ty = this.pasture.y + 0.5 + Math.sin(a) * roam;
       const ok = waterBound
         ? habitatOk(this, Math.round(tx), Math.round(ty))
         : walkable(Math.round(tx), Math.round(ty));

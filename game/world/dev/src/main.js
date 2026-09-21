@@ -237,6 +237,13 @@
     updateInfoPanel(realDt);
     updateRoster(realDt);
     updateActivity(realDt);
+    // 死亡广播 8 秒自动收起（真实秒，与倍速无关）
+    if (deathBcd > 0) {
+      deathBcd -= realDt;
+      if (deathBcd <= 0) { const b = el("death-broadcast"); if (b) b.classList.add("hidden"); }
+    }
+    // 机制演示播放（弹窗开着时逐帧驱动；主世界此时处于暂停态）
+    if (demoState && !el("demo-modal").classList.contains("hidden")) demoTick(realDt);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -290,6 +297,32 @@
     }
   }
   hud.build.textContent = BUILD_ID;
+
+  // ---- 死亡广播（v0.5.9）：被跟随的小人死亡 → 全屏横幅昭告姓名/死因/地点/时间，8 秒自动收起 ----
+  let deathBcd = 0;
+  function showDeathBroadcast(a) {
+    const box = el("death-broadcast");
+    if (!box) return;
+    const totalDays = Math.floor(world.time / SIM.DAY_LEN);
+    const tod = world.timeOfDay;
+    const hh = String(Math.floor(tod * 24)).padStart(2, "0");
+    const mm = String(Math.floor((tod * 24 % 1) * 60)).padStart(2, "0");
+    let place = "荒野";
+    for (const o of world.islands) {
+      if (o.name && Math.hypot(o.x - a.x, o.y - a.y) <= o.r + 1) { place = o.name + "岛"; break; }
+    }
+    const s = settleOf(a.x, a.y);
+    if (s) place = s.name;
+    box.innerHTML = `<div class="db-title">讣 告</div>` +
+      `<div class="db-name">${a.name}</div>` +
+      `<div class="db-line">${a.deathReason || "与世长辞"}（享年 ${Math.floor(a.age)} 岁）</div>` +
+      `<div class="db-line">卒于 ${place} · 第${Math.floor(totalDays / SIM.YEAR_DAYS) + 1}年第${totalDays % SIM.YEAR_DAYS + 1}月 ${hh}:${mm}</div>` +
+      `<div class="db-hint">—— 点击任意处致哀 ——</div>`;
+    box.classList.remove("hidden");
+    deathBcd = 8;
+  }
+  const deathBox = el("death-broadcast");
+  if (deathBox) deathBox.addEventListener("click", () => { deathBox.classList.add("hidden"); deathBcd = 0; });
 
   // ---- 点击拾取与信息面板 ----
   const infoPanel = el("info-panel"), infoBody = el("info-body"), infoClose = el("info-close");
@@ -486,27 +519,39 @@
       }
     }
     const carry = hauling.length
-      ? `<br>背着：${hauling.map(h => (ITEM_VIEW[h.item] || ["", "物品"])[1] + "×" + h.n).join("、")}（回仓入库中）`
+      ? `<div class="ip-line">背着：${hauling.map(h => (ITEM_VIEW[h.item] || ["", "物品"])[1] + "×" + h.n).join("、")}<span class="ip-tag">（回仓入库中）</span></div>`
       : "";
-    return `职业：${JOBS_CN[a.job] || a.job}<br>` +
-      `状态：${a.sick ? "生病了" : (STATE_CN[a.state] || a.state)}${a.task ? "（" + TASK_CN[a.task.type] + "）" : ""}${a.drunkT > 0 ? "（醉醺醺）" : ""}${a.coffeeT > 0 ? "（咖啡提神）" : ""}${a.depressed ? "（抑郁）" : ""}${(a.cheerT || 0) > 0 ? "（尽兴而归）" : ""}` +
-      // 搬运动物标注：rescuing 指向被困动物且 carriedBy 是自己时正在搬运（物种名查不到则兜底泛称）
-      (a.rescuing && a.rescuing.carriedBy === a ? (CREATURE_META[a.rescuing.type] ? "（搬运中：移动" + CREATURE_META[a.rescuing.type].name + "）" : "（搬运动物中）") : "") +
-      `<br>` +
-      `年龄：${Math.floor(a.age)} 岁 · ${ageTier(a.age, "human")}<br>` +
-      `性别：${a.sex === "f" ? "女" : "男"}<br>` +
-      ((a.father || a.mother) ? `父母：${[a.father, a.mother].filter(Boolean).join(" · ")}<br>` : "") +
-      `健康：${healthTier(a)}<br>` +
-      `饱食：${hungerTier(a.hunger)}<div class="ip-bar"><div style="width:${a.hunger}%;background:${foodC}"></div></div>` +
-      // 渴值条：thirst 未接入（undefined/null）时整行不显示，避免出现 NaN
-      (a.thirst == null ? "" : `渴值：${thirstTier(a.thirst)}<div class="ip-bar"><div style="width:${a.thirst}%;background:${thirstC}"></div></div>`) +
-      `精力：${energyTier(a.energy)}<div class="ip-bar"><div style="width:${a.energy}%;background:${enC}"></div></div>` +
-      // 心情条（v0.5.0）：mood 未接入时整行不显示（falsy 容错，与渴值条同款）
-      (a.mood == null ? "" : `心情：${moodTier(a.mood)}<div class="ip-bar"><div style="width:${a.mood}%;background:${moodC}"></div></div>`) +
-      `探索欲：${adventureTier(a.adventure)}<br>` +
-      `勤劳：${diligenceTier(a.diligence)}<br>` +
-      `喜好：${HOBBY_CN[a.hobby] || "随遇而安"}<br>` +
-      `住所：${home}${carry}<br>` +
+    // 状态行（合并：生病/行动/任务/醉/咖啡/抑郁/尽兴/搬运 全部收进一行小标签）
+    const tags = [
+      a.sick ? "生病了" : (STATE_CN[a.state] || a.state),
+      a.task ? TASK_CN[a.task.type] : "",
+      a.drunkT > 0 ? "醉醺醺" : "",
+      a.coffeeT > 0 ? "咖啡提神" : "",
+      a.depressed ? "抑郁" : "",
+      (a.cheerT || 0) > 0 ? "尽兴而归" : "",
+      a.rescuing && a.rescuing.carriedBy === a ? (CREATURE_META[a.rescuing.type] ? "搬运" + CREATURE_META[a.rescuing.type].name : "搬运动物") : "",
+    ].filter(Boolean);
+    // 四维状态条（v0.5.2 简化：2×2 紧凑网格，一行顶四行）；mood/thirst 未接入时 falsy 容错隐藏
+    const bar = (label, val, color) =>
+      `<div class="ip-b"><i>${label}</i><div class="ip-bar"><div style="width:${Math.max(0, Math.min(100, val))}%;background:${color}"></div></div></div>`;
+    const bars = `<div class="ip-bars">` +
+      bar("饱食", a.hunger, foodC) +
+      (a.thirst == null ? "" : bar("渴值", a.thirst, thirstC)) +
+      bar("精力", a.energy, enC) +
+      (a.mood == null ? "" : bar("心情", a.mood, moodC)) +
+      `</div>`;
+    // 性格合并行：勤劳 · 喜好（探索欲档并入喜好语义——向往远方即探索欲高的直观表达）
+    const traits = [diligenceTier(a.diligence), HOBBY_CN[a.hobby] || "随遇而安"].join(" · ");
+    const parents = (a.father || a.mother)
+      ? `<div class="ip-line ip-tag">父母：${[a.father, a.mother].filter(Boolean).join(" · ")}</div>` : "";
+    return `<div class="ip-title">${a.name}<span class="ip-sub">${a.sex === "f" ? "女" : "男"} · ${Math.floor(a.age)} 岁 · ${JOBS_CN[a.job] || a.job}</span></div>` +
+      `<div class="ip-line">状态：<b>${tags.join(" · ")}</b></div>` +
+      bars +
+      `<div class="ip-sec">个 性</div>` +
+      `<div class="ip-line">${traits}</div>` +
+      `<div class="ip-line">住所：<b>${home}</b></div>` +
+      parents +
+      carry +
       packGridHtml(a);
   }
 
@@ -548,7 +593,11 @@
     const target = selectedAgent || selectedCreature;
     if (selectedAgent) {
       const a = selectedAgent;
-      if (a.dead) { infoPanel.classList.add("hidden"); selectedAgent = null; followMode = false; syncFollowBtn(); return; }
+      if (a.dead) {
+        // 被跟随/选中的居民去世：昭告全境（v0.5.9 死亡广播），再收起面板与跟随
+        if (followMode) showDeathBroadcast(a);
+        infoPanel.classList.add("hidden"); selectedAgent = null; followMode = false; syncFollowBtn(); return;
+      }
       const s = TILE_PX * camera.zoom;
       const px = CW / 2 + (a.x - camera.x) * s;
       const py = CH / 2 + (a.y - camera.y) * s;
@@ -708,6 +757,7 @@
   const activityBody = el("activity-body");
   let actCd = 0;
   const ACT_CN = { voyage: "航海", drunk: "喝酒", coffee: "喝咖啡", water: "喝水", fish: "垂钓", rescue: "搬运动物", shepherd: "牧羊", brew: "酿造", explore: "探索", play: "游玩", sad: "抑郁" };
+  const actRot = {};   // 各活动行的轮播游标（v0.5.7：多人同干一事时轮换展示，不让一个人霸榜）
   // 活动判据汇总：一人可同属多项；只统计存活居民
   function collectActivities() {
     const map = {};
@@ -738,8 +788,13 @@
     for (const k in ACT_CN) {
       const list = map[k];
       const n = list.length;
-      // 行格式：名称 ×人数·最近参与者名；0 人灰显 ×0（点击无效）
-      html += `<div class="act-row${n ? "" : " zero"}" data-act="${k}">${ACT_CN[k]}<span class="cnt"> ×${n}</span>${n ? "·" + list[n - 1].name : ""}</div>`;
+      // 行格式：名称 ×人数·参与者名（v0.5.7 轮播：每次刷新换下一个人，点击仍随机定位）
+      let who = "";
+      if (n) {
+        actRot[k] = ((actRot[k] || 0) + 1) % n;
+        who = "·" + list[actRot[k]].name;
+      }
+      html += `<div class="act-row${n ? "" : " zero"}" data-act="${k}">${ACT_CN[k]}<span class="cnt"> ×${n}</span>${who}</div>`;
     }
     activityBody.innerHTML = html;
   }
@@ -770,6 +825,71 @@
     syncTitle();
     tEl.addEventListener("click", () => { collapsed = !collapsed; syncTitle(); });
   }
+
+  // ---- 教程与机制演示弹窗（v0.6.0）：打开演示时暂停主世界，关闭恢复 ----
+  let demoSavedSpeed = null;
+  function openModal(id) {
+    const m = el(id);
+    if (!m) return;
+    m.classList.remove("hidden");
+    if (id === "demo-modal") {
+      demoSavedSpeed = speed;
+      if (speed !== 0) setSpeed(0);       // 演示时暂停主世界进程
+      demoOpenList();
+      sfx.play("click");
+    }
+  }
+  function closeModal(id) {
+    const m = el(id);
+    if (!m) return;
+    m.classList.add("hidden");
+    if (id === "demo-modal") {
+      demoState = null;                    // 停止演示播放
+      if (demoSavedSpeed !== null) { setSpeed(demoSavedSpeed); demoSavedSpeed = null; }
+    }
+  }
+  const helpBtn = el("help-btn");
+  if (helpBtn) helpBtn.addEventListener("click", () => {
+    sfx.play("click");
+    const m = el("help-modal");
+    if (m && !m.classList.contains("hidden")) closeModal("help-modal"); else openModal("help-modal");
+  });
+  const demoBtn = el("demo-btn");
+  if (demoBtn) demoBtn.addEventListener("click", () => {
+    const m = el("demo-modal");
+    if (m && !m.classList.contains("hidden")) closeModal("demo-modal"); else openModal("demo-modal");
+  });
+  // 弹窗关闭按钮（data-close 委托）+ 点遮罩关闭
+  document.querySelectorAll(".modal").forEach(m => {
+    m.addEventListener("click", e => {
+      if (e.target === m) closeModal(m.id);
+      const c = e.target.closest(".modal-close");
+      if (c) closeModal(c.dataset.close);
+    });
+  });
+  // 演示列表点击 → 开始播放；倍速按钮循环；返回列表
+  const demoListEl = el("demo-list");
+  if (demoListEl) demoListEl.addEventListener("click", e => {
+    const item = e.target.closest("[data-demo]");
+    if (!item) return;
+    sfx.play("click");
+    demoStart(item.dataset.demo);
+  });
+  const demoSpeedBtn = el("demo-speed");
+  if (demoSpeedBtn) demoSpeedBtn.addEventListener("click", () => {
+    if (!demoState) return;
+    const seq = [0.5, 1, 2, 4];
+    demoState.speed = seq[(seq.indexOf(demoState.speed) + 1) % seq.length];
+    demoSpeedBtn.textContent = "速度 " + demoState.speed + "×";
+    sfx.play("click");
+  });
+  const demoStopBtn = el("demo-stop");
+  if (demoStopBtn) demoStopBtn.addEventListener("click", () => {
+    if (demoState) DEMO_DONE.add(demoState.topic.id);
+    demoState = null;
+    demoOpenList();
+    sfx.play("click");
+  });
 
   // ---- dev 热刷新：仅 http(s) 下生效，file:// 双击打开时静默跳过 ----
   if (location.protocol !== "file:") {

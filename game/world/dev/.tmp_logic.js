@@ -16,7 +16,7 @@ function emit(name, data) {
 
 "use strict";
 // ============ 全局配置 ============
-const BUILD_ID = "v0.5.0";
+const BUILD_ID = "v0.6.0";
 
 // tile 类型
 const T = {
@@ -28,6 +28,7 @@ const T = {
   BAMBOO: 25, MUSHROOM: 26, MOONBLOOM: 27,   // v0.5.0 新植物：竹林（快木材）/蘑菇（林地小粮）/月光花（夜光环）
   PAVILION: 28, THEATER: 29, ARENA: 30,      // v0.5.0 娱乐链：凉亭（era1）/戏台（era2）/斗兽场（era2）
   PARK_GATE: 31, FERRIS: 32, CAROUSEL: 33, COASTER: 34, PIER: 35,   // 游乐园：门楼/摩天轮/旋转木马/过山车/水上浮台
+  GATE: 36,                                // 牧场门（v0.5.3：围栏留门，牲畜可外出自由活动）
 };
 
 const TILE_META = {
@@ -67,6 +68,7 @@ const TILE_META = {
   [T.CAROUSEL]: { name: "旋转木马", color: "#d08aa0", walk: false, h: 0 },
   [T.COASTER]:  { name: "过山车", color: "#c07840", walk: false, h: 0 },
   [T.PIER]:     { name: "水上浮台", color: "#9a8468", walk: true, h: 0 },
+  [T.GATE]:     { name: "牧场门", color: "#7a5a2e", walk: true, h: 0 },
 };
 
 const WORLD_W = 240, WORLD_H = 180;   // 仅作语义参考：无限地图时代初始生成以主岛原点为中心（genWorld），无固定区域
@@ -77,7 +79,7 @@ const SIM = {
   NIGHT_END: 0.18,
   PLANNER_INTERVAL: 4,  // 规划器每 4 sim 秒跑一次
   AGENT_SPEED: 1.7,     // tile/秒 基准
-  HUNGER_DECAY: 1.1,    // hunger 每秒下降
+  HUNGER_DECAY: 0.55,   // hunger 每秒下降（v0.5.4：减半——生活节奏放缓）
   ENERGY_DECAY: 0.6,    // 醒着时 energy 每秒下降（0.9 时 100 能量只够往返 95 格，扩张区任务必过劳死）
   ENERGY_REGEN: 9,      // 睡觉时每秒恢复
   WORK_EFFORT: 1.3,     // 每个工人每秒任务进度
@@ -120,7 +122,7 @@ const SIM = {
   BOAT_FISH_YIELD: 2,         // 渔船每次起网渔获
   FISHING_INTERVAL: 10,       // 渔船起网周期（秒）
   // ---- 口渴与饮品 ----
-  THIRST_DECAY: 0.7,          // 口渴每秒下降（walk 实际 ≈0.84/s：直饮/城库饮水恢复 100 约撑 119s，路上另有背包水自用，避免高频喝水打断生产）
+  THIRST_DECAY: 0.35,         // 口渴每秒下降（v0.5.4：减半——walk 实际 ≈0.42/s，直饮一次可撑 ~240s）
   STATE_HUNGER: { idle: 1.0, walk: 1.15, run: 1.5, work: 1.45, sleep: 0.5 },  // 饥饿衰减按状态倍率（睡觉减半）
   STATE_ENERGY: { idle: 0.85, walk: 1.1, run: 1.6, work: 1.35 },              // 体力衰减按状态倍率（睡觉不衰减，走 ENERGY_REGEN 恢复）
   STATE_THIRST: { idle: 1.0, walk: 1.2, run: 1.5, work: 1.3, sleep: 0.55 },   // 口渴衰减按状态倍率
@@ -160,6 +162,8 @@ const SIM = {
   MOOD_RECOVER_TIME: 20,
   MOOD_SICK_TIME: 300,        // 抑郁累计此时长 → 郁结成疾病倒（sickSource="mood"，走不出则不治）
   JOY_CD: 60,                 // 找乐子失败冷却（城库无酒时防连帧重试）
+  // ---- 意外死亡（v0.6.0 config 化：每秒掷骰概率，测试可临时调 1 强制触发）----
+  ACCIDENT: { cliff: 1 / 20000, shark: 1 / 15000, choke: 1 / 6000 },
   // ---- 娱乐链与游乐园（v0.5.0）----
   ENT_POP_MIN: 6,             // 凉亭人口门槛（era≥1，每城一座）
   THEATER_POP_MIN: 10,        // 戏台/斗兽场人口门槛（era≥2，每城各一座）
@@ -390,6 +394,7 @@ const world = {
   ponds: new Set(),     // 人工池塘格 "x,y"（EXCAV 挖出来的水，显示为池塘而非浅海）
   mushrooms: new Set(), // 蘑菇格 "x,y"（v0.5.0：一次性行走粮点，采完消失）
   parks: [],            // [{x,y,x0,y0,x1,y1,water}] 游乐园（v0.5.0 娱乐链，园区 bounding + 门楼）
+  interBridges: new Set(), // 已立项/已建的岛际大桥对 "ax,ay|bx,by"（v0.5.1，同一对岛只修一条）
   lastBridgeHead: null, // 上一条桥线的桥头（续接锚点）
   lastBridgeDir: null,  // 上一条桥线的走向（续接沿此直线延伸，保证笔直）
   pastures: [],         // [{x,y}] 牧场
@@ -401,6 +406,7 @@ const world = {
   ponds: new Set(),     // 人工池塘（genWorld 重置）
   mushrooms: new Set(), // 蘑菇格（genWorld 重置）
   parks: [],            // 游乐园（genWorld 重置）
+  interBridges: new Set(), // 岛际大桥对（genWorld 重置）
   lastBridgeHead: null,
   lastBridgeDir: null,
   logs: [],
@@ -1634,15 +1640,23 @@ function tasksFinish(t, agent, was) {
     case "PASTURE": {
       setTile(t.x, t.y, T.PASTURE);
       // 自动圈地：牧场四周立起围栏，圈养的牲畜从此只能在栏内活动
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (!dx && !dy) continue;
-          const tt = tileAt(t.x + dx, t.y + dy);
-          if (tt === T.GRASS || tt === T.SAND) setTile(t.x + dx, t.y + dy, T.FENCE);
-        }
+      // v0.5.3：环上必留一道门（T.GATE 可走）——牲畜可以自己出门在附近溜达，不必全程圈死；
+      // 门优先取南侧正中，该格不可圈（水/建筑等）则取第一个可圈格，保证有环就有门
+      const ring = [];
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const tt = tileAt(t.x + dx, t.y + dy);
+        if (tt === T.GRASS || tt === T.SAND) ring.push([dx, dy]);
+      }
+      const gate = ring.find(([dx, dy]) => dx === 0 && dy === 1) ||
+                   ring.find(([dx, dy]) => dx === 0 || dy === 0) ||   // 门放在正交向（对角开门太怪）
+                   ring[0] || null;
+      for (const [dx, dy] of ring) {
+        const isGate = gate && dx === gate[0] && dy === gate[1];
+        setTile(t.x + dx, t.y + dy, isGate ? T.GATE : T.FENCE);
       }
       world.pastures.push({ x: t.x, y: t.y });
-      logMsg(`新的牧场建成了，围栏圈地，圈养的牲畜将定期供给奶食。`);
+      logMsg(`新的牧场建成了，围栏圈地留了道门——牲畜偶尔会自己出门溜达。`);
       break;
     }
     case "QUARRY": {
@@ -1891,42 +1905,10 @@ class Creature {
     this.updateWild(dt);
   }
 
-  // 野生：游荡（栖息地内）；可猎物种会被猎人逼近而逃离（附近有狗则被围堵减速）
+  // 野生：游荡（栖息地内）。v0.5.6：可猎兽不再躲避人类——猎物从容吃草，猎人技艺只看工时
+  // （原逃跑/疲劳/猎犬围堵逻辑整体移除，顺带省掉每只可猎兽的逐帧威胁扫描）
   updateWild(dt) {
     const meta = CREATURE_META[this.type];
-    // 逃跑判定：只对可猎物种生效（0.3s 节流 v0.5.0——45 小人 × 每只可猎兽逐帧扫描是热点；
-    // 威胁与狗缓存 0.3s，逃跑移动仍逐帧进行）
-    if (meta.hunt) {
-      this.threatCd = (this.threatCd || 0) - dt;
-      if (this.threatCd <= 0) {
-        this.threatCd = 0.3;
-        let threat = null, threatD = 2.8;
-        for (const a of agents) {
-          const d = Math.hypot(a.x - this.x, a.y - this.y);
-          if (d < threatD) { threatD = d; threat = a; }
-        }
-        let dogNear = false;
-        for (const c of creatures) {
-          if (c.type === "dog" && !c.dead && Math.hypot(c.x - this.x, c.y - this.y) < 4) { dogNear = true; break; }
-        }
-        this.threat = threat;
-        this.dogNear = dogNear;
-      }
-      const threat = (this.threat && !this.threat.dead && Math.hypot(this.threat.x - this.x, this.threat.y - this.y) < 3.5)
-        ? this.threat : null;
-      if (threat) {
-        this.fleeT = (this.fleeT || 0) + dt;
-        const tired = this.fleeT > 8 ? 0.4 : 1;
-        const sp = ((this.dogNear ? 0.55 : meta.flee) * tired) * dt;
-        const dx = this.x - threat.x, dy = this.y - threat.y;
-        const d = Math.hypot(dx, dy) || 1;
-        const fox = this.x, foy = this.y;
-        this.moveBy((dx / d) * sp, (dy / d) * sp);
-        if (this.x !== fox || this.y !== foy) this.updateFace(dx, dy);   // 朝向=逃跑方向（dx/dy 本就是背离威胁的背向向量）；实际位移才更新——与 stepToward 同口径
-        return;
-      }
-      this.fleeT = 0;
-    }
     // 游荡：栖息地内随机走
     this.moveCd -= dt;
     if (this.moveCd <= 0) {
@@ -2042,14 +2024,16 @@ class Creature {
     this.updateWild(dt);
   }
 
-  // 圈养：在栏内小范围活动，定期产粮 + 繁殖（水生物种圈养于水域渔场，游荡判定走栖息地）
+  // 圈养：栏内小范围活动 + 定期产粮 + 繁殖（水生物种圈养于水域渔场，游荡判定走栖息地）。
+  // v0.5.3：牧场有门（T.GATE 可走），牲畜会自己出门在牧场附近 5 格内溜达，不再全程圈死
   updatePasture(dt) {
     const waterBound = CREATURE_META[this.type].habitat === "water" || CREATURE_META[this.type].habitat === "deep";
     this.moveCd -= dt;
     if (this.moveCd <= 0) {
       this.moveCd = 1.5 + rand() * 2;
       const a = rand() * Math.PI * 2;
-      const tx = this.pasture.x + 0.5 + Math.cos(a) * 2.5, ty = this.pasture.y + 0.5 + Math.sin(a) * 2.5;
+      const roam = waterBound ? 2.5 : 5;   // 陆生牲畜走得更远（从门出去），水生仍在水域内
+      const tx = this.pasture.x + 0.5 + Math.cos(a) * roam, ty = this.pasture.y + 0.5 + Math.sin(a) * roam;
       const ok = waterBound
         ? habitatOk(this, Math.round(tx), Math.round(ty))
         : walkable(Math.round(tx), Math.round(ty));
@@ -2270,15 +2254,29 @@ const _GIVEN_F = ["禾", "梅", "竹", "云", "岚", "星", "宁", "秋", "白",
 const _usedNames = new Set();
 function pickAgentName(sex, surname) {
   const pool = sex === "f" ? _GIVEN_F : _GIVEN_M;
-  for (let i = 0; i < 40; i++) {
-    // 随机姓槽：单姓×3 + 复姓 合并索引上抽一次（复姓占比约 9%，稀有感）；恒定消耗，保持随机流调用点与旧版一致
-    const si = randInt(0, _SURNAMES.length * 3 + _SURNAMES_CP.length - 1);
-    const sn = si < _SURNAMES.length * 3 ? _SURNAMES[si % _SURNAMES.length] : _SURNAMES_CP[si - _SURNAMES.length * 3];
-    const n = (surname || sn) + pool[randInt(0, pool.length - 1)] +
-              (rand() < 0.4 ? pool[randInt(0, pool.length - 1)] : "");
-    if (!_usedNames.has(n)) { _usedNames.add(n); return n; }
+  // 两轮尝试（40 + 400 次）：第二轮放开双字名概率并加大尝试量——姓氏传家（新生儿继承父/母姓）
+  // 时同名池会被同姓挤穿，40 次撞满就会掉进「居民44」这类编号兜底（v0.5.5 修复）
+  for (let round = 0; round < 2; round++) {
+    const tries = round === 0 ? 40 : 400;
+    for (let i = 0; i < tries; i++) {
+      const si = randInt(0, _SURNAMES.length * 3 + _SURNAMES_CP.length - 1);
+      const sn = surname || (si < _SURNAMES.length * 3 ? _SURNAMES[si % _SURNAMES.length] : _SURNAMES_CP[si - _SURNAMES.length * 3]);
+      const g1 = pool[randInt(0, pool.length - 1)];
+      const g2 = pool[randInt(0, pool.length - 1)];
+      // 第二轮：名字长度不限（双字概率拉满，缀第三字 20%），大幅扩大组合空间
+      const n = round === 0
+        ? sn + g1 + (rand() < 0.4 ? g2 : "")
+        : sn + g1 + (rand() < 0.8 ? g2 : "") + (rand() < 0.2 ? pool[randInt(0, pool.length - 1)] : "");
+      if (!_usedNames.has(n)) { _usedNames.add(n); return n; }
+    }
   }
-  return "居民" + (agents.length + 1);
+  // 终极兜底：单姓 + 「氏」+ 序号——永远唯一，绝不再出现「居民44」
+  const base = surname || _SURNAMES[0];
+  let k = 1;
+  while (_usedNames.has(base + "氏" + (k > 1 ? k : ""))) k++;
+  const n = base + "氏" + (k > 1 ? k : "");
+  _usedNames.add(n);
+  return n;
 }
 
 // 姓氏：命中复姓前缀取前两字，否则取首字
@@ -2578,6 +2576,28 @@ class Agent {
         if (rand() < 0.01 + over * 0.003) { this.die("寿终正寝"); return; }
       }
     }
+    // ---- 意外死亡（v0.5.8，极小概率的世界事故；概率 v0.6.0 config 化便于测试与调参）----
+    // 每秒掷一次：崖边失足 / 浅滩遇鲨 / 进食噎住——概率调得极低，只是生活的无常点缀
+    this.accCd = (this.accCd || 0) - dt;
+    if (this.accCd <= 0) {
+      this.accCd = 1;
+      const ax = Math.round(this.x), ay = Math.round(this.y);
+      const ACC = SIM.ACCIDENT || { cliff: 1 / 20000, shark: 1 / 15000, choke: 1 / 6000 };
+      if (neighborsOf(ax, ay).some(p => tileAt(p.x, p.y) === T.CLIFF) && rand() < ACC.cliff) {
+        this.die("在崖边失足坠落，当场身亡");
+        return;
+      }
+      if (creatures.some(c => c.type === "shark" && !c.dead && Math.hypot(c.x - this.x, c.y - this.y) < 2.2) &&
+          rand() < ACC.shark) {
+        this.die("在浅滩戏水时被鲨鱼拖下了水");
+        return;
+      }
+      if (this.state === "eat" && rand() < ACC.choke) {
+        this.die("进食时狼吞虎咽，不幸噎住身亡");
+        return;
+      }
+    }
+
     // 脱水：thirst<8 持续 DEHYDRY_TIME 秒 → 复用病倒机制（sickSource="thirst"，痊愈需水分恢复）
     if (this.thirst < 8) {
       this.dehydrT = (this.dehydrT || 0) + dt;
@@ -3147,6 +3167,7 @@ class Agent {
   die(reason) {
     if (this.dead) return;
     this.dead = true;
+    this.deathReason = reason;   // 死因随行（v0.5.9 死亡广播用）
     if (this.task) { tasksRelease(this.task, this); this.task = null; }
     if (this.rescuing) { this.rescuing.rescuer = null; this.rescuing = null; }   // 释放被困动物的认领锁
     if (packHaulCount(this.pack) > 0) this.deposit();   // 遗产：搬运产出就地登记入库
@@ -3954,8 +3975,11 @@ function plannerTick() {
       if (s) tasksAdd({ type: "PASTURE", x: s.x, y: s.y, need: 16 });
     } else if (world.pastures.length > 0 && tasksPending("CAPTURE", true).length < 1) {
       const pas = world.pastures[0];
+      // v0.5.3：陆上牧场只圈陆生牲畜——水生动物（鱼群/海龟/鲸）不入陆栏（脚下不是水会搁浅），
+      // 它们的圈养走 2d2 渔场路径（水上渔场/池塘 dest）
       const cap = creatures.filter(c => c.isWild() && !c.dead &&
         Math.hypot(c.x - pas.x, c.y - pas.y) < 40 && c.type !== "dog" &&
+        CREATURE_META[c.type].habitat !== "water" && CREATURE_META[c.type].habitat !== "deep" &&
         creatures.filter(k => k.pasture && k.type === c.type).length < SIM.PASTURE_CAP);
       if (cap.length) {
         const c = cap[0];
@@ -4276,6 +4300,40 @@ function plannerTick() {
           }
         }
         break;   // 每周期最多立一项
+      }
+    }
+  }
+  // 2f3. 岛际大桥（v0.5.1）：已命名岛屿两两邻近（中心距 ≤50）→ 沿两岛中心连线架跨海大桥——
+  //      海上段全部架桥（浅海/深海皆可架），corridor 链式生长直达对岸即停；同一对岛只修一条
+  if (world.era >= 2 && world.time - _interBridgeCd > 30 && tasksPending("BRIDGE", true).length < 30) {
+    _interBridgeCd = world.time;
+    const named = world.islands.filter(o => o.name && o.r >= 3);
+    let best = null, bestD = Infinity;
+    for (let i = 0; i < named.length; i++) for (let j = i + 1; j < named.length; j++) {
+      const a = named[i], b = named[j];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d > 50 || d < 8) continue;
+      const kAB = a.x + "," + a.y + "|" + b.x + "," + b.y;
+      const kBA = b.x + "," + b.y + "|" + a.x + "," + a.y;
+      if (world.interBridges && (world.interBridges.has(kAB) || world.interBridges.has(kBA))) continue;
+      if (d < bestD) { bestD = d; best = [a, b, kAB]; }
+    }
+    if (best) {
+      const [a, b, pairKey] = best;
+      const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
+      const dist = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
+      // 沿 A→B 直线找第一个海上格：其前驱或任一邻格可站立（工人必可达）才立项首格，链式生长接力
+      for (let k = 1; k < dist; k++) {
+        const x = a.x + dx * k, y = a.y + dy * k;
+        const t = tileAt(x, y);
+        if (t !== T.WATER && t !== T.DEEP) continue;
+        const startOk = walkable(x - dx, y - dy) || neighborsOf(x, y).some(p => walkable(p.x, p.y));
+        if (startOk && !tasks.list.some(tk => !tk.done && tk.x === x && tk.y === y) && !nearAny(x, y, [T.BRIDGE], 6)) {
+          tasksAdd({ type: "BRIDGE", x, y, corridor: { dx, dy, remain: dist - k } });
+          world.interBridges.add(pairKey);
+          logMsg(`工匠们着手在「${a.name}」与「${b.name}」之间修一条跨海大桥。`);
+        }
+        break;   // 只看第一个海上格（不可达则 30s 后重查，等周边地形解锁）
       }
     }
   }
@@ -4614,6 +4672,7 @@ function farmTick(dt) {
 let _plannerCd = SIM.PLANNER_INTERVAL;
 let _lastFeast = -999;
 let _resScanTick = 0;   // 资源采集选址扫描节流计数（每 5 个规划周期扫一次，见 plannerTick 2e）
+let _interBridgeCd = -999;   // 岛际大桥立项节流（30s 一查）
 let _frontierCd = -999;
 
 function simUpdate(dt) {

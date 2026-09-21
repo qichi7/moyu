@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>小世界 · v0.5.0</title>
+<title>小世界 · v0.6.0</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #07090e; }
@@ -128,8 +128,58 @@
   #activity-panel.collapsed #activity-body { display: none; }
 
   #info-panel .ip-title { color: #e8d9a0; font-weight: 600; margin-bottom: 2px; }
+  #info-panel .ip-title .ip-sub { color: #8a93a8; font-weight: 400; font-size: 10px; margin-left: 5px; }
+  #info-panel .ip-line { color: #aeb6c6; margin: 2px 0; line-height: 1.45; }
+  #info-panel .ip-line b { color: #d8dee9; font-weight: 500; }
+  #info-panel .ip-tag { color: #8a93a8; }
+  #info-panel .ip-sec { color: #5f6b80; font-size: 9px; letter-spacing: 2px; margin: 6px 0 3px; border-top: 1px solid #232c40; padding-top: 5px; }
+  /* 四维状态条：2×2 紧凑网格（标签在左、条在右），一屏看完生存状态 */
+  #info-panel .ip-bars { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin: 4px 0; }
+  #info-panel .ip-b { display: flex; align-items: center; gap: 5px; min-width: 0; }
+  #info-panel .ip-b i { font-style: normal; font-size: 10px; color: #8a93a8; flex: 0 0 auto; width: 24px; text-align: right; }
+  #info-panel .ip-b .ip-bar { flex: 1; margin: 0; min-width: 0; }
   #info-panel .ip-bar { height: 5px; background: #1c2333; border-radius: 3px; overflow: hidden; margin: 3px 0 7px; }
   #info-panel .ip-bar > div { height: 100%; border-radius: 3px; }
+  /* 死亡广播（v0.5.9）：被跟随的小人死亡时全屏横幅昭告——姓名/死因/地点/时间，点击致哀 */
+  #death-broadcast {
+    position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 60;
+    background: rgba(26,13,15,0.94); border: 1px solid #7a3a3a; border-radius: 8px;
+    padding: 14px 28px; text-align: center; box-shadow: 0 4px 24px rgba(0,0,0,0.55);
+    cursor: pointer; animation: db-in 0.4s ease; min-width: 240px;
+  }
+  #death-broadcast.hidden { display: none; }
+  #death-broadcast .db-title { color: #c96a6a; font-size: 12px; letter-spacing: 8px; margin-bottom: 4px; }
+  #death-broadcast .db-name { color: #f0e6d0; font-size: 18px; font-weight: 600; margin: 2px 0 6px; }
+  #death-broadcast .db-line { color: #b8a89a; font-size: 11px; margin: 2px 0; }
+  #death-broadcast .db-hint { color: #5f5a58; font-size: 9px; margin-top: 6px; }
+  @keyframes db-in { from { opacity: 0; transform: translateX(-50%) translateY(-8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+  /* 弹窗（v0.6.0：教程 / 机制演示） */
+  .modal { position: fixed; inset: 0; z-index: 70; background: rgba(4,6,12,0.72); display: flex; align-items: center; justify-content: center; }
+  .modal.hidden { display: none; }
+  .modal-box { background: #121826; border: 1px solid #2a3448; border-radius: 10px; width: min(560px, 92vw); max-height: 84vh; overflow: auto; box-shadow: 0 8px 40px rgba(0,0,0,0.6); }
+  .demo-box { width: min(420px, 94vw); }
+  .modal-head { position: sticky; top: 0; background: #121826; color: #e8d9a0; font-weight: 600; padding: 10px 14px; border-bottom: 1px solid #232c40; display: flex; justify-content: space-between; align-items: center; }
+  .modal-close { cursor: pointer; color: #6b7688; font-size: 18px; line-height: 1; padding: 0 4px; }
+  .modal-close:hover { color: #fff; }
+  .modal-body { padding: 10px 14px 14px; color: #aeb6c6; font-size: 12px; }
+  .help-sec { color: #8a93a8; font-size: 10px; letter-spacing: 2px; margin: 10px 0 4px; }
+  .help-sec:first-child { margin-top: 0; }
+  .help-grid { display: grid; grid-template-columns: 72px 1fr; gap: 5px 10px; }
+  .help-grid span:nth-child(odd) { color: #d8dee9; }
+  /* 机制演示列表与舞台 */
+  .demo-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; margin: 4px 0; background: #0e1420; border: 1px solid #232c40; border-radius: 6px; cursor: pointer; }
+  .demo-item:hover { border-color: #3d4c68; background: #131c2c; }
+  .demo-item .di-name { color: #d8dee9; }
+  .demo-item .di-done { color: #6fae4e; font-size: 11px; margin-left: 8px; }
+  .demo-item .di-desc { color: #6b7688; font-size: 10px; margin-left: 8px; flex: 1; text-align: right; }
+  #demo-stage canvas { width: 100%; background: #0a0e16; border: 1px solid #232c40; border-radius: 6px; image-rendering: pixelated; }
+  #demo-caption { min-height: 34px; margin: 8px 0 4px; color: #e8d9a0; line-height: 1.5; }
+  #demo-caption.done { color: #6fae4e; }
+  #demo-ctl { display: flex; gap: 8px; align-items: center; }
+  #demo-ctl button { background: #161c2a; border: 1px solid #2a3448; color: #aeb6c6; border-radius: 4px; padding: 3px 10px; cursor: pointer; font-size: 11px; }
+  #demo-ctl button:hover { border-color: #3d4c68; color: #fff; }
+  #demo-prog { margin-left: auto; color: #5f6b80; font-size: 10px; }
   #info-close {
     position: absolute; top: 2px; right: 7px; background: none; border: none;
     color: #6b7688; cursor: pointer; font-size: 15px; padding: 0;
@@ -195,6 +245,58 @@
       <button id="s100" data-v="100">100×</button>
       <button id="s1000" data-v="1000">1000×</button>
       <button id="sfx-toggle">音效:开</button>
+      <button id="help-btn" title="玩法教程">? 教程</button>
+      <button id="demo-btn" title="机制演示（会暂停主世界）">▶ 演示</button>
+    </div>
+  </div>
+</div>
+
+<!-- 玩法教程弹窗（v0.6.0）：所有可操作功能的静态速查 -->
+<div id="help-modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">玩法教程<span class="modal-close" data-close="help-modal">×</span></div>
+    <div class="modal-body">
+      <div class="help-sec">基础操作</div>
+      <div class="help-grid">
+        <span>平移视角</span><span>按住鼠标 / 单指拖拽</span>
+        <span>缩放</span><span>滚轮（鼠标锚）· 双指捏合（触屏）· 顶栏滑轴 0.1×~6×</span>
+        <span>回原点</span><span>顶栏「回原点」按钮——平滑飞回主岛（四角定位的家）</span>
+        <span>暂停 / 变速</span><span>空格暂停；1/2/3/4/5 键 = 1×/2×/10×/100×/1000×；顶栏同款按钮</span>
+        <span>查看一切</span><span>点击小人 / 动物 / 地块：信息框显示状态、四维条、背包、地块归属与进度</span>
+        <span>视角跟随</span><span>信息框「跟随视角」按钮或 F 键——相机锁定选中生物（v0.5.9：被跟随者去世会全屏讣告）</span>
+      </div>
+      <div class="help-sec">面板与定位</div>
+      <div class="help-grid">
+        <span>居民名册</span><span>左栏按地区分组：点名字定位 + 对话框；点 ▸/▾ 折叠；点 ⌖ 飞往地区中心</span>
+        <span>定位岛屿</span><span>名册「已命名岛屿 / 未知岛屿」条目或 ⌖ 按钮直接飞到该岛</span>
+        <span>世界动态</span><span>右栏实时活动目录（航海/喝酒/游玩/抑郁…），点行随机定位一名参与者并跟随；多人同做一事会轮播</span>
+        <span>世界纪事</span><span>左下事件流；三块面板标题都可折叠</span>
+      </div>
+      <div class="help-sec">进阶</div>
+      <div class="help-grid">
+        <span>机制演示</span><span>顶栏「▶ 演示」：逐机制动画讲解（会暂停主世界），可倍速播放</span>
+        <span>音效</span><span>顶栏「音效:开/关」；首次点击页面后生效（浏览器策略）</span>
+        <span>热刷新</span><span>http:// 打开时改动文件自动刷新；file:// 双击打开无此限制</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 机制演示弹窗（v0.6.0）：主世界暂停，脚本化逐机制演示，可倍速 -->
+<div id="demo-modal" class="modal hidden">
+  <div class="modal-box demo-box">
+    <div class="modal-head">机制演示<span class="modal-close" data-close="demo-modal">×</span></div>
+    <div class="modal-body">
+      <div id="demo-list"></div>
+      <div id="demo-stage" class="hidden">
+        <canvas id="demo-cv" width="360" height="240"></canvas>
+        <div id="demo-caption"></div>
+        <div id="demo-ctl">
+          <button id="demo-speed">速度 1×</button>
+          <button id="demo-stop">■ 返回列表</button>
+          <span id="demo-prog"></span>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -216,6 +318,7 @@
   <div id="activity-body"></div>
 </div>
 
+<div id="death-broadcast" class="hidden" title="点击致哀"></div>
 <div id="info-panel" class="hidden">
   <button id="info-close">×</button>
   <button id="follow-btn">跟随视角</button>
@@ -241,7 +344,7 @@ function emit(name, data) {
 
 "use strict";
 // ============ 全局配置 ============
-const BUILD_ID = "v0.5.0";
+const BUILD_ID = "v0.6.0";
 
 // tile 类型
 const T = {
@@ -253,6 +356,7 @@ const T = {
   BAMBOO: 25, MUSHROOM: 26, MOONBLOOM: 27,   // v0.5.0 新植物：竹林（快木材）/蘑菇（林地小粮）/月光花（夜光环）
   PAVILION: 28, THEATER: 29, ARENA: 30,      // v0.5.0 娱乐链：凉亭（era1）/戏台（era2）/斗兽场（era2）
   PARK_GATE: 31, FERRIS: 32, CAROUSEL: 33, COASTER: 34, PIER: 35,   // 游乐园：门楼/摩天轮/旋转木马/过山车/水上浮台
+  GATE: 36,                                // 牧场门（v0.5.3：围栏留门，牲畜可外出自由活动）
 };
 
 const TILE_META = {
@@ -292,6 +396,7 @@ const TILE_META = {
   [T.CAROUSEL]: { name: "旋转木马", color: "#d08aa0", walk: false, h: 0 },
   [T.COASTER]:  { name: "过山车", color: "#c07840", walk: false, h: 0 },
   [T.PIER]:     { name: "水上浮台", color: "#9a8468", walk: true, h: 0 },
+  [T.GATE]:     { name: "牧场门", color: "#7a5a2e", walk: true, h: 0 },
 };
 
 const WORLD_W = 240, WORLD_H = 180;   // 仅作语义参考：无限地图时代初始生成以主岛原点为中心（genWorld），无固定区域
@@ -302,7 +407,7 @@ const SIM = {
   NIGHT_END: 0.18,
   PLANNER_INTERVAL: 4,  // 规划器每 4 sim 秒跑一次
   AGENT_SPEED: 1.7,     // tile/秒 基准
-  HUNGER_DECAY: 1.1,    // hunger 每秒下降
+  HUNGER_DECAY: 0.55,   // hunger 每秒下降（v0.5.4：减半——生活节奏放缓）
   ENERGY_DECAY: 0.6,    // 醒着时 energy 每秒下降（0.9 时 100 能量只够往返 95 格，扩张区任务必过劳死）
   ENERGY_REGEN: 9,      // 睡觉时每秒恢复
   WORK_EFFORT: 1.3,     // 每个工人每秒任务进度
@@ -345,7 +450,7 @@ const SIM = {
   BOAT_FISH_YIELD: 2,         // 渔船每次起网渔获
   FISHING_INTERVAL: 10,       // 渔船起网周期（秒）
   // ---- 口渴与饮品 ----
-  THIRST_DECAY: 0.7,          // 口渴每秒下降（walk 实际 ≈0.84/s：直饮/城库饮水恢复 100 约撑 119s，路上另有背包水自用，避免高频喝水打断生产）
+  THIRST_DECAY: 0.35,         // 口渴每秒下降（v0.5.4：减半——walk 实际 ≈0.42/s，直饮一次可撑 ~240s）
   STATE_HUNGER: { idle: 1.0, walk: 1.15, run: 1.5, work: 1.45, sleep: 0.5 },  // 饥饿衰减按状态倍率（睡觉减半）
   STATE_ENERGY: { idle: 0.85, walk: 1.1, run: 1.6, work: 1.35 },              // 体力衰减按状态倍率（睡觉不衰减，走 ENERGY_REGEN 恢复）
   STATE_THIRST: { idle: 1.0, walk: 1.2, run: 1.5, work: 1.3, sleep: 0.55 },   // 口渴衰减按状态倍率
@@ -385,6 +490,8 @@ const SIM = {
   MOOD_RECOVER_TIME: 20,
   MOOD_SICK_TIME: 300,        // 抑郁累计此时长 → 郁结成疾病倒（sickSource="mood"，走不出则不治）
   JOY_CD: 60,                 // 找乐子失败冷却（城库无酒时防连帧重试）
+  // ---- 意外死亡（v0.6.0 config 化：每秒掷骰概率，测试可临时调 1 强制触发）----
+  ACCIDENT: { cliff: 1 / 20000, shark: 1 / 15000, choke: 1 / 6000 },
   // ---- 娱乐链与游乐园（v0.5.0）----
   ENT_POP_MIN: 6,             // 凉亭人口门槛（era≥1，每城一座）
   THEATER_POP_MIN: 10,        // 戏台/斗兽场人口门槛（era≥2，每城各一座）
@@ -615,6 +722,7 @@ const world = {
   ponds: new Set(),     // 人工池塘格 "x,y"（EXCAV 挖出来的水，显示为池塘而非浅海）
   mushrooms: new Set(), // 蘑菇格 "x,y"（v0.5.0：一次性行走粮点，采完消失）
   parks: [],            // [{x,y,x0,y0,x1,y1,water}] 游乐园（v0.5.0 娱乐链，园区 bounding + 门楼）
+  interBridges: new Set(), // 已立项/已建的岛际大桥对 "ax,ay|bx,by"（v0.5.1，同一对岛只修一条）
   lastBridgeHead: null, // 上一条桥线的桥头（续接锚点）
   lastBridgeDir: null,  // 上一条桥线的走向（续接沿此直线延伸，保证笔直）
   pastures: [],         // [{x,y}] 牧场
@@ -626,6 +734,7 @@ const world = {
   ponds: new Set(),     // 人工池塘（genWorld 重置）
   mushrooms: new Set(), // 蘑菇格（genWorld 重置）
   parks: [],            // 游乐园（genWorld 重置）
+  interBridges: new Set(), // 岛际大桥对（genWorld 重置）
   lastBridgeHead: null,
   lastBridgeDir: null,
   logs: [],
@@ -1859,15 +1968,23 @@ function tasksFinish(t, agent, was) {
     case "PASTURE": {
       setTile(t.x, t.y, T.PASTURE);
       // 自动圈地：牧场四周立起围栏，圈养的牲畜从此只能在栏内活动
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (!dx && !dy) continue;
-          const tt = tileAt(t.x + dx, t.y + dy);
-          if (tt === T.GRASS || tt === T.SAND) setTile(t.x + dx, t.y + dy, T.FENCE);
-        }
+      // v0.5.3：环上必留一道门（T.GATE 可走）——牲畜可以自己出门在附近溜达，不必全程圈死；
+      // 门优先取南侧正中，该格不可圈（水/建筑等）则取第一个可圈格，保证有环就有门
+      const ring = [];
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const tt = tileAt(t.x + dx, t.y + dy);
+        if (tt === T.GRASS || tt === T.SAND) ring.push([dx, dy]);
+      }
+      const gate = ring.find(([dx, dy]) => dx === 0 && dy === 1) ||
+                   ring.find(([dx, dy]) => dx === 0 || dy === 0) ||   // 门放在正交向（对角开门太怪）
+                   ring[0] || null;
+      for (const [dx, dy] of ring) {
+        const isGate = gate && dx === gate[0] && dy === gate[1];
+        setTile(t.x + dx, t.y + dy, isGate ? T.GATE : T.FENCE);
       }
       world.pastures.push({ x: t.x, y: t.y });
-      logMsg(`新的牧场建成了，围栏圈地，圈养的牲畜将定期供给奶食。`);
+      logMsg(`新的牧场建成了，围栏圈地留了道门——牲畜偶尔会自己出门溜达。`);
       break;
     }
     case "QUARRY": {
@@ -2116,42 +2233,10 @@ class Creature {
     this.updateWild(dt);
   }
 
-  // 野生：游荡（栖息地内）；可猎物种会被猎人逼近而逃离（附近有狗则被围堵减速）
+  // 野生：游荡（栖息地内）。v0.5.6：可猎兽不再躲避人类——猎物从容吃草，猎人技艺只看工时
+  // （原逃跑/疲劳/猎犬围堵逻辑整体移除，顺带省掉每只可猎兽的逐帧威胁扫描）
   updateWild(dt) {
     const meta = CREATURE_META[this.type];
-    // 逃跑判定：只对可猎物种生效（0.3s 节流 v0.5.0——45 小人 × 每只可猎兽逐帧扫描是热点；
-    // 威胁与狗缓存 0.3s，逃跑移动仍逐帧进行）
-    if (meta.hunt) {
-      this.threatCd = (this.threatCd || 0) - dt;
-      if (this.threatCd <= 0) {
-        this.threatCd = 0.3;
-        let threat = null, threatD = 2.8;
-        for (const a of agents) {
-          const d = Math.hypot(a.x - this.x, a.y - this.y);
-          if (d < threatD) { threatD = d; threat = a; }
-        }
-        let dogNear = false;
-        for (const c of creatures) {
-          if (c.type === "dog" && !c.dead && Math.hypot(c.x - this.x, c.y - this.y) < 4) { dogNear = true; break; }
-        }
-        this.threat = threat;
-        this.dogNear = dogNear;
-      }
-      const threat = (this.threat && !this.threat.dead && Math.hypot(this.threat.x - this.x, this.threat.y - this.y) < 3.5)
-        ? this.threat : null;
-      if (threat) {
-        this.fleeT = (this.fleeT || 0) + dt;
-        const tired = this.fleeT > 8 ? 0.4 : 1;
-        const sp = ((this.dogNear ? 0.55 : meta.flee) * tired) * dt;
-        const dx = this.x - threat.x, dy = this.y - threat.y;
-        const d = Math.hypot(dx, dy) || 1;
-        const fox = this.x, foy = this.y;
-        this.moveBy((dx / d) * sp, (dy / d) * sp);
-        if (this.x !== fox || this.y !== foy) this.updateFace(dx, dy);   // 朝向=逃跑方向（dx/dy 本就是背离威胁的背向向量）；实际位移才更新——与 stepToward 同口径
-        return;
-      }
-      this.fleeT = 0;
-    }
     // 游荡：栖息地内随机走
     this.moveCd -= dt;
     if (this.moveCd <= 0) {
@@ -2267,14 +2352,16 @@ class Creature {
     this.updateWild(dt);
   }
 
-  // 圈养：在栏内小范围活动，定期产粮 + 繁殖（水生物种圈养于水域渔场，游荡判定走栖息地）
+  // 圈养：栏内小范围活动 + 定期产粮 + 繁殖（水生物种圈养于水域渔场，游荡判定走栖息地）。
+  // v0.5.3：牧场有门（T.GATE 可走），牲畜会自己出门在牧场附近 5 格内溜达，不再全程圈死
   updatePasture(dt) {
     const waterBound = CREATURE_META[this.type].habitat === "water" || CREATURE_META[this.type].habitat === "deep";
     this.moveCd -= dt;
     if (this.moveCd <= 0) {
       this.moveCd = 1.5 + rand() * 2;
       const a = rand() * Math.PI * 2;
-      const tx = this.pasture.x + 0.5 + Math.cos(a) * 2.5, ty = this.pasture.y + 0.5 + Math.sin(a) * 2.5;
+      const roam = waterBound ? 2.5 : 5;   // 陆生牲畜走得更远（从门出去），水生仍在水域内
+      const tx = this.pasture.x + 0.5 + Math.cos(a) * roam, ty = this.pasture.y + 0.5 + Math.sin(a) * roam;
       const ok = waterBound
         ? habitatOk(this, Math.round(tx), Math.round(ty))
         : walkable(Math.round(tx), Math.round(ty));
@@ -2495,15 +2582,29 @@ const _GIVEN_F = ["禾", "梅", "竹", "云", "岚", "星", "宁", "秋", "白",
 const _usedNames = new Set();
 function pickAgentName(sex, surname) {
   const pool = sex === "f" ? _GIVEN_F : _GIVEN_M;
-  for (let i = 0; i < 40; i++) {
-    // 随机姓槽：单姓×3 + 复姓 合并索引上抽一次（复姓占比约 9%，稀有感）；恒定消耗，保持随机流调用点与旧版一致
-    const si = randInt(0, _SURNAMES.length * 3 + _SURNAMES_CP.length - 1);
-    const sn = si < _SURNAMES.length * 3 ? _SURNAMES[si % _SURNAMES.length] : _SURNAMES_CP[si - _SURNAMES.length * 3];
-    const n = (surname || sn) + pool[randInt(0, pool.length - 1)] +
-              (rand() < 0.4 ? pool[randInt(0, pool.length - 1)] : "");
-    if (!_usedNames.has(n)) { _usedNames.add(n); return n; }
+  // 两轮尝试（40 + 400 次）：第二轮放开双字名概率并加大尝试量——姓氏传家（新生儿继承父/母姓）
+  // 时同名池会被同姓挤穿，40 次撞满就会掉进「居民44」这类编号兜底（v0.5.5 修复）
+  for (let round = 0; round < 2; round++) {
+    const tries = round === 0 ? 40 : 400;
+    for (let i = 0; i < tries; i++) {
+      const si = randInt(0, _SURNAMES.length * 3 + _SURNAMES_CP.length - 1);
+      const sn = surname || (si < _SURNAMES.length * 3 ? _SURNAMES[si % _SURNAMES.length] : _SURNAMES_CP[si - _SURNAMES.length * 3]);
+      const g1 = pool[randInt(0, pool.length - 1)];
+      const g2 = pool[randInt(0, pool.length - 1)];
+      // 第二轮：名字长度不限（双字概率拉满，缀第三字 20%），大幅扩大组合空间
+      const n = round === 0
+        ? sn + g1 + (rand() < 0.4 ? g2 : "")
+        : sn + g1 + (rand() < 0.8 ? g2 : "") + (rand() < 0.2 ? pool[randInt(0, pool.length - 1)] : "");
+      if (!_usedNames.has(n)) { _usedNames.add(n); return n; }
+    }
   }
-  return "居民" + (agents.length + 1);
+  // 终极兜底：单姓 + 「氏」+ 序号——永远唯一，绝不再出现「居民44」
+  const base = surname || _SURNAMES[0];
+  let k = 1;
+  while (_usedNames.has(base + "氏" + (k > 1 ? k : ""))) k++;
+  const n = base + "氏" + (k > 1 ? k : "");
+  _usedNames.add(n);
+  return n;
 }
 
 // 姓氏：命中复姓前缀取前两字，否则取首字
@@ -2803,6 +2904,28 @@ class Agent {
         if (rand() < 0.01 + over * 0.003) { this.die("寿终正寝"); return; }
       }
     }
+    // ---- 意外死亡（v0.5.8，极小概率的世界事故；概率 v0.6.0 config 化便于测试与调参）----
+    // 每秒掷一次：崖边失足 / 浅滩遇鲨 / 进食噎住——概率调得极低，只是生活的无常点缀
+    this.accCd = (this.accCd || 0) - dt;
+    if (this.accCd <= 0) {
+      this.accCd = 1;
+      const ax = Math.round(this.x), ay = Math.round(this.y);
+      const ACC = SIM.ACCIDENT || { cliff: 1 / 20000, shark: 1 / 15000, choke: 1 / 6000 };
+      if (neighborsOf(ax, ay).some(p => tileAt(p.x, p.y) === T.CLIFF) && rand() < ACC.cliff) {
+        this.die("在崖边失足坠落，当场身亡");
+        return;
+      }
+      if (creatures.some(c => c.type === "shark" && !c.dead && Math.hypot(c.x - this.x, c.y - this.y) < 2.2) &&
+          rand() < ACC.shark) {
+        this.die("在浅滩戏水时被鲨鱼拖下了水");
+        return;
+      }
+      if (this.state === "eat" && rand() < ACC.choke) {
+        this.die("进食时狼吞虎咽，不幸噎住身亡");
+        return;
+      }
+    }
+
     // 脱水：thirst<8 持续 DEHYDRY_TIME 秒 → 复用病倒机制（sickSource="thirst"，痊愈需水分恢复）
     if (this.thirst < 8) {
       this.dehydrT = (this.dehydrT || 0) + dt;
@@ -3372,6 +3495,7 @@ class Agent {
   die(reason) {
     if (this.dead) return;
     this.dead = true;
+    this.deathReason = reason;   // 死因随行（v0.5.9 死亡广播用）
     if (this.task) { tasksRelease(this.task, this); this.task = null; }
     if (this.rescuing) { this.rescuing.rescuer = null; this.rescuing = null; }   // 释放被困动物的认领锁
     if (packHaulCount(this.pack) > 0) this.deposit();   // 遗产：搬运产出就地登记入库
@@ -4179,8 +4303,11 @@ function plannerTick() {
       if (s) tasksAdd({ type: "PASTURE", x: s.x, y: s.y, need: 16 });
     } else if (world.pastures.length > 0 && tasksPending("CAPTURE", true).length < 1) {
       const pas = world.pastures[0];
+      // v0.5.3：陆上牧场只圈陆生牲畜——水生动物（鱼群/海龟/鲸）不入陆栏（脚下不是水会搁浅），
+      // 它们的圈养走 2d2 渔场路径（水上渔场/池塘 dest）
       const cap = creatures.filter(c => c.isWild() && !c.dead &&
         Math.hypot(c.x - pas.x, c.y - pas.y) < 40 && c.type !== "dog" &&
+        CREATURE_META[c.type].habitat !== "water" && CREATURE_META[c.type].habitat !== "deep" &&
         creatures.filter(k => k.pasture && k.type === c.type).length < SIM.PASTURE_CAP);
       if (cap.length) {
         const c = cap[0];
@@ -4501,6 +4628,40 @@ function plannerTick() {
           }
         }
         break;   // 每周期最多立一项
+      }
+    }
+  }
+  // 2f3. 岛际大桥（v0.5.1）：已命名岛屿两两邻近（中心距 ≤50）→ 沿两岛中心连线架跨海大桥——
+  //      海上段全部架桥（浅海/深海皆可架），corridor 链式生长直达对岸即停；同一对岛只修一条
+  if (world.era >= 2 && world.time - _interBridgeCd > 30 && tasksPending("BRIDGE", true).length < 30) {
+    _interBridgeCd = world.time;
+    const named = world.islands.filter(o => o.name && o.r >= 3);
+    let best = null, bestD = Infinity;
+    for (let i = 0; i < named.length; i++) for (let j = i + 1; j < named.length; j++) {
+      const a = named[i], b = named[j];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d > 50 || d < 8) continue;
+      const kAB = a.x + "," + a.y + "|" + b.x + "," + b.y;
+      const kBA = b.x + "," + b.y + "|" + a.x + "," + a.y;
+      if (world.interBridges && (world.interBridges.has(kAB) || world.interBridges.has(kBA))) continue;
+      if (d < bestD) { bestD = d; best = [a, b, kAB]; }
+    }
+    if (best) {
+      const [a, b, pairKey] = best;
+      const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
+      const dist = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
+      // 沿 A→B 直线找第一个海上格：其前驱或任一邻格可站立（工人必可达）才立项首格，链式生长接力
+      for (let k = 1; k < dist; k++) {
+        const x = a.x + dx * k, y = a.y + dy * k;
+        const t = tileAt(x, y);
+        if (t !== T.WATER && t !== T.DEEP) continue;
+        const startOk = walkable(x - dx, y - dy) || neighborsOf(x, y).some(p => walkable(p.x, p.y));
+        if (startOk && !tasks.list.some(tk => !tk.done && tk.x === x && tk.y === y) && !nearAny(x, y, [T.BRIDGE], 6)) {
+          tasksAdd({ type: "BRIDGE", x, y, corridor: { dx, dy, remain: dist - k } });
+          world.interBridges.add(pairKey);
+          logMsg(`工匠们着手在「${a.name}」与「${b.name}」之间修一条跨海大桥。`);
+        }
+        break;   // 只看第一个海上格（不可达则 30s 后重查，等周边地形解锁）
       }
     }
   }
@@ -4839,6 +5000,7 @@ function farmTick(dt) {
 let _plannerCd = SIM.PLANNER_INTERVAL;
 let _lastFeast = -999;
 let _resScanTick = 0;   // 资源采集选址扫描节流计数（每 5 个规划周期扫一次，见 plannerTick 2e）
+let _interBridgeCd = -999;   // 岛际大桥立项节流（30s 一查）
 let _frontierCd = -999;
 
 function simUpdate(dt) {
@@ -5438,6 +5600,17 @@ function bakeTileArt(tile, v, bright) {
       rectF(g, 11, 2, 2, 12, shade("#5c3d1e", bright));
       rectF(g, 2, 2, 2, 1, shade("#9a7040", bright));      // 柱头亮
       rectF(g, 11, 2, 2, 1, shade("#9a7040", bright));
+      return cv;
+    }
+    case T.GATE: {
+      // 牧场门（v0.5.3）：单侧开阖的木门——横栏断开 + 门轴柱 + 微开缝隙
+      const { cv, g } = groundCopy(v, bright, "#5e8c4f", "#4d7842", "#6f9c5e");
+      rectF(g, 1, 2, 2, 12, shade("#5c3d1e", bright));     // 门轴柱
+      rectF(g, 1, 2, 2, 1, shade("#9a7040", bright));
+      rectF(g, 3, 4, 6, 2, shade("#8a6236", bright));      // 上半扇门（微开）
+      rectF(g, 3, 10, 5, 2, shade("#8a6236", bright));     // 下半扇门（错位留缝）
+      rectF(g, 8, 4, 1, 8, shade("#5c3d1e", bright));      // 门闩沿
+      pxF(g, 12, 7, shade("#9a7040", bright)); pxF(g, 13, 8, shade("#9a7040", bright));   // 路径小径点
       return cv;
     }
     case T.PASTURE: {
@@ -7273,6 +7446,384 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
   }
 }
 
+
+"use strict";
+// ============ 机制演示引擎（v0.6.0）============
+// 脚本化演示：每个机制一段时间轴（分步文案 + 画布绘制回调）。播放时主世界暂停（main.js 负责
+// setSpeed(0)/恢复），演示自身可倍速（0.5/1/2/4×），播完提示「当前机制演示完毕」并打勾标记。
+// 绘制复用全局 sprite 图集（本文件拼接在 sprites/render 之后、main 之前；DOM 只在打开弹窗时触碰）。
+
+// ---- 绘制小工具（棋盘格场景拼贴 + 分层小人）----
+function dTileAt(g, tile, x, y, s) {
+  g.drawImage(tileSprite(tile, 2, 0), x, y, s + 0.5, s + 0.5);
+}
+function dWaterRow(g, x, y, n, s) {
+  for (let i = 0; i < n; i++) g.drawImage(waterSprite(T.WATER, 2, 0, 0), x + i * s, y, s + 0.5, s + 0.5);
+}
+// 分层小人（影子+腿+身+头），view 固定正面；poseKey 取 sprites 姿态键
+function dMan(g, x, y, s, opts) {
+  const o = opts || {};
+  const sex = o.sex || "m";
+  const view = o.view || "front";
+  const key = o.key || "stand";
+  const shirt = o.shirt || "#7a92c4";
+  const k = s / 16;
+  g.fillStyle = "rgba(0,0,0,0.3)";
+  g.beginPath(); g.ellipse(x + s / 2, y + s * 0.95, s * 0.3, s * 0.1, 0, 0, 7); g.fill();
+  const bob = (key === "walk1" || key === "walk2") ? Math.abs(Math.sin((o.phase || 0) * 9)) * s * 0.06 : 0;
+  const px = x, py = y - bob;
+  if (key !== "sleep") g.drawImage(agentPantsSprite(0, key === "work1" || key === "work2" ? "stand" : key, sex, 0, view === "side" ? "side" : "vert"), px, py, s + 0.5, s + 0.5);
+  g.drawImage(agentBodySprite(shirt, key, sex, view), px, py, s + 0.5, s + 0.5);
+  g.drawImage(agentHeadSprite(0, "short", "#4a3220", sex, !!o.native, view), px, py, s + 0.5, s + 0.5);
+}
+function dCreature(g, type, x, y, s, view) {
+  const meta = CREATURE_META[type];
+  const spr = creatureSprite(type, 0, view || "side");
+  const w = Math.max(8, s * 0.8 * meta.size);
+  const hh = w * spr.height / spr.width;
+  g.drawImage(spr, x + (s - w) / 2, y + s - hh - s * 0.08, w, hh);
+}
+function dBuilding(g, tile, x, y, s) {
+  g.drawImage(buildingSprite(tile, 0), x, y + s - 24 * (s / 16), s + 0.5, 24 * (s / 16));
+}
+// 状态条
+function dBar(g, x, y, w, h, ratio, color, label) {
+  g.fillStyle = "#1c2333"; g.fillRect(x, y, w, h);
+  g.fillStyle = color; g.fillRect(x, y, Math.max(0, Math.min(1, ratio)) * w, h);
+  g.strokeStyle = "#2a3448"; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  if (label) { g.fillStyle = "#8a93a8"; g.font = "9px sans-serif"; g.fillText(label, x, y - 2); }
+}
+// 云朵（抑郁标记）
+function dCloud(g, x, y, s) {
+  g.fillStyle = "rgba(150,160,180,0.9)";
+  g.beginPath();
+  g.arc(x, y, s * 0.28, 0, 7); g.arc(x + s * 0.3, y - s * 0.1, s * 0.22, 0, 7); g.arc(x - s * 0.3, y - s * 0.08, s * 0.2, 0, 7);
+  g.fill();
+}
+
+// ---- 演示主题（时间轴 + 分步文案 + 绘制回调；t = 演示秒，已乘倍速）----
+const DEMO_TOPICS = [
+  {
+    id: "survival", name: "需求与生存", desc: "饱食/渴值/精力/心情四维与生死线", dur: 14,
+    steps: [
+      { t: 0, text: "每个小人都有四条生命线：饱食、渴值、精力、心情——随时间与行为实时增减。" },
+      { t: 4.5, text: "饿了去粮仓吃饭，渴了找水井河湖直饮，深夜精力见底就回家睡觉。" },
+      { t: 9, text: "需求跌破警戒线有真实后果：脱水病倒、积劳成疾，60 秒不治会离世。" },
+      { t: 12.5, text: "还有极小概率的意外：崖边失足、浅滩遇鲨、进食噎住——世界自有无常。" },
+    ],
+    draw(g, W, H, t) {
+      const s = 26;
+      dWaterRow(g, W * 0.06, H * 0.62, 3, s);
+      dTileAt(g, T.GRASS, W * 0.32, H * 0.62, s); dTileAt(g, T.GRASS, W * 0.32 + s, H * 0.62, s);
+      const walkPhase = (t * 0.6) % 1;
+      const mx = W * 0.36 + walkPhase * s * 2 - s;
+      dMan(g, mx, H * 0.62 - s * 0.55, s, { key: t % 2 < 1 ? "walk1" : "walk2", phase: t * 2 });
+      dTileAt(g, T.WELL, W * 0.08, H * 0.62 - s, s);
+      dBuilding(g, T.BREWERY, W * 0.06, H * 0.62 - s * 0.4, s);
+      const bx = W * 0.58, bw = W * 0.34;
+      dBar(g, bx, H * 0.18, bw, 9, 0.5 + Math.sin(t * 0.7) * 0.45, "#6fae4e", "饱食");
+      dBar(g, bx, H * 0.34, bw, 9, 0.5 + Math.cos(t * 0.9) * 0.45, "#4aa0c2", "渴值");
+      dBar(g, bx, H * 0.50, bw, 9, t % 8 < 4 ? 0.25 : 0.85, "#5a8fd0", "精力");
+      dBar(g, bx, H * 0.66, bw, 9, 0.8, "#e8c15a", "心情");
+    },
+  },
+  {
+    id: "mood", name: "心情与抑郁", desc: "工作磨人 / 喜好回甘 / 抑郁与走出", dur: 15,
+    steps: [
+      { t: 0, text: "心情值 0~100：工作最磨人（衰减 ×1.9），睡觉慢慢回神，随遇而安的人看得开。" },
+      { t: 4, text: "做喜好匹配的事转快乐：向往远方的出海架桥、爱牲畜的牧羊、垂钓者钓鱼、恋家的守家。" },
+      { t: 8, text: "喝酒 +30、果汁 +12、宴席全体 +25——心情低落时小人会主动去找乐子。" },
+      { t: 11.5, text: "心情 <12 持续 → 抑郁（灰雨云）：什么都不想干；长期走不出会郁结成疾，甚至郁郁而终。" },
+    ],
+    draw(g, W, H, t) {
+      const s = 30;
+      dTileAt(g, T.GRASS, W * 0.1, H * 0.55, s); dTileAt(g, T.GRASS, W * 0.1 + s, H * 0.55, s);
+      if (t < 4) {
+        dMan(g, W * 0.12, H * 0.55 - s * 0.6, s, { key: t % 1 < 0.5 ? "work1" : "work2", shirt: "#ff9f43" });
+        if (t > 1.5 && Math.floor(t * 3) % 2) { g.fillStyle = "#fff"; g.fillRect(W * 0.16, H * 0.55 - s * 1.1, 3, 2); }
+      } else if (t < 8) {
+        dMan(g, W * 0.12, H * 0.55 - s * 0.6, s, { key: "stand" });
+        dCreature(g, "goat", W * 0.24, H * 0.55 - s * 0.3, s);
+        g.fillStyle = "#e8c15a"; g.font = "12px sans-serif"; g.fillText("♪ 做喜欢的事", W * 0.14, H * 0.42);
+      } else if (t < 11.5) {
+        dMan(g, W * 0.12, H * 0.55 - s * 0.6, s, { key: Math.floor(t * 2) % 2 ? "drink2" : "drink1" });
+        dBuilding(g, T.BREWERY, W * 0.24, H * 0.55 - s * 0.4, s);
+        g.fillStyle = "#e8a13b"; g.font = "12px sans-serif"; g.fillText("🍺 +30", W * 0.15, H * 0.4);
+      } else {
+        dMan(g, W * 0.12, H * 0.55 - s * 0.6, s, { key: "stand", shirt: "#8fa3e8" });
+        dCloud(g, W * 0.15 + s * 0.5, H * 0.55 - s * 1.05, s);
+      }
+      const drop = t < 4 ? Math.max(0.15, 1 - t * 0.2) : t < 8 ? 0.4 + (t - 4) * 0.1 : t < 11.5 ? Math.min(1, 0.7 + (t - 8) * 0.1) : Math.max(0.05, 0.9 - (t - 11.5) * 0.2);
+      dBar(g, W * 0.55, H * 0.3, W * 0.36, 12, drop, drop < 0.25 ? "#9a8ba8" : "#e8c15a", "心情 " + Math.round(drop * 100));
+      dBar(g, W * 0.55, H * 0.5, W * 0.36, 9, 0.9 - (t % 5) * 0.15, "#6fae4e", "饱食（对照：正常增减）");
+    },
+  },
+  {
+    id: "drinks", name: "饮品链", desc: "水井→工坊→酒/汁/咖啡的效果", dur: 15,
+    steps: [
+      { t: 0, text: "水井落成后居民挑水入库——存水是整条饮品链的原料。" },
+      { t: 4, text: "压榨坊榨果汁、酒坊酿麦酒、烘焙坊烘咖啡：各自消耗水 + 原料（果/粮/豆）。" },
+      { t: 8.5, text: "喝麦酒微醺 40 秒（脚步飘、饿得慢）、咖啡提神 120 秒（精力耐用）、果汁回精力。" },
+      { t: 12.5, text: "渴了自动找喝的：城库按「咖啡 > 果汁 > 麦酒 > 清水」优先取用，不挑不拣喝高阶。" },
+    ],
+    draw(g, W, H, t) {
+      const s = 24;
+      dTileAt(g, T.WELL, W * 0.1, H * 0.5, s);
+      g.fillStyle = "#8a93a8"; g.font = "10px sans-serif"; g.fillText("水井", W * 0.11, H * 0.5 - 4);
+      dBuilding(g, T.PRESS, W * 0.32, H * 0.42, s);
+      dBuilding(g, T.BREWERY, W * 0.5, H * 0.42, s);
+      dBuilding(g, T.ROASTERY, W * 0.68, H * 0.42, s);
+      g.fillStyle = "#8a93a8"; g.font = "10px sans-serif";
+      g.fillText("压榨坊", W * 0.33, H * 0.42 - 30 * (s / 16) + 26); g.fillText("酒坊", W * 0.52, H * 0.42 - 30 * (s / 16) + 26); g.fillText("烘焙坊", W * 0.69, H * 0.42 - 30 * (s / 16) + 26);
+      dWaterRow(g, W * 0.08, H * 0.78, 12, s);
+      dMan(g, W * 0.42 + (t % 6) * s * 0.8, H * 0.78 - s * 0.6, s * 0.9, { key: t % 2 < 1 ? "walk1" : "walk2", phase: t * 2, view: "side" });
+      const label = t < 4 ? "💧 打水入库" : t < 8.5 ? "🧃🍺☕ 三坊开工" : t < 12.5 ? "🍺 微醺 ×0.65 移速   ☕ 提神 ×0.55 耗力" : "咖啡 > 果汁 > 麦酒 > 清水";
+      g.fillStyle = "#e8d9a0"; g.font = "12px sans-serif"; g.fillText(label, W * 0.08, H * 0.2);
+      dBar(g, W * 0.08, H * 0.3, W * 0.5, 10, Math.min(1, t / 10), "#4aa0c2", "渴值（喝一口回满 100）");
+    },
+  },
+  {
+    id: "jobs", name: "职业与任务", desc: "规划立项 → 领任务 → 施工入库 → 转职", dur: 15,
+    steps: [
+      { t: 0, text: "规划署每 4 秒聚合需求自动立项：缺房建房、缺粮开荒、缺木伐木、缺水挖塘。" },
+      { t: 4.5, text: "小人按职业优先领任务（农夫开荒、工匠建造……），远任务会老化插队不吃亏。" },
+      { t: 9, text: "产出先进随身背包（haul 槽），走回仓库入库——名册里的数字永远是仓库里的。" },
+      { t: 12.5, text: "劳动力市场：活计干完太久会自动转职，社会永远缺什么补什么。" },
+    ],
+    draw(g, W, H, t) {
+      const s = 26;
+      dTileAt(g, T.GRASS, W * 0.08, H * 0.55, s); dTileAt(g, T.SITE, W * 0.08 + s, H * 0.55, s);
+      dTileAt(g, T.HOUSE, W * 0.08 + s * 2, H * 0.55, s);
+      dTileAt(g, T.FARM, W * 0.08, H * 0.55 + s, s); dTileAt(g, T.TREE, W * 0.08 + s, H * 0.55 + s, s);
+      const phase = (t % 8) / 8;
+      dMan(g, W * 0.08 + s + phase * s * 2 - s, H * 0.55 - s * 0.55, s, { key: t % 1 < 0.5 ? "walk1" : "walk2", phase: t * 2, shirt: phase < 0.5 ? "#ff9f43" : "#7a92c4", view: "side" });
+      dBar(g, W * 0.6, H * 0.25, W * 0.32, 12, Math.min(1, phase * 1.4), "#e8a13b", "工程进度");
+      dBar(g, W * 0.6, H * 0.45, W * 0.32, 9, Math.min(1, phase * 1.4), "#6fae4e", "背包 haul 槽");
+      dBar(g, W * 0.6, H * 0.62, W * 0.32, 9, phase < 0.5 ? 0.2 : Math.min(1, 0.2 + phase), "#5a8fd0", "仓库库存（入库后 +）");
+      g.fillStyle = "#8a93a8"; g.font = "10px sans-serif";
+      g.fillText("规划署 → 任务牌 → 工人 → 背包 → 仓库", W * 0.08, H * 0.2);
+    },
+  },
+  {
+    id: "voyage", name: "航海探索", desc: "码头出海 / 点亮虚空 / 登岛命名 / 救援", dur: 16,
+    steps: [
+      { t: 0, text: "码头（era≥1）建成即开启航海时代——探险家们的浪漫从这里起航。" },
+      { t: 4, text: "消耗木材造船出海：船带粮草，沿途每 2 秒点亮一片虚空，地图向星辰推进。" },
+      { t: 8.5, text: "触碰陆地即下船：第一个登岛的人为岛屿命名，命名即定居化（粮仓+房屋+农田）。" },
+      { t: 12.5, text: "船可以穿过桥；补给耗尽会被困呼救——存粮足够时全城自动派出救援船。" },
+    ],
+    draw(g, W, H, t) {
+      const s = 24;
+      for (let i = 0; i < 14; i++) g.drawImage(waterSprite(T.WATER, 2, 0, Math.floor(t * 2) % 4), W * 0.05 + i * s, H * 0.5, s + 0.5, s + 0.5);
+      dTileAt(g, T.GRASS, W * 0.03, H * 0.5, s); dTileAt(g, T.GRASS, W * 0.03, H * 0.5 - s, s); dTileAt(g, T.DOCK, W * 0.03 + s, H * 0.5, s);
+      const sailX = W * 0.06 + Math.min(1, t / 10) * W * 0.7;
+      g.drawImage(shipSprite("ship"), sailX, H * 0.5 + s * 0.1, s * 1.4, s);
+      // 点亮光圈
+      const rv = Math.max(0, Math.sin((t - 4) * 0.8));
+      if (rv > 0 && t > 4) {
+        g.strokeStyle = `rgba(220,240,255,${0.5 * rv})`; g.lineWidth = 2;
+        g.beginPath(); g.arc(sailX + s * 0.7, H * 0.5 + s * 0.5, s * (1 + rv), 0, 7); g.stroke();
+      }
+      dTileAt(g, T.GRASS, W * 0.86, H * 0.5, s); dTileAt(g, T.GRASS, W * 0.86, H * 0.5 - s, s); dTileAt(g, T.HOUSE, W * 0.86, H * 0.5 + s, s);
+      if (t > 8.5) { g.fillStyle = "#e8d9a0"; g.font = "11px sans-serif"; g.fillText("「云岚屿」", W * 0.845, H * 0.5 - s - 6); }
+      g.fillStyle = "#8a93a8"; g.font = "10px sans-serif";
+      g.fillText(t < 8.5 ? "船速 3 格/秒 · 航程上限 220 格" : "船穿桥而过 · 桥不再是岸", W * 0.08, H * 0.24);
+    },
+  },
+  {
+    id: "bridges", name: "岛际大桥", desc: "命名岛连线 · 深海架桥 · 链式贯通", dur: 13,
+    steps: [
+      { t: 0, text: "已命名的邻近岛屿（中心距 ≤50）之间，规划署会立项跨海大桥。" },
+      { t: 4, text: "沿两岛中心连线逐格架桥——浅海架桥，深海也架桥，绝不填海绕路。" },
+      { t: 8, text: "桥一格接一格生长（链式 corridor），直到踏上对岸——两岛从此陆路相通。" },
+    ],
+    draw(g, W, H, t) {
+      const s = 22;
+      // 左右两座岛 + 中间深海
+      for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) dTileAt(g, T.GRASS, W * 0.06 + c * s, H * 0.42 + r * s, s);
+      for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) dTileAt(g, T.GRASS, W * 0.82 + c * s, H * 0.42 + r * s, s);
+      for (let i = 0; i < 12; i++) g.drawImage(waterSprite(T.DEEP, 2, 0, Math.floor(t) % 4), W * 0.06 + s * 2 + i * s, H * 0.42, s + 0.5, s + 0.5);
+      for (let i = 0; i < 12; i++) g.drawImage(waterSprite(T.DEEP, 2, 0, Math.floor(t) % 4), W * 0.06 + s * 2 + i * s, H * 0.42 + s, s + 0.5, s + 0.5);
+      const grown = Math.min(12, Math.max(0, Math.floor((t - 2) * 1.6)));
+      for (let i = 0; i < grown; i++) dTileAt(g, T.BRIDGE, W * 0.06 + s * 2 + i * s, H * 0.42 + s * 0.5, s);
+      const dMan2 = grown >= 12;
+      if (dMan2) dMan(g, W * 0.3 + (t % 3) * s, H * 0.42 + s * 0.5 - s * 0.55, s * 0.9, { key: t % 1 < 0.5 ? "walk1" : "walk2", phase: t * 2, view: "side" });
+      g.fillStyle = "#8a93a8"; g.font = "10px sans-serif";
+      g.fillText(dMan2 ? "贯通！两岛陆路相通" : "海上段逐格生长中……", W * 0.08, H * 0.24);
+      g.fillStyle = "#e8d9a0"; g.font = "12px sans-serif";
+      g.fillText("测试西岛", W * 0.05, H * 0.36); g.fillText("测试东岛", W * 0.81, H * 0.36);
+    },
+  },
+  {
+    id: "ranch", name: "畜牧与渔场", desc: "围栏留门 / 圈养产粮 / 渔船起网", dur: 15,
+    steps: [
+      { t: 0, text: "牧场围栏圈地——但必留一道门：牲畜会自己出门，在附近溜达再回家。" },
+      { t: 4.5, text: "圈养牛羊定期产粮 +2、缓慢繁衍；喜爱牲畜的居民在旁陪伴还能加速。" },
+      { t: 9, text: "水生动物不进陆上牧场：鱼群圈进水域渔场或池塘，渔船近海起网满舱回港。" },
+      { t: 12.5, text: "狼捕食野羊、野犬可驯化认主——人类的牧场之外，自然自有生态。" },
+    ],
+    draw(g, W, H, t) {
+      const s = 24;
+      const px = W * 0.08, py = H * 0.4;
+      dTileAt(g, T.PASTURE, px + s, py + s, s);
+      const ring = [[0, 0], [1, 0], [2, 0], [0, 1], [2, 1], [0, 2], [1, 2], [2, 2]];
+      ring.forEach(([c, r], i) => dTileAt(g, i === 4 ? T.GATE : T.FENCE, px + c * s, py + r * s, s));
+      dCreature(g, "cow", px + s + 2, py + s + 2, s);
+      const cowOut = Math.min(1, Math.max(0, (t - 4) / 3));
+      dCreature(g, "goat", px + s + s * 1.2 + cowOut * s * 1.6, py + s * 2.6, s);
+      dWaterRow(g, W * 0.55, H * 0.4, 7, s);
+      dCreature(g, "fish", W * 0.58, H * 0.4 + 2, s * 0.8);
+      dCreature(g, "fish", W * 0.64, H * 0.4 + 4, s * 0.8);
+      g.drawImage(shipSprite("boat"), W * 0.62, H * 0.4 - 4, s * 1.1, s * 0.75);
+      dCreature(g, "wolf", W * 0.85, H * 0.7, s);
+      dCreature(g, "dog", W * 0.78, H * 0.72, s);
+      dMan(g, W * 0.7, H * 0.7 - s * 0.5, s * 0.9, { key: "stand" });
+      g.fillStyle = "#8a93a8"; g.font = "10px sans-serif";
+      g.fillText("围栏留门 · 牲畜自由出入", W * 0.08, H * 0.3);
+      g.fillText("渔船起网 +2 粮 / 10 秒", W * 0.55, H * 0.3);
+    },
+  },
+  {
+    id: "species", name: "物种图鉴", desc: "17+ 种生灵轮番亮相", dur: 17,
+    steps: [
+      { t: 0, text: "群岛栖居着 17 种生灵：草地、沙滩、林缘、浅海、深海、天空各有其主。" },
+      { t: 2, text: "普通生灵可猎可捕；珍稀物种（独角兽/月光鱼/锦鲤/凤凰/仙龙/人鱼）可遇不可求。" },
+      { t: 8, text: "独角兽可以驯化认主（+25 心情）；月光鱼与锦鲤可垂钓（钓到开心大涨）。" },
+      { t: 13, text: "一切生物都会老去：分栖息地繁衍、超龄离世——种群永续，不必担心猎绝。" },
+    ],
+    draw(g, W, H, t) {
+      const types = ["cow", "goat", "deer", "boar", "wolf", "dog", "rabbit", "fox", "bear", "horse",
+        "penguin", "crab", "dolphin", "shark", "turtle", "whale", "unicorn", "moonfish", "koi", "phoenix", "fairy", "mermaid", "bird"];
+      const idx = Math.floor(t / 0.75) % types.length;
+      const cur = types[idx];
+      const s = 46;
+      g.fillStyle = "#131c2c"; g.fillRect(W * 0.32, H * 0.16, s * 2.4, s * 2.4);
+      g.strokeStyle = "#2a3448"; g.strokeRect(W * 0.32, H * 0.16, s * 2.4, s * 2.4);
+      dCreature(g, cur, W * 0.32 + s * 0.2, H * 0.16 + s * 0.2, s * 2);
+      g.fillStyle = "#e8d9a0"; g.font = "13px sans-serif";
+      g.fillText(CREATURE_META[cur].name + (CREATURE_META[cur].rare ? " · 珍稀" : "") + (CREATURE_META[cur].tamable ? " · 可驯化" : ""), W * 0.62, H * 0.3);
+      g.fillStyle = "#8a93a8"; g.font = "10px sans-serif";
+      const hab = { grass: "草地", forest: "林缘", sand: "沙滩", water: "浅海", deep: "深海", air: "天空" }[CREATURE_META[cur].habitat] || "";
+      g.fillText("栖息地：" + hab + (CREATURE_META[cur].hunt ? " · 可猎 +" + CREATURE_META[cur].yield : ""), W * 0.62, H * 0.38);
+      g.fillText((idx + 1) + " / " + types.length, W * 0.62, H * 0.45);
+    },
+  },
+  {
+    id: "fate", name: "意外与死亡", desc: "老死病亡 / 意外 / 全屏讣告", dur: 14,
+    steps: [
+      { t: 0, text: "生命有尽头：老死（60 岁后概率渐增）、饥饿/力竭/脱水病倒、抑郁郁郁而终。" },
+      { t: 5, text: "还有极小概率的世界无常：崖边失足（1/20000 每秒）、浅滩遇鲨、进食噎住。" },
+      { t: 9, text: "被视角跟随的居民去世 → 全屏讣告：姓名、死因、享年、地点与时刻，点击致哀。" },
+      { t: 12, text: "死者长已矣——名册静默更新，房屋与任务释放，世界继续向前。" },
+    ],
+    draw(g, W, H, t) {
+      const s = 26;
+      dTileAt(g, T.GRASS, W * 0.1, H * 0.5, s); dTileAt(g, T.GRASS, W * 0.1 + s, H * 0.5, s);
+      dTileAt(g, T.CLIFF, W * 0.1 + s * 2, H * 0.5, s);
+      if (t < 9) {
+        const wob = t > 5 && t < 7 ? Math.sin(t * 20) * 3 : 0;
+        dMan(g, W * 0.1 + s * 0.2 + wob, H * 0.5 - s * 0.6, s, { key: t < 5 ? "stand" : t < 7 ? "walk2" : "drink1" });
+      }
+      g.fillStyle = "#8a93a8"; g.font = "10px sans-serif";
+      g.fillText(t < 5 ? "岁月与疾病" : t < 9 ? "无常的意外" : "讣告昭告全境", W * 0.1, H * 0.38);
+      if (t >= 9) {
+        g.fillStyle = "rgba(26,13,15,0.94)"; g.fillRect(W * 0.32, H * 0.2, W * 0.42, H * 0.5);
+        g.strokeStyle = "#7a3a3a"; g.strokeRect(W * 0.32, H * 0.2, W * 0.42, H * 0.5);
+        g.fillStyle = "#c96a6a"; g.font = "11px sans-serif"; g.fillText("讣 告", W * 0.48, H * 0.28);
+        g.fillStyle = "#f0e6d0"; g.font = "14px sans-serif"; g.fillText("张 川", W * 0.47, H * 0.38);
+        g.fillStyle = "#b8a89a"; g.font = "10px sans-serif";
+        g.fillText("在崖边失足坠落，当场身亡（享年 34 岁）", W * 0.35, H * 0.46);
+        g.fillText("卒于 主岛城 · 第3年第7月 14:20", W * 0.38, H * 0.53);
+        g.fillStyle = "#5f5a58"; g.fillText("—— 点击任意处致哀 ——", W * 0.42, H * 0.63);
+      }
+    },
+  },
+  {
+    id: "park", name: "娱乐与游乐园", desc: "凉亭戏台斗兽场 / 海上浮台游乐园", dur: 16,
+    steps: [
+      { t: 0, text: "时代进步带来娱乐：凉亭（era1）小憩、戏台与斗兽场（era2）看戏观演。" },
+      { t: 5, text: "文明时代（era3·人口 16）建游乐园——选址陆地 3×3 草地，也可以是海上浮台园区。" },
+      { t: 9.5, text: "摩天轮、旋转木马、过山车在园区内逐个立起。" },
+      { t: 13, text: "尽兴而归：心情 +35，余韵 300 秒内衰减 ×0.35——这一份开心，很持久。" },
+    ],
+    draw(g, W, H, t) {
+      const s = 24;
+      if (t < 5) {
+        dTileAt(g, T.GRASS, W * 0.12, H * 0.45, s); dTileAt(g, T.GRASS, W * 0.4, H * 0.45, s); dTileAt(g, T.GRASS, W * 0.68, H * 0.45, s);
+        dBuilding(g, T.PAVILION, W * 0.12, H * 0.45 - 2, s);
+        dBuilding(g, T.THEATER, W * 0.4, H * 0.45 - 2, s);
+        dBuilding(g, T.ARENA, W * 0.68, H * 0.45 - 2, s);
+        g.fillStyle = "#8a93a8"; g.font = "10px sans-serif";
+        g.fillText("+12", W * 0.15, H * 0.36); g.fillText("+18", W * 0.43, H * 0.36); g.fillText("+20", W * 0.71, H * 0.36);
+      } else {
+        for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+          const tt = (r === 1 && c === 1) ? T.PARK_GATE : T.PIER;
+          dTileAt(g, tt, W * 0.12 + c * s, H * 0.4 + r * s, s);
+        }
+        dBuilding(g, T.FERRIS, W * 0.12, H * 0.4 - 2, s);
+        if (t > 7) dBuilding(g, T.CAROUSEL, W * 0.12 + s * 2, H * 0.4 - 2, s);
+        if (t > 9.5) dBuilding(g, T.COASTER, W * 0.12 + s, H * 0.4 + s * 2, s);
+        dMan(g, W * 0.12 + s * 3.4, H * 0.4 + s - s * 0.55, s * 0.9, { key: t % 1 < 0.5 ? "drink2" : "drink1" });
+        g.fillStyle = "#e8d9a0"; g.font = "11px sans-serif"; g.fillText("游乐园（水上浮台）", W * 0.12, H * 0.3);
+        dBar(g, W * 0.6, H * 0.62, W * 0.3, 10, Math.min(1, 0.4 + t * 0.03), "#e8c15a", "心情（余韵期衰减 ×0.35）");
+      }
+    },
+  },
+];
+
+// ---- 播放器状态与驱动 ----
+const DEMO_DONE = new Set();      // 已看完的主题 id（列表打勾，内存态）
+let demoState = null;             // { topic, t, speed, done, cv, g }
+
+function demoOpenList() {
+  const listEl = document.getElementById("demo-list");
+  const stageEl = document.getElementById("demo-stage");
+  if (!listEl) return;
+  stageEl.classList.add("hidden");
+  listEl.classList.remove("hidden");
+  listEl.innerHTML = DEMO_TOPICS.map(tp =>
+    `<div class="demo-item" data-demo="${tp.id}">` +
+    `<span class="di-name">${DEMO_DONE.has(tp.id) ? "✓ " : ""}${tp.name}</span>` +
+    `<span class="di-desc">${tp.desc}</span></div>`).join("");
+}
+
+function demoStart(id) {
+  const tp = DEMO_TOPICS.find(k => k.id === id);
+  if (!tp) return;
+  demoState = { topic: tp, t: 0, speed: 1, done: false };
+  const cv = document.getElementById("demo-cv");
+  const g = cv.getContext("2d");
+  g.imageSmoothingEnabled = false;
+  demoState.cv = cv; demoState.g = g;
+  document.getElementById("demo-list").classList.add("hidden");
+  document.getElementById("demo-stage").classList.remove("hidden");
+  document.getElementById("demo-caption").classList.remove("done");
+  document.getElementById("demo-speed").textContent = "速度 1×";
+}
+
+// 主循环每帧调用（realDt 真实秒；主世界此时已被暂停）
+function demoTick(realDt) {
+  if (!demoState) return;
+  const d = demoState;
+  if (!d.done) d.t += realDt * d.speed;
+  const { g, cv, topic } = d;
+  const W = cv.width, H = cv.height;
+  g.fillStyle = "#0a0e16"; g.fillRect(0, 0, W, H);
+  topic.draw(g, W, H, Math.min(d.t, topic.dur));
+  // 步骤文案：取 t 之前最近的 step
+  const capEl = document.getElementById("demo-caption");
+  if (d.done) {
+    capEl.textContent = "✓ 当前机制演示完毕（点击左侧「■ 返回列表」继续看其他机制）";
+    capEl.classList.add("done");
+  } else {
+    let text = topic.steps[0].text;
+    for (const st of topic.steps) if (d.t >= st.t) text = st.text;
+    capEl.textContent = text;
+  }
+  document.getElementById("demo-prog").textContent =
+    Math.min(100, Math.round(d.t / topic.dur * 100)) + "%";
+}
+
 "use strict";
 // ============ 主入口：主循环 / 相机输入 / UI ============
 
@@ -7512,6 +8063,13 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     updateInfoPanel(realDt);
     updateRoster(realDt);
     updateActivity(realDt);
+    // 死亡广播 8 秒自动收起（真实秒，与倍速无关）
+    if (deathBcd > 0) {
+      deathBcd -= realDt;
+      if (deathBcd <= 0) { const b = el("death-broadcast"); if (b) b.classList.add("hidden"); }
+    }
+    // 机制演示播放（弹窗开着时逐帧驱动；主世界此时处于暂停态）
+    if (demoState && !el("demo-modal").classList.contains("hidden")) demoTick(realDt);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -7565,6 +8123,32 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     }
   }
   hud.build.textContent = BUILD_ID;
+
+  // ---- 死亡广播（v0.5.9）：被跟随的小人死亡 → 全屏横幅昭告姓名/死因/地点/时间，8 秒自动收起 ----
+  let deathBcd = 0;
+  function showDeathBroadcast(a) {
+    const box = el("death-broadcast");
+    if (!box) return;
+    const totalDays = Math.floor(world.time / SIM.DAY_LEN);
+    const tod = world.timeOfDay;
+    const hh = String(Math.floor(tod * 24)).padStart(2, "0");
+    const mm = String(Math.floor((tod * 24 % 1) * 60)).padStart(2, "0");
+    let place = "荒野";
+    for (const o of world.islands) {
+      if (o.name && Math.hypot(o.x - a.x, o.y - a.y) <= o.r + 1) { place = o.name + "岛"; break; }
+    }
+    const s = settleOf(a.x, a.y);
+    if (s) place = s.name;
+    box.innerHTML = `<div class="db-title">讣 告</div>` +
+      `<div class="db-name">${a.name}</div>` +
+      `<div class="db-line">${a.deathReason || "与世长辞"}（享年 ${Math.floor(a.age)} 岁）</div>` +
+      `<div class="db-line">卒于 ${place} · 第${Math.floor(totalDays / SIM.YEAR_DAYS) + 1}年第${totalDays % SIM.YEAR_DAYS + 1}月 ${hh}:${mm}</div>` +
+      `<div class="db-hint">—— 点击任意处致哀 ——</div>`;
+    box.classList.remove("hidden");
+    deathBcd = 8;
+  }
+  const deathBox = el("death-broadcast");
+  if (deathBox) deathBox.addEventListener("click", () => { deathBox.classList.add("hidden"); deathBcd = 0; });
 
   // ---- 点击拾取与信息面板 ----
   const infoPanel = el("info-panel"), infoBody = el("info-body"), infoClose = el("info-close");
@@ -7761,27 +8345,39 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
       }
     }
     const carry = hauling.length
-      ? `<br>背着：${hauling.map(h => (ITEM_VIEW[h.item] || ["", "物品"])[1] + "×" + h.n).join("、")}（回仓入库中）`
+      ? `<div class="ip-line">背着：${hauling.map(h => (ITEM_VIEW[h.item] || ["", "物品"])[1] + "×" + h.n).join("、")}<span class="ip-tag">（回仓入库中）</span></div>`
       : "";
-    return `职业：${JOBS_CN[a.job] || a.job}<br>` +
-      `状态：${a.sick ? "生病了" : (STATE_CN[a.state] || a.state)}${a.task ? "（" + TASK_CN[a.task.type] + "）" : ""}${a.drunkT > 0 ? "（醉醺醺）" : ""}${a.coffeeT > 0 ? "（咖啡提神）" : ""}${a.depressed ? "（抑郁）" : ""}${(a.cheerT || 0) > 0 ? "（尽兴而归）" : ""}` +
-      // 搬运动物标注：rescuing 指向被困动物且 carriedBy 是自己时正在搬运（物种名查不到则兜底泛称）
-      (a.rescuing && a.rescuing.carriedBy === a ? (CREATURE_META[a.rescuing.type] ? "（搬运中：移动" + CREATURE_META[a.rescuing.type].name + "）" : "（搬运动物中）") : "") +
-      `<br>` +
-      `年龄：${Math.floor(a.age)} 岁 · ${ageTier(a.age, "human")}<br>` +
-      `性别：${a.sex === "f" ? "女" : "男"}<br>` +
-      ((a.father || a.mother) ? `父母：${[a.father, a.mother].filter(Boolean).join(" · ")}<br>` : "") +
-      `健康：${healthTier(a)}<br>` +
-      `饱食：${hungerTier(a.hunger)}<div class="ip-bar"><div style="width:${a.hunger}%;background:${foodC}"></div></div>` +
-      // 渴值条：thirst 未接入（undefined/null）时整行不显示，避免出现 NaN
-      (a.thirst == null ? "" : `渴值：${thirstTier(a.thirst)}<div class="ip-bar"><div style="width:${a.thirst}%;background:${thirstC}"></div></div>`) +
-      `精力：${energyTier(a.energy)}<div class="ip-bar"><div style="width:${a.energy}%;background:${enC}"></div></div>` +
-      // 心情条（v0.5.0）：mood 未接入时整行不显示（falsy 容错，与渴值条同款）
-      (a.mood == null ? "" : `心情：${moodTier(a.mood)}<div class="ip-bar"><div style="width:${a.mood}%;background:${moodC}"></div></div>`) +
-      `探索欲：${adventureTier(a.adventure)}<br>` +
-      `勤劳：${diligenceTier(a.diligence)}<br>` +
-      `喜好：${HOBBY_CN[a.hobby] || "随遇而安"}<br>` +
-      `住所：${home}${carry}<br>` +
+    // 状态行（合并：生病/行动/任务/醉/咖啡/抑郁/尽兴/搬运 全部收进一行小标签）
+    const tags = [
+      a.sick ? "生病了" : (STATE_CN[a.state] || a.state),
+      a.task ? TASK_CN[a.task.type] : "",
+      a.drunkT > 0 ? "醉醺醺" : "",
+      a.coffeeT > 0 ? "咖啡提神" : "",
+      a.depressed ? "抑郁" : "",
+      (a.cheerT || 0) > 0 ? "尽兴而归" : "",
+      a.rescuing && a.rescuing.carriedBy === a ? (CREATURE_META[a.rescuing.type] ? "搬运" + CREATURE_META[a.rescuing.type].name : "搬运动物") : "",
+    ].filter(Boolean);
+    // 四维状态条（v0.5.2 简化：2×2 紧凑网格，一行顶四行）；mood/thirst 未接入时 falsy 容错隐藏
+    const bar = (label, val, color) =>
+      `<div class="ip-b"><i>${label}</i><div class="ip-bar"><div style="width:${Math.max(0, Math.min(100, val))}%;background:${color}"></div></div></div>`;
+    const bars = `<div class="ip-bars">` +
+      bar("饱食", a.hunger, foodC) +
+      (a.thirst == null ? "" : bar("渴值", a.thirst, thirstC)) +
+      bar("精力", a.energy, enC) +
+      (a.mood == null ? "" : bar("心情", a.mood, moodC)) +
+      `</div>`;
+    // 性格合并行：勤劳 · 喜好（探索欲档并入喜好语义——向往远方即探索欲高的直观表达）
+    const traits = [diligenceTier(a.diligence), HOBBY_CN[a.hobby] || "随遇而安"].join(" · ");
+    const parents = (a.father || a.mother)
+      ? `<div class="ip-line ip-tag">父母：${[a.father, a.mother].filter(Boolean).join(" · ")}</div>` : "";
+    return `<div class="ip-title">${a.name}<span class="ip-sub">${a.sex === "f" ? "女" : "男"} · ${Math.floor(a.age)} 岁 · ${JOBS_CN[a.job] || a.job}</span></div>` +
+      `<div class="ip-line">状态：<b>${tags.join(" · ")}</b></div>` +
+      bars +
+      `<div class="ip-sec">个 性</div>` +
+      `<div class="ip-line">${traits}</div>` +
+      `<div class="ip-line">住所：<b>${home}</b></div>` +
+      parents +
+      carry +
       packGridHtml(a);
   }
 
@@ -7823,7 +8419,11 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     const target = selectedAgent || selectedCreature;
     if (selectedAgent) {
       const a = selectedAgent;
-      if (a.dead) { infoPanel.classList.add("hidden"); selectedAgent = null; followMode = false; syncFollowBtn(); return; }
+      if (a.dead) {
+        // 被跟随/选中的居民去世：昭告全境（v0.5.9 死亡广播），再收起面板与跟随
+        if (followMode) showDeathBroadcast(a);
+        infoPanel.classList.add("hidden"); selectedAgent = null; followMode = false; syncFollowBtn(); return;
+      }
       const s = TILE_PX * camera.zoom;
       const px = CW / 2 + (a.x - camera.x) * s;
       const py = CH / 2 + (a.y - camera.y) * s;
@@ -7983,6 +8583,7 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
   const activityBody = el("activity-body");
   let actCd = 0;
   const ACT_CN = { voyage: "航海", drunk: "喝酒", coffee: "喝咖啡", water: "喝水", fish: "垂钓", rescue: "搬运动物", shepherd: "牧羊", brew: "酿造", explore: "探索", play: "游玩", sad: "抑郁" };
+  const actRot = {};   // 各活动行的轮播游标（v0.5.7：多人同干一事时轮换展示，不让一个人霸榜）
   // 活动判据汇总：一人可同属多项；只统计存活居民
   function collectActivities() {
     const map = {};
@@ -8013,8 +8614,13 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     for (const k in ACT_CN) {
       const list = map[k];
       const n = list.length;
-      // 行格式：名称 ×人数·最近参与者名；0 人灰显 ×0（点击无效）
-      html += `<div class="act-row${n ? "" : " zero"}" data-act="${k}">${ACT_CN[k]}<span class="cnt"> ×${n}</span>${n ? "·" + list[n - 1].name : ""}</div>`;
+      // 行格式：名称 ×人数·参与者名（v0.5.7 轮播：每次刷新换下一个人，点击仍随机定位）
+      let who = "";
+      if (n) {
+        actRot[k] = ((actRot[k] || 0) + 1) % n;
+        who = "·" + list[actRot[k]].name;
+      }
+      html += `<div class="act-row${n ? "" : " zero"}" data-act="${k}">${ACT_CN[k]}<span class="cnt"> ×${n}</span>${who}</div>`;
     }
     activityBody.innerHTML = html;
   }
@@ -8045,6 +8651,71 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     syncTitle();
     tEl.addEventListener("click", () => { collapsed = !collapsed; syncTitle(); });
   }
+
+  // ---- 教程与机制演示弹窗（v0.6.0）：打开演示时暂停主世界，关闭恢复 ----
+  let demoSavedSpeed = null;
+  function openModal(id) {
+    const m = el(id);
+    if (!m) return;
+    m.classList.remove("hidden");
+    if (id === "demo-modal") {
+      demoSavedSpeed = speed;
+      if (speed !== 0) setSpeed(0);       // 演示时暂停主世界进程
+      demoOpenList();
+      sfx.play("click");
+    }
+  }
+  function closeModal(id) {
+    const m = el(id);
+    if (!m) return;
+    m.classList.add("hidden");
+    if (id === "demo-modal") {
+      demoState = null;                    // 停止演示播放
+      if (demoSavedSpeed !== null) { setSpeed(demoSavedSpeed); demoSavedSpeed = null; }
+    }
+  }
+  const helpBtn = el("help-btn");
+  if (helpBtn) helpBtn.addEventListener("click", () => {
+    sfx.play("click");
+    const m = el("help-modal");
+    if (m && !m.classList.contains("hidden")) closeModal("help-modal"); else openModal("help-modal");
+  });
+  const demoBtn = el("demo-btn");
+  if (demoBtn) demoBtn.addEventListener("click", () => {
+    const m = el("demo-modal");
+    if (m && !m.classList.contains("hidden")) closeModal("demo-modal"); else openModal("demo-modal");
+  });
+  // 弹窗关闭按钮（data-close 委托）+ 点遮罩关闭
+  document.querySelectorAll(".modal").forEach(m => {
+    m.addEventListener("click", e => {
+      if (e.target === m) closeModal(m.id);
+      const c = e.target.closest(".modal-close");
+      if (c) closeModal(c.dataset.close);
+    });
+  });
+  // 演示列表点击 → 开始播放；倍速按钮循环；返回列表
+  const demoListEl = el("demo-list");
+  if (demoListEl) demoListEl.addEventListener("click", e => {
+    const item = e.target.closest("[data-demo]");
+    if (!item) return;
+    sfx.play("click");
+    demoStart(item.dataset.demo);
+  });
+  const demoSpeedBtn = el("demo-speed");
+  if (demoSpeedBtn) demoSpeedBtn.addEventListener("click", () => {
+    if (!demoState) return;
+    const seq = [0.5, 1, 2, 4];
+    demoState.speed = seq[(seq.indexOf(demoState.speed) + 1) % seq.length];
+    demoSpeedBtn.textContent = "速度 " + demoState.speed + "×";
+    sfx.play("click");
+  });
+  const demoStopBtn = el("demo-stop");
+  if (demoStopBtn) demoStopBtn.addEventListener("click", () => {
+    if (demoState) DEMO_DONE.add(demoState.topic.id);
+    demoState = null;
+    demoOpenList();
+    sfx.play("click");
+  });
 
   // ---- dev 热刷新：仅 http(s) 下生效，file:// 双击打开时静默跳过 ----
   if (location.protocol !== "file:") {

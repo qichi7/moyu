@@ -17,10 +17,10 @@ function makeElement(id) {
     style: {}, dataset: {},
     classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
     addEventListener() {},
+    getContext: () => ctxStub,   // 通用画布语义（demo-cv 等弹窗内 canvas；主 cv 单独覆盖尺寸）
   };
   if (id === "cv") {
     e.width = 0; e.height = 0;
-    e.getContext = () => ctxStub;
   }
   return e;
 }
@@ -50,6 +50,8 @@ const docStub = {
     }
     return elements[key];
   },
+  // 弹窗委托绑定用（v0.6.0：main.js 对 .modal 做事件委托；stub 返回空集即可）
+  querySelectorAll() { return []; },
 };
 const rafCbs = [];
 let now = 0;
@@ -111,5 +113,44 @@ assert(state.hasNoise, "simInit 已执行（噪声/世界已初始化）");
 assert(state.houses >= 4, "初始粮仓与房屋已落成");
 assert(state.agentN >= 12, "初始小人已出生（≥12）");
 assert(state.time > 0, "模拟时间已开始流动（world.time > 0）");
+
+// ---- 机制演示契约（v0.6.0）：主题数据完整 + 全部绘制回调在 stub ctx 上无引用错误 ----
+{
+  const fakeSpr = { width: 16, height: 16 };
+  entryCtx.tileSprite = () => fakeSpr;
+  entryCtx.waterSprite = () => fakeSpr;
+  entryCtx.agentPantsSprite = () => fakeSpr;
+  entryCtx.agentBodySprite = () => fakeSpr;
+  entryCtx.agentHeadSprite = () => fakeSpr;
+  entryCtx.creatureSprite = () => fakeSpr;
+  entryCtx.buildingSprite = () => fakeSpr;
+  entryCtx.shipSprite = () => fakeSpr;
+  const demoRes = vm.runInContext(`
+    let ok = true;
+    for (const tp of DEMO_TOPICS) {
+      if (!tp.id || !tp.name || !tp.draw || !(tp.dur > 0)) ok = false;
+      let last = -1;
+      for (const st of tp.steps) { if (!(st.t > last) || !st.text) ok = false; last = st.t; }
+      if (tp.steps[tp.steps.length - 1].t > tp.dur) ok = false;
+    }
+    const nTopics = DEMO_TOPICS.length;
+    let drew = false, allOk = true, err = "";
+    try {
+      demoStart("mood");
+      demoState.cv = { width: 360, height: 240 };
+      demoState.g = new Proxy({}, { get: (t, k) => (k in t ? t[k] : () => {}), set: () => true });
+      for (let i = 0; i < 20; i++) demoTick(0.05);
+      drew = true;
+      for (const tp of DEMO_TOPICS) {
+        demoState.topic = tp; demoState.t = tp.dur * 0.9; demoState.done = false;
+        for (let i = 0; i < 30; i++) demoTick(0.05);
+      }
+    } catch (e) { allOk = false; err = e.message; }
+    ({ ok, nTopics, drew, allOk, err });
+  `, entryCtx);
+  assert(demoRes.ok && demoRes.nTopics >= 10, "demo 契约：" + demoRes.nTopics + " 个主题数据/时间轴/时长完整");
+  assert(demoRes.drew, "demo 播放：绘制回调驱动正常（stub ctx）");
+  assert(demoRes.allOk, "demo 播放：全部主题全时段绘制扫描无异常" + (demoRes.err ? "（" + demoRes.err + "）" : ""));
+}
 
 process.exitCode = failed ? 1 : 0;

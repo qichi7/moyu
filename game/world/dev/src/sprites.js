@@ -348,6 +348,17 @@ function bakeTileArt(tile, v, bright) {
       rectF(g, 11, 2, 2, 1, shade("#9a7040", bright));
       return cv;
     }
+    case T.GATE: {
+      // 牧场门（v0.5.3）：单侧开阖的木门——横栏断开 + 门轴柱 + 微开缝隙
+      const { cv, g } = groundCopy(v, bright, "#5e8c4f", "#4d7842", "#6f9c5e");
+      rectF(g, 1, 2, 2, 12, shade("#5c3d1e", bright));     // 门轴柱
+      rectF(g, 1, 2, 2, 1, shade("#9a7040", bright));
+      rectF(g, 3, 4, 6, 2, shade("#8a6236", bright));      // 上半扇门（微开）
+      rectF(g, 3, 10, 5, 2, shade("#8a6236", bright));     // 下半扇门（错位留缝）
+      rectF(g, 8, 4, 1, 8, shade("#5c3d1e", bright));      // 门闩沿
+      pxF(g, 12, 7, shade("#9a7040", bright)); pxF(g, 13, 8, shade("#9a7040", bright));   // 路径小径点
+      return cv;
+    }
     case T.PASTURE: {
       const { cv, g } = groundCopy(v, bright, "#a89a62", "#8f7f4e", "#b8aa72");
       rectF(g, 0, 0, 16, 1, shade("#7a6a3a", bright));     // 圈地边框

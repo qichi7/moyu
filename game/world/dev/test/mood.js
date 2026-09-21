@@ -38,6 +38,7 @@ function zeroDrinks() {
   for (const s of world.settlements) { const st = ensureStock(s); st.beer = 0; st.juice = 0; st.coffee = 0; }
 }
 // ---- 工具：长循环中冻结全员生命需求与心情下限（隔离单一变量，防饥荒/抑郁连锁死亡移动索引）----
+const takeAlive = i => (agents[i] && !agents[i].dead ? agents[i] : agents.find(a => !a.dead));
 function topUp(except) {
   for (const a of agents) {
     if (a.hunger < 60) a.hunger = 60;
@@ -260,6 +261,60 @@ assert(bad === 0, "稳定性：2000s 采样 mood 无 NaN、值域 [0,100]");
 
 // ===== 20. 抑郁在长跑中真实发生（机制活性：非摆设）=====
 assert(world.logs.some(l => l.text.includes("抑郁")), "机制活性：长跑中出现过抑郁纪事");
+
+// ===== 21. 迁居机制（长期挨饿 → 搬到食物充裕的街区，v0.6.0 看护补齐）=====
+const mA = takeAlive(6);
+freeze(mA);
+mA.hunger = 5; mA.starveT = 39;   // 贴线：一步即越过 40s 饥饿阈值
+let migrated = false;
+for (let i = 0; i < 60 && !migrated; i++) {
+  topUp();
+  mA.pack = new Array(10).fill(null);   // 清背包：口粮自用会把 hunger 拉回，starveT 永远攒不满
+  mA.hunger = 5;   // 每轮压回饥饿线（starveT 只在循环外预置一次，靠 update 自然累计过 40）
+  simUpdate(STEP);
+  migrated = world.logs.some(l => l.text.includes("饥民迁居"));
+}
+assert(migrated, "迁居机制：hunger<10 持续 40s → 饥民迁居纪事");
+
+// ===== 22. 意外死亡三分支（v0.6.0 看护补齐：概率 config 化 → 置 1 强制触发）=====
+const savedAcc = SIM.ACCIDENT;
+SIM.ACCIDENT = { cliff: 1, shark: 1, choke: 1 };
+// ① 崖边失足：小人站悬崖邻格（Math.round(x+0.4)=x，避开 half-up 偏移——死锁 #20 家族）
+const accA = takeAlive(7);
+freeze(accA); accA.accCd = 0.01;
+const accSpot = findSpot(Math.round(accA.x), Math.round(accA.y), 1, 8, T.GRASS, [T.HOUSE, T.FARM]);
+if (!accSpot) { assert(true, "意外死亡①：无构造点（跳过）"); } else {
+  setTile(accSpot.x + 1, accSpot.y, T.CLIFF);
+  accA.x = accSpot.x + 0.4; accA.y = accSpot.y + 0.4;   // x/y 都用 .4 偏移：half-up 取整会错行（死锁 #20 家族）
+  let cliffDead = null;
+  for (let i = 0; i < 30 && !cliffDead; i++) { simUpdate(STEP); if (accA.dead) cliffDead = accA.deathReason; }
+  assert(!!cliffDead && cliffDead.includes("坠落"), "意外死亡①：崖边失足坠落（cliff=1 强制）");
+}
+// ② 浅滩遇鲨：小人站水边可走格，鲨鱼放旁边水域
+const accB = takeAlive(8);
+freeze(accB); accB.accCd = 0.01;
+const sharkW = (function () {
+  for (let y = -30; y <= 30; y++) for (let x = -30; x <= 30; x++) {
+    if (tileAt(x, y) !== T.WATER && tileAt(x, y) !== T.DEEP) continue;
+    const nb = neighborsOf(x, y).find(p => walkable(p.x, p.y));
+    if (nb) return { w: { x, y }, nb };
+  }
+  return null;
+})();
+if (!sharkW) { assert(true, "意外死亡②：无水域（跳过）"); } else {
+  spawnCreature(sharkW.w.x, sharkW.w.y, "shark");
+  accB.x = sharkW.nb.x + 0.5; accB.y = sharkW.nb.y + 0.5;
+  let sharkDead = null;
+  for (let i = 0; i < 30 && !sharkDead; i++) { simUpdate(STEP); if (accB.dead) sharkDead = accB.deathReason; }
+  assert(!!sharkDead && sharkDead.includes("鲨鱼"), "意外死亡②：浅滩被鲨鱼拖走（shark=1 强制）");
+}
+// ③ 进食噎住：eat 态一步即中
+const accC = takeAlive(9);
+freeze(accC); accC.accCd = 0.01; accC.state = "eat";
+let chokeDead = null;
+for (let i = 0; i < 30 && !chokeDead; i++) { simUpdate(STEP); if (accC.dead) chokeDead = accC.deathReason; }
+assert(!!chokeDead && chokeDead.includes("噎"), "意外死亡③：进食噎住（choke=1 强制）");
+SIM.ACCIDENT = savedAcc;   // 还原概率（后续长跑保持真实节奏）
 
 console.log("---- mood.js 断言结束 ----");
 `;

@@ -128,8 +128,58 @@
   #activity-panel.collapsed #activity-body { display: none; }
 
   #info-panel .ip-title { color: #e8d9a0; font-weight: 600; margin-bottom: 2px; }
+  #info-panel .ip-title .ip-sub { color: #8a93a8; font-weight: 400; font-size: 10px; margin-left: 5px; }
+  #info-panel .ip-line { color: #aeb6c6; margin: 2px 0; line-height: 1.45; }
+  #info-panel .ip-line b { color: #d8dee9; font-weight: 500; }
+  #info-panel .ip-tag { color: #8a93a8; }
+  #info-panel .ip-sec { color: #5f6b80; font-size: 9px; letter-spacing: 2px; margin: 6px 0 3px; border-top: 1px solid #232c40; padding-top: 5px; }
+  /* 四维状态条：2×2 紧凑网格（标签在左、条在右），一屏看完生存状态 */
+  #info-panel .ip-bars { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin: 4px 0; }
+  #info-panel .ip-b { display: flex; align-items: center; gap: 5px; min-width: 0; }
+  #info-panel .ip-b i { font-style: normal; font-size: 10px; color: #8a93a8; flex: 0 0 auto; width: 24px; text-align: right; }
+  #info-panel .ip-b .ip-bar { flex: 1; margin: 0; min-width: 0; }
   #info-panel .ip-bar { height: 5px; background: #1c2333; border-radius: 3px; overflow: hidden; margin: 3px 0 7px; }
   #info-panel .ip-bar > div { height: 100%; border-radius: 3px; }
+  /* 死亡广播（v0.5.9）：被跟随的小人死亡时全屏横幅昭告——姓名/死因/地点/时间，点击致哀 */
+  #death-broadcast {
+    position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 60;
+    background: rgba(26,13,15,0.94); border: 1px solid #7a3a3a; border-radius: 8px;
+    padding: 14px 28px; text-align: center; box-shadow: 0 4px 24px rgba(0,0,0,0.55);
+    cursor: pointer; animation: db-in 0.4s ease; min-width: 240px;
+  }
+  #death-broadcast.hidden { display: none; }
+  #death-broadcast .db-title { color: #c96a6a; font-size: 12px; letter-spacing: 8px; margin-bottom: 4px; }
+  #death-broadcast .db-name { color: #f0e6d0; font-size: 18px; font-weight: 600; margin: 2px 0 6px; }
+  #death-broadcast .db-line { color: #b8a89a; font-size: 11px; margin: 2px 0; }
+  #death-broadcast .db-hint { color: #5f5a58; font-size: 9px; margin-top: 6px; }
+  @keyframes db-in { from { opacity: 0; transform: translateX(-50%) translateY(-8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+  /* 弹窗（v0.6.0：教程 / 机制演示） */
+  .modal { position: fixed; inset: 0; z-index: 70; background: rgba(4,6,12,0.72); display: flex; align-items: center; justify-content: center; }
+  .modal.hidden { display: none; }
+  .modal-box { background: #121826; border: 1px solid #2a3448; border-radius: 10px; width: min(560px, 92vw); max-height: 84vh; overflow: auto; box-shadow: 0 8px 40px rgba(0,0,0,0.6); }
+  .demo-box { width: min(420px, 94vw); }
+  .modal-head { position: sticky; top: 0; background: #121826; color: #e8d9a0; font-weight: 600; padding: 10px 14px; border-bottom: 1px solid #232c40; display: flex; justify-content: space-between; align-items: center; }
+  .modal-close { cursor: pointer; color: #6b7688; font-size: 18px; line-height: 1; padding: 0 4px; }
+  .modal-close:hover { color: #fff; }
+  .modal-body { padding: 10px 14px 14px; color: #aeb6c6; font-size: 12px; }
+  .help-sec { color: #8a93a8; font-size: 10px; letter-spacing: 2px; margin: 10px 0 4px; }
+  .help-sec:first-child { margin-top: 0; }
+  .help-grid { display: grid; grid-template-columns: 72px 1fr; gap: 5px 10px; }
+  .help-grid span:nth-child(odd) { color: #d8dee9; }
+  /* 机制演示列表与舞台 */
+  .demo-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; margin: 4px 0; background: #0e1420; border: 1px solid #232c40; border-radius: 6px; cursor: pointer; }
+  .demo-item:hover { border-color: #3d4c68; background: #131c2c; }
+  .demo-item .di-name { color: #d8dee9; }
+  .demo-item .di-done { color: #6fae4e; font-size: 11px; margin-left: 8px; }
+  .demo-item .di-desc { color: #6b7688; font-size: 10px; margin-left: 8px; flex: 1; text-align: right; }
+  #demo-stage canvas { width: 100%; background: #0a0e16; border: 1px solid #232c40; border-radius: 6px; image-rendering: pixelated; }
+  #demo-caption { min-height: 34px; margin: 8px 0 4px; color: #e8d9a0; line-height: 1.5; }
+  #demo-caption.done { color: #6fae4e; }
+  #demo-ctl { display: flex; gap: 8px; align-items: center; }
+  #demo-ctl button { background: #161c2a; border: 1px solid #2a3448; color: #aeb6c6; border-radius: 4px; padding: 3px 10px; cursor: pointer; font-size: 11px; }
+  #demo-ctl button:hover { border-color: #3d4c68; color: #fff; }
+  #demo-prog { margin-left: auto; color: #5f6b80; font-size: 10px; }
   #info-close {
     position: absolute; top: 2px; right: 7px; background: none; border: none;
     color: #6b7688; cursor: pointer; font-size: 15px; padding: 0;
@@ -195,6 +245,58 @@
       <button id="s100" data-v="100">100×</button>
       <button id="s1000" data-v="1000">1000×</button>
       <button id="sfx-toggle">音效:开</button>
+      <button id="help-btn" title="玩法教程">? 教程</button>
+      <button id="demo-btn" title="机制演示（会暂停主世界）">▶ 演示</button>
+    </div>
+  </div>
+</div>
+
+<!-- 玩法教程弹窗（v0.6.0）：所有可操作功能的静态速查 -->
+<div id="help-modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">玩法教程<span class="modal-close" data-close="help-modal">×</span></div>
+    <div class="modal-body">
+      <div class="help-sec">基础操作</div>
+      <div class="help-grid">
+        <span>平移视角</span><span>按住鼠标 / 单指拖拽</span>
+        <span>缩放</span><span>滚轮（鼠标锚）· 双指捏合（触屏）· 顶栏滑轴 0.1×~6×</span>
+        <span>回原点</span><span>顶栏「回原点」按钮——平滑飞回主岛（四角定位的家）</span>
+        <span>暂停 / 变速</span><span>空格暂停；1/2/3/4/5 键 = 1×/2×/10×/100×/1000×；顶栏同款按钮</span>
+        <span>查看一切</span><span>点击小人 / 动物 / 地块：信息框显示状态、四维条、背包、地块归属与进度</span>
+        <span>视角跟随</span><span>信息框「跟随视角」按钮或 F 键——相机锁定选中生物（v0.5.9：被跟随者去世会全屏讣告）</span>
+      </div>
+      <div class="help-sec">面板与定位</div>
+      <div class="help-grid">
+        <span>居民名册</span><span>左栏按地区分组：点名字定位 + 对话框；点 ▸/▾ 折叠；点 ⌖ 飞往地区中心</span>
+        <span>定位岛屿</span><span>名册「已命名岛屿 / 未知岛屿」条目或 ⌖ 按钮直接飞到该岛</span>
+        <span>世界动态</span><span>右栏实时活动目录（航海/喝酒/游玩/抑郁…），点行随机定位一名参与者并跟随；多人同做一事会轮播</span>
+        <span>世界纪事</span><span>左下事件流；三块面板标题都可折叠</span>
+      </div>
+      <div class="help-sec">进阶</div>
+      <div class="help-grid">
+        <span>机制演示</span><span>顶栏「▶ 演示」：逐机制动画讲解（会暂停主世界），可倍速播放</span>
+        <span>音效</span><span>顶栏「音效:开/关」；首次点击页面后生效（浏览器策略）</span>
+        <span>热刷新</span><span>http:// 打开时改动文件自动刷新；file:// 双击打开无此限制</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 机制演示弹窗（v0.6.0）：主世界暂停，脚本化逐机制演示，可倍速 -->
+<div id="demo-modal" class="modal hidden">
+  <div class="modal-box demo-box">
+    <div class="modal-head">机制演示<span class="modal-close" data-close="demo-modal">×</span></div>
+    <div class="modal-body">
+      <div id="demo-list"></div>
+      <div id="demo-stage" class="hidden">
+        <canvas id="demo-cv" width="360" height="240"></canvas>
+        <div id="demo-caption"></div>
+        <div id="demo-ctl">
+          <button id="demo-speed">速度 1×</button>
+          <button id="demo-stop">■ 返回列表</button>
+          <span id="demo-prog"></span>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -216,6 +318,7 @@
   <div id="activity-body"></div>
 </div>
 
+<div id="death-broadcast" class="hidden" title="点击致哀"></div>
 <div id="info-panel" class="hidden">
   <button id="info-close">×</button>
   <button id="follow-btn">跟随视角</button>

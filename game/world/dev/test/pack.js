@@ -380,14 +380,14 @@ assert(p1 > 0 && Math.abs(p2 / p1 - 1.2) < 0.05,
   "工具加成（doWork 进度制路径）：有锤/无锤固定 tick 进度比 ≈1.2（实测 " + (p2 / p1).toFixed(3) + "）");
 
 // ===== 33. 数值契约：config 集中调参位（含 v0.4.1 资源堆叠）=====
-assert(SIM.THIRST_DECAY === 0.7 &&
+assert(SIM.THIRST_DECAY === 0.35 &&
        SIM.DRINK_RESTORE.water === 100 && SIM.DRINK_RESTORE.juice === 100 &&
        SIM.DRINK_RESTORE.beer === 100 && SIM.DRINK_RESTORE.coffee === 100 &&
        SIM.PACK_RESTOCK_DIST === 15 && SIM.PACK_LOW === 35 && SIM.PACK_TOOL_BONUS === 1.2 &&
        SIM.PACK_STACK.food === 3 && SIM.PACK_STACK.axe === 1 &&
        SIM.PACK_STACK.wood === 3 && SIM.PACK_STACK.stone === 3 && SIM.PACK_STACK.sand === 3 &&
        SIM.PACK_RESTOCK.water === 2 && SIM.PACK_RESTORE.water === 65 && SIM.PACK_RESTORE.food === 50,
-  "config 数值契约：THIRST_DECAY 0.7 / DRINK_RESTORE 全 100 / PACK_* 就位（资源堆叠 wood/stone/sand=3）");
+  "config 数值契约：THIRST_DECAY 0.35（v0.5.4 减半）/ DRINK_RESTORE 全 100 / PACK_* 就位（资源堆叠 wood/stone/sand=3）");
 
 console.log("---- pack.js 断言结束 ----");
 `;

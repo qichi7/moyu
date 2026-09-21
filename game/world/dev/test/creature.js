@@ -73,10 +73,10 @@ for (let r = 4; r <= 10; r++) {   // 近圈：靠近聚落人群，救援响应�
   for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
     if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
     const x = world.store.x + dx, y = world.store.y + dy;
-    // 岛缘草地（4 邻至少 3 格 GRASS 且 10 格内有深海）：救援小人可达，放归岸线路径短不易跨海峡
+    // 岛缘草地（4 邻至少 3 格 GRASS 且紧邻深海 ≤3 格）：搬运路径极短，放归必然可达（不再依赖随机选点运气）
     const landN = neighborsOf(x, y).filter(p => tileAt(p.x, p.y) === T.GRASS).length;
     if (tileAt(x, y) === T.GRASS && walkable(x, y) && landN >= 3 &&
-        nearAny(x, y, [T.DEEP], 10) && !nearAny(x, y, [T.HOUSE, T.FARM, T.SITE], 2)) {
+        nearAny(x, y, [T.DEEP], 3) && !nearAny(x, y, [T.HOUSE, T.FARM, T.SITE], 2)) {
       beachSpot = { x, y };
       break outerC;
     }
@@ -282,6 +282,28 @@ if (!drySpot || nearAny(drySpot.x, drySpot.y, [T.WATER, T.DEEP], 5)) {
     dryFarm.waterCd = 0;
     for (let i = 0; i < 600; i++) simUpdate(STEP);
     assert(dryFarm.grow > 1, "场景K：通水后恢复生长（grow=" + dryFarm.grow.toFixed(2) + "）");
+  }
+}
+
+// ---- 场景 L：牧场门与水生圈养排除（v0.5.3）----
+simInit(42);
+const pasSpot = findSpot(world.store.x, world.store.y, 3, 10, T.GRASS, [T.HOUSE, T.FARM]);
+if (!pasSpot) { assert(true, "场景L：无构造点（跳过）"); } else {
+  // ① 牧场完工：南侧留一道可走的门（牲畜可外出自由活动）
+  tasksAdd({ type: "PASTURE", x: pasSpot.x, y: pasSpot.y, need: 1 });
+  const pt = tasks.list[tasks.list.length - 1];
+  pt.progress = pt.need;
+  tasksFinish(pt);
+  assert([[0,1],[-1,0],[1,0],[0,-1]].some(([dx,dy]) => tileAt(pasSpot.x+dx, pasSpot.y+dy) === T.GATE && walkable(pasSpot.x+dx, pasSpot.y+dy)),
+    "场景L：牧场环上留有可走的门（GATE，牲畜可外出）");
+  // ② 水生动物不会被立项圈进陆上牧场（渔场走水上路径 2d2）
+  world.pastures.push({ x: pasSpot.x, y: pasSpot.y });
+  const fishW = findSpot(pasSpot.x, pasSpot.y, 1, 8, T.WATER);
+  if (!fishW) { assert(true, "场景L：牧场旁无水域（②跳过）"); } else {
+    const fish2 = spawnCreature(fishW.x, fishW.y, "fish");
+    plannerTick();
+    assert(!tasks.list.some(t => t.type === "CAPTURE" && t.creature === fish2),
+      "场景L：水生动物不会被立项圈进陆上牧场（渔场另有路径）");
   }
 }
 `;

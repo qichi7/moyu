@@ -280,15 +280,23 @@ function tasksFinish(t, agent, was) {
     case "PASTURE": {
       setTile(t.x, t.y, T.PASTURE);
       // 自动圈地：牧场四周立起围栏，圈养的牲畜从此只能在栏内活动
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (!dx && !dy) continue;
-          const tt = tileAt(t.x + dx, t.y + dy);
-          if (tt === T.GRASS || tt === T.SAND) setTile(t.x + dx, t.y + dy, T.FENCE);
-        }
+      // v0.5.3：环上必留一道门（T.GATE 可走）——牲畜可以自己出门在附近溜达，不必全程圈死；
+      // 门优先取南侧正中，该格不可圈（水/建筑等）则取第一个可圈格，保证有环就有门
+      const ring = [];
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const tt = tileAt(t.x + dx, t.y + dy);
+        if (tt === T.GRASS || tt === T.SAND) ring.push([dx, dy]);
+      }
+      const gate = ring.find(([dx, dy]) => dx === 0 && dy === 1) ||
+                   ring.find(([dx, dy]) => dx === 0 || dy === 0) ||   // 门放在正交向（对角开门太怪）
+                   ring[0] || null;
+      for (const [dx, dy] of ring) {
+        const isGate = gate && dx === gate[0] && dy === gate[1];
+        setTile(t.x + dx, t.y + dy, isGate ? T.GATE : T.FENCE);
       }
       world.pastures.push({ x: t.x, y: t.y });
-      logMsg(`新的牧场建成了，围栏圈地，圈养的牲畜将定期供给奶食。`);
+      logMsg(`新的牧场建成了，围栏圈地留了道门——牲畜偶尔会自己出门溜达。`);
       break;
     }
     case "QUARRY": {

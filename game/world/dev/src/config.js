@@ -1,6 +1,6 @@
 "use strict";
 // ============ 全局配置 ============
-const BUILD_ID = "v0.5.0";
+const BUILD_ID = "v0.6.0";
 
 // tile 类型
 const T = {
@@ -12,6 +12,7 @@ const T = {
   BAMBOO: 25, MUSHROOM: 26, MOONBLOOM: 27,   // v0.5.0 新植物：竹林（快木材）/蘑菇（林地小粮）/月光花（夜光环）
   PAVILION: 28, THEATER: 29, ARENA: 30,      // v0.5.0 娱乐链：凉亭（era1）/戏台（era2）/斗兽场（era2）
   PARK_GATE: 31, FERRIS: 32, CAROUSEL: 33, COASTER: 34, PIER: 35,   // 游乐园：门楼/摩天轮/旋转木马/过山车/水上浮台
+  GATE: 36,                                // 牧场门（v0.5.3：围栏留门，牲畜可外出自由活动）
 };
 
 const TILE_META = {
@@ -51,6 +52,7 @@ const TILE_META = {
   [T.CAROUSEL]: { name: "旋转木马", color: "#d08aa0", walk: false, h: 0 },
   [T.COASTER]:  { name: "过山车", color: "#c07840", walk: false, h: 0 },
   [T.PIER]:     { name: "水上浮台", color: "#9a8468", walk: true, h: 0 },
+  [T.GATE]:     { name: "牧场门", color: "#7a5a2e", walk: true, h: 0 },
 };
 
 const WORLD_W = 240, WORLD_H = 180;   // 仅作语义参考：无限地图时代初始生成以主岛原点为中心（genWorld），无固定区域
@@ -61,7 +63,7 @@ const SIM = {
   NIGHT_END: 0.18,
   PLANNER_INTERVAL: 4,  // 规划器每 4 sim 秒跑一次
   AGENT_SPEED: 1.7,     // tile/秒 基准
-  HUNGER_DECAY: 1.1,    // hunger 每秒下降
+  HUNGER_DECAY: 0.55,   // hunger 每秒下降（v0.5.4：减半——生活节奏放缓）
   ENERGY_DECAY: 0.6,    // 醒着时 energy 每秒下降（0.9 时 100 能量只够往返 95 格，扩张区任务必过劳死）
   ENERGY_REGEN: 9,      // 睡觉时每秒恢复
   WORK_EFFORT: 1.3,     // 每个工人每秒任务进度
@@ -104,7 +106,7 @@ const SIM = {
   BOAT_FISH_YIELD: 2,         // 渔船每次起网渔获
   FISHING_INTERVAL: 10,       // 渔船起网周期（秒）
   // ---- 口渴与饮品 ----
-  THIRST_DECAY: 0.7,          // 口渴每秒下降（walk 实际 ≈0.84/s：直饮/城库饮水恢复 100 约撑 119s，路上另有背包水自用，避免高频喝水打断生产）
+  THIRST_DECAY: 0.35,         // 口渴每秒下降（v0.5.4：减半——walk 实际 ≈0.42/s，直饮一次可撑 ~240s）
   STATE_HUNGER: { idle: 1.0, walk: 1.15, run: 1.5, work: 1.45, sleep: 0.5 },  // 饥饿衰减按状态倍率（睡觉减半）
   STATE_ENERGY: { idle: 0.85, walk: 1.1, run: 1.6, work: 1.35 },              // 体力衰减按状态倍率（睡觉不衰减，走 ENERGY_REGEN 恢复）
   STATE_THIRST: { idle: 1.0, walk: 1.2, run: 1.5, work: 1.3, sleep: 0.55 },   // 口渴衰减按状态倍率
@@ -144,6 +146,8 @@ const SIM = {
   MOOD_RECOVER_TIME: 20,
   MOOD_SICK_TIME: 300,        // 抑郁累计此时长 → 郁结成疾病倒（sickSource="mood"，走不出则不治）
   JOY_CD: 60,                 // 找乐子失败冷却（城库无酒时防连帧重试）
+  // ---- 意外死亡（v0.6.0 config 化：每秒掷骰概率，测试可临时调 1 强制触发）----
+  ACCIDENT: { cliff: 1 / 20000, shark: 1 / 15000, choke: 1 / 6000 },
   // ---- 娱乐链与游乐园（v0.5.0）----
   ENT_POP_MIN: 6,             // 凉亭人口门槛（era≥1，每城一座）
   THEATER_POP_MIN: 10,        // 戏台/斗兽场人口门槛（era≥2，每城各一座）

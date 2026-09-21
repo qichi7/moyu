@@ -14,15 +14,29 @@ const _GIVEN_F = ["禾", "梅", "竹", "云", "岚", "星", "宁", "秋", "白",
 const _usedNames = new Set();
 function pickAgentName(sex, surname) {
   const pool = sex === "f" ? _GIVEN_F : _GIVEN_M;
-  for (let i = 0; i < 40; i++) {
-    // 随机姓槽：单姓×3 + 复姓 合并索引上抽一次（复姓占比约 9%，稀有感）；恒定消耗，保持随机流调用点与旧版一致
-    const si = randInt(0, _SURNAMES.length * 3 + _SURNAMES_CP.length - 1);
-    const sn = si < _SURNAMES.length * 3 ? _SURNAMES[si % _SURNAMES.length] : _SURNAMES_CP[si - _SURNAMES.length * 3];
-    const n = (surname || sn) + pool[randInt(0, pool.length - 1)] +
-              (rand() < 0.4 ? pool[randInt(0, pool.length - 1)] : "");
-    if (!_usedNames.has(n)) { _usedNames.add(n); return n; }
+  // 两轮尝试（40 + 400 次）：第二轮放开双字名概率并加大尝试量——姓氏传家（新生儿继承父/母姓）
+  // 时同名池会被同姓挤穿，40 次撞满就会掉进「居民44」这类编号兜底（v0.5.5 修复）
+  for (let round = 0; round < 2; round++) {
+    const tries = round === 0 ? 40 : 400;
+    for (let i = 0; i < tries; i++) {
+      const si = randInt(0, _SURNAMES.length * 3 + _SURNAMES_CP.length - 1);
+      const sn = surname || (si < _SURNAMES.length * 3 ? _SURNAMES[si % _SURNAMES.length] : _SURNAMES_CP[si - _SURNAMES.length * 3]);
+      const g1 = pool[randInt(0, pool.length - 1)];
+      const g2 = pool[randInt(0, pool.length - 1)];
+      // 第二轮：名字长度不限（双字概率拉满，缀第三字 20%），大幅扩大组合空间
+      const n = round === 0
+        ? sn + g1 + (rand() < 0.4 ? g2 : "")
+        : sn + g1 + (rand() < 0.8 ? g2 : "") + (rand() < 0.2 ? pool[randInt(0, pool.length - 1)] : "");
+      if (!_usedNames.has(n)) { _usedNames.add(n); return n; }
+    }
   }
-  return "居民" + (agents.length + 1);
+  // 终极兜底：单姓 + 「氏」+ 序号——永远唯一，绝不再出现「居民44」
+  const base = surname || _SURNAMES[0];
+  let k = 1;
+  while (_usedNames.has(base + "氏" + (k > 1 ? k : ""))) k++;
+  const n = base + "氏" + (k > 1 ? k : "");
+  _usedNames.add(n);
+  return n;
 }
 
 // 姓氏：命中复姓前缀取前两字，否则取首字
@@ -322,6 +336,28 @@ class Agent {
         if (rand() < 0.01 + over * 0.003) { this.die("寿终正寝"); return; }
       }
     }
+    // ---- 意外死亡（v0.5.8，极小概率的世界事故；概率 v0.6.0 config 化便于测试与调参）----
+    // 每秒掷一次：崖边失足 / 浅滩遇鲨 / 进食噎住——概率调得极低，只是生活的无常点缀
+    this.accCd = (this.accCd || 0) - dt;
+    if (this.accCd <= 0) {
+      this.accCd = 1;
+      const ax = Math.round(this.x), ay = Math.round(this.y);
+      const ACC = SIM.ACCIDENT || { cliff: 1 / 20000, shark: 1 / 15000, choke: 1 / 6000 };
+      if (neighborsOf(ax, ay).some(p => tileAt(p.x, p.y) === T.CLIFF) && rand() < ACC.cliff) {
+        this.die("在崖边失足坠落，当场身亡");
+        return;
+      }
+      if (creatures.some(c => c.type === "shark" && !c.dead && Math.hypot(c.x - this.x, c.y - this.y) < 2.2) &&
+          rand() < ACC.shark) {
+        this.die("在浅滩戏水时被鲨鱼拖下了水");
+        return;
+      }
+      if (this.state === "eat" && rand() < ACC.choke) {
+        this.die("进食时狼吞虎咽，不幸噎住身亡");
+        return;
+      }
+    }
+
     // 脱水：thirst<8 持续 DEHYDRY_TIME 秒 → 复用病倒机制（sickSource="thirst"，痊愈需水分恢复）
     if (this.thirst < 8) {
       this.dehydrT = (this.dehydrT || 0) + dt;
@@ -891,6 +927,7 @@ class Agent {
   die(reason) {
     if (this.dead) return;
     this.dead = true;
+    this.deathReason = reason;   // 死因随行（v0.5.9 死亡广播用）
     if (this.task) { tasksRelease(this.task, this); this.task = null; }
     if (this.rescuing) { this.rescuing.rescuer = null; this.rescuing = null; }   // 释放被困动物的认领锁
     if (packHaulCount(this.pack) > 0) this.deposit();   // 遗产：搬运产出就地登记入库

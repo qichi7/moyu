@@ -192,6 +192,60 @@ if (!lane) { assert(true, "场景C：找不到开阔水道（跳过）"); } else
   assert(crossed, "场景C：船穿过了桥线（继续向前航行）");
   assert(!dockedOnBridge && sailorAbroad, "场景C：桥线附近未靠岸、水手未下船（桥不再是岸）");
 }
+
+// ---- 场景 D：岛际跨海大桥（v0.5.1：已命名岛屿中心连线，海上段架桥，深海亦可）----
+simInit(42);
+for (let i = 0; i < 800; i++) simUpdate(STEP);
+world.era = 2;
+// 构造一对已命名「岛屿」标记：A 在沿岸陆地格，B 在其某方向 10 格外的海面（连线穿海）
+let pairA = null, pairB = null;
+outerD:
+for (let y = -30; y <= 30 && !pairA; y++) for (let x = -30; x <= 30; x++) {
+  if (tileAt(x, y) !== T.GRASS || !walkable(x, y)) continue;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    let ok = true;
+    for (let k = 1; k <= 10; k++) {
+      const t = tileAt(x + dx * k, y + dy * k);
+      if (t !== T.WATER && t !== T.DEEP) { ok = false; break; }   // 浅海/深海皆可架（本版特性）
+    }
+    if (ok) { pairA = { x, y }; pairB = { x: x + dx * 10, y: y + dy * 10 }; break outerD; }
+  }
+}
+if (!pairA) { assert(true, "场景D：地理不满足（无沿岸构造点），跳过"); } else {
+  const islA = { x: pairA.x, y: pairA.y, r: 6, name: "测试西岛", claimed: true };
+  const islB = { x: pairB.x, y: pairB.y, r: 6, name: "测试东岛", claimed: true };
+  world.islands.push(islA, islB);
+  world.settlements.forEach(s => ensureStock(s).wood = 200);
+  jointStockDirty();
+  plannerTick();
+  const bridge = tasks.list.find(t => t.type === "BRIDGE" && t.corridor);
+  assert(!!bridge && tileAt(bridge.x, bridge.y) !== T.GRASS, "岛际大桥：连线海上首格立项 BRIDGE（带 corridor）");
+  assert(!!bridge && (tileAt(bridge.x, bridge.y) === T.WATER || tileAt(bridge.x, bridge.y) === T.DEEP),
+    "岛际大桥：桥格落在海上（" + (bridge ? TILE_META[tileAt(bridge.x, bridge.y)].name : "-") + "）");
+  plannerTick();
+  const count = tasks.list.filter(t => t.type === "BRIDGE" && t.corridor &&
+    Math.abs(t.x - bridge.x) <= 1 && Math.abs(t.y - bridge.y) <= 1).length;
+  assert(count === 1, "岛际大桥：同一对岛不重复立项（pair 去重）");
+  // 贯通（v0.6.0 看护补齐）：木材管够 + 派工匠驻守桥头 → corridor 链式生长到 remain 归零
+  world.settlements.forEach(s => ensureStock(s).wood = 500);
+  jointStockDirty();
+  const builders = agents.filter(a => !a.dead).slice(0, 3);
+  builders.forEach(b => {
+    b.x = pairA.x + 0.5; b.y = pairA.y + 0.5;
+    b.state = "idle"; b.task = null; b.thinkCd = 0; b.onArrive = null; b.path = null;
+    b.energy = 100; b.hunger = 90; b.thirst = 90; b.mood = 100; b.depressed = false;
+    b.pack = new Array(10).fill(null);
+  });
+  const dirScan = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([dx, dy]) =>
+    tileAt(pairA.x + dx * 10, pairA.y + dy * 10) === T.WATER || tileAt(pairA.x + dx * 10, pairA.y + dy * 10) === T.DEEP);
+  let built = 0;
+  for (let i = 0; i < 9000 && built < 8; i++) {
+    simUpdate(STEP);
+    built = dirScan ? Array.from({ length: 10 }, (_, k) =>
+      tileAt(pairA.x + dirScan[0] * (k + 1), pairA.y + dirScan[1] * (k + 1))).filter(t => t === T.BRIDGE).length : 0;
+  }
+  assert(built >= 8, "岛际大桥：corridor 链式生长贯通（海上桥格 " + built + "/10）");
+}
 `;
 
 const sandbox = { console, __failed: false };

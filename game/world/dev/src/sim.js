@@ -289,8 +289,11 @@ function plannerTick() {
       if (s) tasksAdd({ type: "PASTURE", x: s.x, y: s.y, need: 16 });
     } else if (world.pastures.length > 0 && tasksPending("CAPTURE", true).length < 1) {
       const pas = world.pastures[0];
+      // v0.5.3：陆上牧场只圈陆生牲畜——水生动物（鱼群/海龟/鲸）不入陆栏（脚下不是水会搁浅），
+      // 它们的圈养走 2d2 渔场路径（水上渔场/池塘 dest）
       const cap = creatures.filter(c => c.isWild() && !c.dead &&
         Math.hypot(c.x - pas.x, c.y - pas.y) < 40 && c.type !== "dog" &&
+        CREATURE_META[c.type].habitat !== "water" && CREATURE_META[c.type].habitat !== "deep" &&
         creatures.filter(k => k.pasture && k.type === c.type).length < SIM.PASTURE_CAP);
       if (cap.length) {
         const c = cap[0];
@@ -611,6 +614,40 @@ function plannerTick() {
           }
         }
         break;   // 每周期最多立一项
+      }
+    }
+  }
+  // 2f3. 岛际大桥（v0.5.1）：已命名岛屿两两邻近（中心距 ≤50）→ 沿两岛中心连线架跨海大桥——
+  //      海上段全部架桥（浅海/深海皆可架），corridor 链式生长直达对岸即停；同一对岛只修一条
+  if (world.era >= 2 && world.time - _interBridgeCd > 30 && tasksPending("BRIDGE", true).length < 30) {
+    _interBridgeCd = world.time;
+    const named = world.islands.filter(o => o.name && o.r >= 3);
+    let best = null, bestD = Infinity;
+    for (let i = 0; i < named.length; i++) for (let j = i + 1; j < named.length; j++) {
+      const a = named[i], b = named[j];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d > 50 || d < 8) continue;
+      const kAB = a.x + "," + a.y + "|" + b.x + "," + b.y;
+      const kBA = b.x + "," + b.y + "|" + a.x + "," + a.y;
+      if (world.interBridges && (world.interBridges.has(kAB) || world.interBridges.has(kBA))) continue;
+      if (d < bestD) { bestD = d; best = [a, b, kAB]; }
+    }
+    if (best) {
+      const [a, b, pairKey] = best;
+      const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
+      const dist = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
+      // 沿 A→B 直线找第一个海上格：其前驱或任一邻格可站立（工人必可达）才立项首格，链式生长接力
+      for (let k = 1; k < dist; k++) {
+        const x = a.x + dx * k, y = a.y + dy * k;
+        const t = tileAt(x, y);
+        if (t !== T.WATER && t !== T.DEEP) continue;
+        const startOk = walkable(x - dx, y - dy) || neighborsOf(x, y).some(p => walkable(p.x, p.y));
+        if (startOk && !tasks.list.some(tk => !tk.done && tk.x === x && tk.y === y) && !nearAny(x, y, [T.BRIDGE], 6)) {
+          tasksAdd({ type: "BRIDGE", x, y, corridor: { dx, dy, remain: dist - k } });
+          world.interBridges.add(pairKey);
+          logMsg(`工匠们着手在「${a.name}」与「${b.name}」之间修一条跨海大桥。`);
+        }
+        break;   // 只看第一个海上格（不可达则 30s 后重查，等周边地形解锁）
       }
     }
   }
@@ -949,6 +986,7 @@ function farmTick(dt) {
 let _plannerCd = SIM.PLANNER_INTERVAL;
 let _lastFeast = -999;
 let _resScanTick = 0;   // 资源采集选址扫描节流计数（每 5 个规划周期扫一次，见 plannerTick 2e）
+let _interBridgeCd = -999;   // 岛际大桥立项节流（30s 一查）
 let _frontierCd = -999;
 
 function simUpdate(dt) {

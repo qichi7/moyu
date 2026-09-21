@@ -36,7 +36,7 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 
 1. **逻辑层零 DOM 依赖**：`src/` 中 events/config/noise/path/world/tasks/creature/agent/sim 必须能在 node 里 headless 跑（`test/smoke.js` 依赖这一点）。禁止在逻辑层引用 `document/window/canvas`。表现层是 audio/render/main。
 2. **通信只走事件总线**（`events.js` 的 `onEvent/emit`）：逻辑层 emit、表现层订阅。逻辑层**不知道**音频/UI 的存在。事件数据必须真的传（历史上 emit("discovery") 漏传岛对象导致原住民系统崩）。
-3. **加载顺序即拼接顺序**（`build.js` 的 `logicFiles`）：events → config → noise → path → world → tasks → **creature** → agent → sim；表现层拼接序：audio → **sprites** → render → main。同作用域拼接，函数声明提升可用，但 **const/let 有 TDZ**——`main.js` 里曾因 `const el` 在使用后才声明导致整个入口崩（黑屏/全零），`test/entry.js` 就是为防这类问题存在的。新增文件必须同时加进 `logicFiles`（或 render 拼接串）。
+3. **加载顺序即拼接顺序**（`build.js` 的 `logicFiles`）：events → config → noise → path → world → tasks → **creature** → agent → sim；表现层拼接序：audio → **sprites** → render → **demo** → main（v0.6.0 起 demo.js 参与 render 拼接，改 build.js 时勿漏）。同作用域拼接，函数声明提升可用，但 **const/let 有 TDZ**——`main.js` 里曾因 `const el` 在使用后才声明导致整个入口崩（黑屏/全零），`test/entry.js` 就是为防这类问题存在的。新增文件必须同时加进 `logicFiles`（或 render 拼接串）。
 4. **新任务类型必须**：a) 加进 `tasks.js` 的 `TASK_DEFAULT_NEED`（漏了 = `need===undefined` 永不完工、占死名额——历史死锁 #1）；b) 进度类任务加进 `agent.js` `doWork` 的进度分支列表；c) 需要 tile 改造的走 `workTile`，需要圈地的加入 `tasksAdd` 的 SITE 列表。
 5. **区域生成必须 chunk 对齐**：`generateRegion` 内部已做对齐扩展——绕过它直接写 chunk 会产生「半写 chunk」（bounding 只盖 chunk 一部分，其余格保持默认值 0 = VOID 且永不修复——历史死锁 #2）。
 6. **点亮永不黑回**：VOID→DEEP 的转换记录在 `world.litCells`，`settleFarTile` 的三分支语义（reveal 点亮 / 首次 VOID / 重算保持原值）不要动。**发现岛显现必须用 combined litTest（探索斑块 ∪ 岛缘海圆）**——直接对矩形 bounding 做 reveal 全亮会留下方形亮海块（历史 bug）。
@@ -67,6 +67,7 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 | render.js | 场景编排：drawScene 贴 sprite 图集 + 动态叠加层（工程进度/昼夜/分区底纹/地区名标注/选中环/瀑布）、**face→view 朝向映射与 left 翻转**（putLayer 包裹分层，影子/光环/状态粒子在翻转外）、**河流（水格三层判定：池塘→河流→海）/咖啡田（farmInfo 缓存 crop 变体）/四工坊（16×24 底部锚定）渲染，全部带契约未落地回退路径**、**醉酒 wobble**（sin 摆动+偶发 stumble，影子不随动）、**小人分层绘制与姿态分发 `agentPoseOf`（走/跑/吃/工具两帧/钓竿浮标/船内划手双桨固定 side/喝水 drink 两帧/酿造 brew 两帧/醉酒 stumble）**、动物朝向接线（drawC 翻转包裹/鱼群切线朝向）、chunk 缩略图（zoom<0.4）、缩放平滑语义（≥1 关/0.4~1 开） | `drawScene / agentPoseOf` |
 | audio.js | 程序化音效（振荡器合成，无音频文件） | `sfx.play(name)` |
 | sprites.js | 像素 Sprite 图集：全部 tile/房屋 24 变体/**小人分层像素系统三视图（`agentLook` 外观随机 + head/body/pants 三层 25 姿态 × 2 性别；body/pants front|back 归一 "vert"（中缝细节）、head front/side/back（双眼/侧脸/后脑）；新增 drink/brew/stumble 姿态）+ 背包 9 种（新增 water/juice/beer/coffee/beans）**/十种动物三视图（`QUAD_VIEW` 四足兽正/背视点阵 + turtle/whale/fish/bird 特例）/4 种船/**`riverSprite`（4 帧偏青绿）/`buildingSprite`（16×24 向上探出）/`coffeeFarmSprite`**/浪花抖动叠加层的 16×16 点阵惰性烘焙；色彩基建（shade/shadeHex/ELEV_TIERS/TILE_ELEV_VARIANTS/POND_VARIANTS/RIVER_VARIANTS）在此 | `tileSprite/waterSprite/pondSprite/riverSprite/houseSprite/buildingSprite/coffeeFarmSprite/propSprite/agentLook/agentBodySprite/agentPantsSprite/agentHeadSprite/agentHeadLieSprite/agentPackSprite/creatureSprite/shipSprite/foamSprite/ditherSprite` |
+| demo.js | 机制演示引擎（v0.6.0）：DEMO_TOPICS 10 主题脚本时间轴（steps 文案 + draw 画布回调）+ 播放器（demoStart/demoTick，倍速 0.5~4×，播完打勾）；绘制复用全局 sprite 图集；拼接在 render 之后 main 之前，**不进 .tmp_logic.js**（UI 层，entry.js 有契约+绘制扫描断言） | `DEMO_TOPICS / demoStart / demoTick` |
 | main.js | 主循环（固定步长，速度 0/1/2/10/100/1000 档）、Pointer Events 相机（拖拽/捏合/点按）、视觉昼夜 `visualTod`、波光时钟 `waveT`、视角跟随、点击拾取、信息面板（**渴值条五档青蓝梯度（thirst 缺失整行隐藏）、状态行醉/咖啡标注、地块「河流 · 水源」判定（池塘优先）、meta 缺失兜底「建筑」**）、居民名册（**库存行含水/饮/酒/咖**）、**世界动态面板**（`collectActivities` 纯派生只读逻辑层 + `updateActivity` 0.6s 节流；九类活动目录，点击行随机 `focusAgent` 定位跟随）、**三面板折叠**（名册/纪事/动态标题 ▾/▸，内存态）、**纪事 HUD 判刷新用 `world.logSeq`（`\|\| logs.length` 容错回退）** | `focusAgent / handlePick / updateRoster / updateActivity / collectActivities / packGridHtml / followMode` |
 
 ## 4. 已校准的死锁（改相关代码前必读）
@@ -152,7 +153,7 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 主 agent 拆分任务 → 按规模选模式（6.0）下发
 → 全部子 agent 完成 → 主 agent：node dev/build.js    （产物刷到根目录 index.html）
 → node dev/test/smoke.js   （逻辑回归，11 项）
-→ node dev/test/entry.js   （入口回归，7 项）
+→ node dev/test/entry.js   （入口回归，10 项：启动链 + demo 契约/绘制扫描）
 → node dev/test/voyage.js  （航海回归，21 项）
 → node dev/test/creature.js（动物回归，27 项）
 → node dev/test/explorer.js（探索者回归，6 项）
@@ -166,12 +167,28 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 → open index.html          （运行游戏，只开一次）
 ```
 
+**看护矩阵（功能 → 套件，v0.6.0 审计后）**：生存需求=smoke+mood / 心情抑郁=mood / 饮品=drink+mood / 背包=pack / 任务与规划=smoke+park / 航海与船桥=voyage / 岛际大桥贯通=voyage 场景D / 动物生态=creature / 物种扩充=species / 娱乐链=park / 迁居与意外死亡=mood / 亲子=family / 探索者=explorer / 渲染=sprite=pixel / 启动链与演示=entry / 教程与弹窗=entry（stub 级）。DOM 交互细节（轮播/信息栏布局/讣告展示）为 stub 级覆盖，需人工验收。
+
 **强制约定：所有子 agent 执行完毕且收口回归（build + 测试全过）后，必须自动执行 `open index.html` 打开浏览器运行游戏供用户验收**——不要等用户要求，也不要只在汇报里说"可以人工验收"；子 agent 未全部完成前不要提前打开。测试失败则由对应子 agent 先修复，全部通过后照常打开。
 
 测试失败的处理顺序：先看是不是**新代码**破坏了既有语义（对照第 4 节死锁表），再考虑断言本身是否需要随设计更新（改断言要说明理由，禁止静默放松）。
 
-## 7. 当前状态快照（2026-09-22 交接 · v0.5.0 增量）
+## 7. 当前状态快照（2026-09-22 交接 · v0.6.0 增量）
 
+- **v0.6.0 看护与教学（三任务一次发布）**：
+  - **看护补齐**：迁居机制（mood.js 21）、意外死亡三分支（概率 config 化 `SIM.ACCIDENT`，mood.js 22 强制触发验证——**测试注意：y 向 half-up 取整要用 .4 偏移**）、岛际大桥 corridor 贯通（voyage.js 场景 D 驱动工匠实建 8+ 格含深海）；「看护矩阵」= 各功能 → 套件映射见 §6.1
+  - **机制演示**：dev/src/demo.js（新文件，进 render 拼接链）——10 主题 × 时间轴 steps + draw 回调；main.js 打开弹窗即 setSpeed(0)（savedSpeed 关闭恢复）；demoTick 挂主循环 realDt；entry.js 新增 3 断言（契约 + 绘制扫描，sprite 用 stub）
+  - **玩法教程**：template.html 静态弹窗（help-modal），main.js 开关接线；弹窗关闭统一走 data-close 委托 + 遮罩点击
+- **v0.5.1~v0.5.9 九连小版本**：
+  - **v0.5.1 岛际大桥**：planner 2f3——已命名岛屿对（中心距 ≤50、`world.interBridges` Set 去重、30s 节流）沿中心连线立项首格 BRIDGE（corridor 链式生长直达对岸即停，DEEP 亦可架）；立项条件=海上首格的前驱或邻格可站立
+  - **v0.5.2 信息栏简化**：agentPanelHtml 重排——标题行合并（名/性别/年龄/职业）、状态行 tags 数组 join、四维条 `ip-bars` 2×2 网格（ip-b: 标签+条）、性格合并行；tier 文案函数保留未删
+  - **v0.5.3 牧场门**：tasksFinish PASTURE 环上**必留门**（T.GATE=36 可走，优先南→正交→对角）；sim.js 2d 捕获过滤 `habitat !== "water"/"deep"`（水生走 2d2 渔场路径）；updatePasture 陆生游荡半径 2.5→5（出门溜达）
+  - **v0.5.4 节奏放缓**：HUNGER_DECAY 0.55 / THIRST_DECAY 0.35（减半）；pack.js 数值契约同步更新
+  - **v0.5.5 命名修复**：pickAgentName 两轮尝试（40+400，第二轮双字/三字放开）+ 终极兜底「姓+氏+序号」——「居民44」绝迹（旧兜底用 agents.length 会错位且不唯一）
+  - **v0.5.6 兽不避人**：updateWild 逃跑/疲劳/猎犬围堵整体移除（meta.flee 字段保留未用）；狩猎纯工时
+  - **v0.5.7 动态轮播**：main.js `actRot` 游标——每 0.6s 刷新轮换展示参与者（点击定位仍随机）
+  - **v0.5.8 意外死亡**：agent.update 每秒掷骰（accCd）——临悬崖 1/20000 坠亡、近鲨 2.2 格 1/15000、eat 态 1/6000 噎死；die() 记录 `deathReason`
+  - **v0.5.9 死亡广播**：被跟随（followMode）的小人死亡 → `showDeathBroadcast`（template #death-broadcast 横幅：姓名/死因/享年/地点=岛屿或城市/时刻），8 真实秒自动收起、点击致哀；死亡时 infoPanel/followMode 照旧清理
 - **v0.5.0 大版本（心情 + 船桥 + 物种 + 娱乐，一次发布）**：
   - **心情系统**：`a.mood` 0~100（id hash 确定性起步 80~100，**不消耗 rand 流**）；`STATE_MOOD` 状态差分（work ×1.9）；`likedJoyOf`（agent.js 顶层）判定喜好匹配的快乐（explore=航海/BRIDGE/FILL/探索远行、animal=CAPTURE/PASTURE/牧羊邻近[pastureNear 1s 缓存]、fishing=FISH、homebody=守家、none=衰减 ×0.8）；睡眠回复 MOOD_SLEEP_REGEN；饮用分档（`SIM["MOOD_"+RES]`）；抑郁三计时器（depressT/moodOkT/depressAge）→ `sickSource="mood"` 走 60s 不治线；decide 分支 2.9 找乐子（`seekDrink(["beer","juice"])` 偏好参数，落空冷却 JOY_CD）；工作分支（3/3.5/3.8/3.95/4/2.8）全部 `!this.depressed` 门控；**航海喜悦必须插在 update 的 voyage 早退之前**
   - **船穿桥**：world.js 五处碰撞判定（sailing/return/rescue/fishing/fishingReturn）桥格视为水域 + 靠岸点搜索排除桥格——改船舶碰撞必须五处同改

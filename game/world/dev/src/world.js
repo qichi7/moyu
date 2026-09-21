@@ -27,6 +27,7 @@ const world = {
   ponds: new Set(),     // 人工池塘格 "x,y"（EXCAV 挖出来的水，显示为池塘而非浅海）
   mushrooms: new Set(), // 蘑菇格 "x,y"（v0.5.0：一次性行走粮点，采完消失）
   parks: [],            // [{x,y,x0,y0,x1,y1,water}] 游乐园（v0.5.0 娱乐链，园区 bounding + 门楼）
+  interBridges: new Set(), // 已立项/已建的岛际大桥对 "ax,ay|bx,by"（v0.5.1，同一对岛只修一条）
   lastBridgeHead: null, // 上一条桥线的桥头（续接锚点）
   lastBridgeDir: null,  // 上一条桥线的走向（续接沿此直线延伸，保证笔直）
   pastures: [],         // [{x,y}] 牧场
@@ -38,6 +39,7 @@ const world = {
   ponds: new Set(),     // 人工池塘（genWorld 重置）
   mushrooms: new Set(), // 蘑菇格（genWorld 重置）
   parks: [],            // 游乐园（genWorld 重置）
+  interBridges: new Set(), // 岛际大桥对（genWorld 重置）
   lastBridgeHead: null,
   lastBridgeDir: null,
   logs: [],
