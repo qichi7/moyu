@@ -251,6 +251,18 @@ function plannerTick() {
       }
     }
   }
+  // 2b2. 蘑菇采集（v0.5.0）：附近有蘑菇格 → 一次性采粮（采完 tile 变回草地）
+  if (totalFood() < 60 + pop * 3 && tasksPending("GATHER", true).length < 3 &&
+      world.mushrooms && world.mushrooms.size) {
+    const a = pickAnchor();
+    for (const k of world.mushrooms) {
+      const [bx, by] = k.split(",").map(Number);
+      if (Math.abs(bx - a.x) + Math.abs(by - a.y) < 26 && tileAt(bx, by) === T.MUSHROOM) {
+        tasksAdd({ type: "GATHER", x: bx, y: by, need: 3 });
+        break;
+      }
+    }
+  }
   // 2c. 狩猎：附近有野生牛羊 → 猎队（立项前确认动物存活，且未被捕获任务占用）
   if (totalFood() < 60 + pop * 3 && tasksPending("HUNT", true).length < 1) {
     const a = pickAnchor();
@@ -335,11 +347,12 @@ function plannerTick() {
     }
   }
   // 2e. 资源采集：各聚落木材/石材/沙土低于阈值 → 立项伐木/采石/采沙/植树
-  for (const s of world.settlements) {
+  //     20s 节流（v0.5.0）：findSpot 半径 30 螺旋扫是规划器热点，资源点位变化慢，无需每 4s 全扫
+  if (++_resScanTick % 5 === 0) for (const s of world.settlements) {
     const stock = ensureStock(s);
     const digPending = type => tasksPending("DIG", true).filter(t => t.res === type).length;
     if (stock.wood < 25 && digPending("wood") < 6) {   // 储备线 25：造船消耗大，伐木要跑在前面
-      const t = findSpot(s.x, s.y, 2, 30, T.TREE);
+      const t = findSpot(s.x, s.y, 2, 30, T.TREE) || findSpot(s.x, s.y, 2, 30, T.BAMBOO);   // 竹林是快木材（v0.5.0）
       if (t) tasksAdd({ type: "DIG", x: t.x, y: t.y, res: "wood" });
     }
     if (stock.stone < 8 && digPending("stone") < 1) {
@@ -515,6 +528,92 @@ function plannerTick() {
       }
     }
   }
+  // 2f2. 娱乐链（v0.5.0）：凉亭（era1·pop6，每城一座）→ 戏台/斗兽场（era2·pop10，每城各一座）
+  //      → 游乐园（era3·pop16，全域唯一，选址陆地或海洋皆可）→ 园区逐个补建大型设施
+  {
+    // 单格设施：逐城查重（辖区粮仓 ±9 邻域即覆盖本城）后立粮仓周边；
+    // 占位护栏：busy 集合（在办任务格）传入 expandSpot exclude——否则 THEATER/ARENA 同帧选址会撞格互相覆盖
+    const busy = new Set(tasks.list.filter(k => !k.done).map(k => k.x + "," + k.y));
+    for (const s of world.settlements) {
+      if (world.era >= 1 && pop >= SIM.ENT_POP_MIN && !settlementFacility(s, T.PAVILION) &&
+          tasksPending("GAZEBO", true).length < 1) {
+        const g = world.houses.find(h => h.granary && ownerSettle(h.x, h.y) === s) || s;
+        const b = expandSpot(g, 1, 8, T.GRASS, busy) || findSpot(g.x, g.y, 1, 10, T.GRASS);
+        if (b && !busy.has(b.x + "," + b.y)) { tasksAdd({ type: "GAZEBO", x: b.x, y: b.y }); busy.add(b.x + "," + b.y); }
+      }
+      if (world.era >= 2 && pop >= SIM.THEATER_POP_MIN && !settlementFacility(s, T.THEATER) &&
+          tasksPending("THEATER", true).length < 1) {
+        const g = world.houses.find(h => h.granary && ownerSettle(h.x, h.y) === s) || s;
+        const b = expandSpot(g, 1, 8, T.GRASS, busy) || findSpot(g.x, g.y, 1, 10, T.GRASS);
+        if (b && !busy.has(b.x + "," + b.y)) { tasksAdd({ type: "THEATER", x: b.x, y: b.y }); busy.add(b.x + "," + b.y); }
+      }
+      if (world.era >= 2 && pop >= SIM.THEATER_POP_MIN && !settlementFacility(s, T.ARENA) &&
+          tasksPending("ARENA", true).length < 1) {
+        const g = world.houses.find(h => h.granary && ownerSettle(h.x, h.y) === s) || s;
+        const b = expandSpot(g, 2, 10, T.GRASS, busy) || findSpot(g.x, g.y, 2, 12, T.GRASS);
+        if (b && !busy.has(b.x + "," + b.y)) { tasksAdd({ type: "ARENA", x: b.x, y: b.y }); busy.add(b.x + "," + b.y); }
+      }
+    }
+    // 游乐园：全域唯一，选址「先陆后海」——城市旁 3×3 连片草地，找不到则临城 3×3 连片浅水（水上乐园）
+    if (world.era >= 3 && pop >= SIM.PARK_POP_MIN && world.parks.length === 0 &&
+        tasksPending("PARK", true).length < 1) {
+      const S = SIM.PARK_SIZE;
+      let site = null;
+      outerPark:
+      for (const s of world.settlements) {
+        for (let r = 3; r <= 14 && !site; r++) {
+          for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+            const x0 = s.x + dx, y0 = s.y + dy;
+            let landOk = true, waterOk = true;
+            const wc = [];
+            for (let yy = 0; yy < S && (landOk || waterOk); yy++) for (let xx = 0; xx < S; xx++) {
+              const tt = tileAt(x0 + xx, y0 + yy);
+              if (tt !== T.GRASS) landOk = false;
+              if (tt !== T.WATER) waterOk = false; else wc.push((x0 + xx) + "," + (y0 + yy));
+            }
+            if (landOk) { site = { x0, y0, x1: x0 + S - 1, y1: y0 + S - 1, gx: x0 + (S >> 1), gy: y0 + (S >> 1), water: false }; break outerPark; }
+            if (waterOk) { site = { x0, y0, x1: x0 + S - 1, y1: y0 + S - 1, gx: x0 + (S >> 1), gy: y0 + (S >> 1), water: true, waterCells: wc }; break outerPark; }
+          }
+        }
+      }
+      if (site) {
+        const t = tasksAdd({ type: "PARK", x: site.gx, y: site.gy, need: 30,
+          x0: site.x0, y0: site.y0, x1: site.x1, y1: site.y1, gx: site.gx, gy: site.gy,
+          water: site.water, waterCells: site.waterCells || [] });
+        logMsg(site.water
+          ? `规划署选定近海海面兴建水上乐园（${S}×${S} 浮台园区），工地已圈定。`
+          : `规划署圈定了一块 ${S}×${S} 的草地，游乐园破土动工！`);
+        void t;
+      }
+    }
+    // 园区设施补建：摩天轮 → 旋转木马 → 过山车，每规划周期最多立一项（园区格：非门楼的草地/浮台空格）
+    if (world.parks.length) {
+      const p = world.parks[0];
+      const rides = ["FERRIS", "CAROUSEL", "COASTER"];
+      const rideTiles = [T.FERRIS, T.CAROUSEL, T.COASTER];
+      const inPark = (x, y) => x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1;
+      for (let i = 0; i < 3; i++) {
+        const pending = tasks.list.some(k => !k.done && k.type === rides[i] && inPark(k.x, k.y));
+        let built = false;
+        for (let y = p.y0; y <= p.y1 && !built; y++) for (let x = p.x0; x <= p.x1; x++) {
+          if (tileAt(x, y) === rideTiles[i]) { built = true; break; }
+        }
+        if (pending || built) continue;   // 该设施在建或已成：看下一个
+        // 立项：园区内第一个非门楼的可建格（草地或浮台）
+        let placed = false;
+        for (let y = p.y0; y <= p.y1 && !placed; y++) for (let x = p.x0; x <= p.x1 && !placed; x++) {
+          if (x === p.x && y === p.y) continue;
+          const tt = tileAt(x, y);
+          if ((tt === T.GRASS || tt === T.PIER) && !tasks.list.some(k => !k.done && k.x === x && k.y === y)) {
+            tasksAdd({ type: rides[i], x, y });
+            placed = true;
+          }
+        }
+        break;   // 每周期最多立一项
+      }
+    }
+  }
   // 2g. 浆果可持续：丛数低于人口需求（且有丛可采种）→ 培育新丛
   const berryTotal = world.berryStock.size;
   const berryHealthy = [...world.berryStock.values()].filter(v => v >= 1).length;
@@ -645,19 +744,44 @@ function plannerTick() {
     const t = tasks.list[i];
     if ((t.blockedCount || 0) < 3) continue;
     t.freezeAge = (t.freezeAge || 0) + SIM.PLANNER_INTERVAL;
+    t.freezeTotal = (t.freezeTotal || 0) + SIM.PLANNER_INTERVAL;   // 永不重置的冻结累计（60s 自愈会清 freezeAge——放弃判定要用它）
 
     // 新式饮品建筑与建房同款：累计冻结 180s 仍无法施工 → 放弃恢复草地，释放名额（防堵死饮品链）
     if (t.freezeAge >= 180 && (t.type === "BUILD" || t.type === "FARM" || t.type === "FILL" ||
-        t.type === "WELL" || t.type === "BREWERY" || t.type === "PRESS" || t.type === "ROASTERY")) {
+        t.type === "WELL" || t.type === "BREWERY" || t.type === "PRESS" || t.type === "ROASTERY" ||
+        t.type === "GAZEBO" || t.type === "THEATER" || t.type === "ARENA")) {
       setTile(t.x, t.y, t.type === "FILL" ? T.WATER : T.GRASS);   // 填海放弃恢复为水
       tasks.list.splice(i, 1);
       logThrottled("规划署放弃了一处无法施工的地块。", 60);
+      continue;
+    }
+    // 游乐园圈地放弃（v0.5.0）：300s 无法施工 → 水面格还原浅水、工地格还原草地，选址门保留
+    if (t.freezeAge >= 300 && t.type === "PARK") {
+      for (const k of (t.waterCells || [])) {
+        const [px, py] = k.split(",").map(Number);
+        setTile(px, py, T.WATER);
+      }
+      for (let yy = t.y0; yy <= t.y1; yy++) for (let xx = t.x0; xx <= t.x1; xx++) {
+        if (tileAt(xx, yy) === T.SITE) setTile(xx, yy, T.GRASS);
+      }
+      tasks.list.splice(i, 1);
+      logThrottled("规划署放弃了游乐园选址，等待更合适的场地。", 60);
+      continue;
+    }
+    // 追踪/采集类冻结放弃（v0.5.0）：物种扩容后跨海不可达目标会让冻结任务无限堆积——
+    // 按类型 180s 撤销（DIG 300s，tile 不动，路径再受阻时 goTo 会重新立项）；
+    // BRIDGE 是国家工程不放弃（对岸终将接通），FILL/BUILD/FARM 沿用上方 revert 规则
+    const giveUpAt = { HUNT: 180, CAPTURE: 180, GATHER: 180, FISH: 180, FETCH_WATER: 180, PLANT: 180, PLANT_BERRY: 180, EXCAV: 180, DIG: 300 }[t.type];
+    if (giveUpAt && t.freezeTotal >= giveUpAt) {
+      for (const w of t.workers) { if (w.task === t) { w.task = null; if (w.state === "walk" || w.state === "work") w.state = "idle"; } }
+      tasks.list.splice(i, 1);
       continue;
     }
     if (t.freezeAge < 60) continue;
     t.freezeAge = 0;
     t.blockedCount = 0;
     if (t.type !== "DIG") continue;   // 只有开凿需要横向扩宽（凹形山壁卡死），水路已改用桥线
+    if (tasksPending("DIG").length >= 40) continue;   // 自愈扩宽总量护栏：冻结 DIG 的 5×5 撒种不再无界繁衍
     for (let dy2 = -2; dy2 <= 2; dy2++) {
       for (let dx2 = -2; dx2 <= 2; dx2++) {
         const nx2 = t.x + dx2, ny2 = t.y + dy2;
@@ -675,7 +799,7 @@ function plannerTick() {
     const rich = world.settlements.slice().sort((a, b) => (b.stock ? b.stock.food || 0 : 0) - (a.stock ? a.stock.food || 0 : 0))[0];
     if (rich) ensureStock(rich).food = Math.max(0, ensureStock(rich).food - (40 + pop));
     _lastFeast = world.time;
-    for (const a of agents) { a.hunger = 100; a.energy = Math.min(100, a.energy + 30); }
+    for (const a of agents) { a.hunger = 100; a.energy = Math.min(100, a.energy + 30); a.mood = Math.min(100, (a.mood || 0) + (SIM.MOOD_FEAST || 25)); }
     logMsg("丰收宴席：全城共食，欢声笑语。");
     emit("feast");
   }
@@ -824,6 +948,7 @@ function farmTick(dt) {
 // ---- 模拟主步进 ----
 let _plannerCd = SIM.PLANNER_INTERVAL;
 let _lastFeast = -999;
+let _resScanTick = 0;   // 资源采集选址扫描节流计数（每 5 个规划周期扫一次，见 plannerTick 2e）
 let _frontierCd = -999;
 
 function simUpdate(dt) {
@@ -836,6 +961,11 @@ function simUpdate(dt) {
   // 死者退场（名册/住房/任务引用同步释放）
   for (let i = agents.length - 1; i >= 0; i--) {
     if (agents[i].dead) agents.splice(i, 1);
+  }
+  // 生物死者退场（v0.5.0）：死尸留守会被所有全表扫描白白遍历——物种扩容后泄漏放大成性能杀手
+  // （任务/驯化/救援等外部引用持有对象本身，出列不影响引用有效性）
+  for (let i = creatures.length - 1; i >= 0; i--) {
+    if (creatures[i].dead) creatures.splice(i, 1);
   }
   farmTick(dt);
   berryTick();

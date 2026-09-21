@@ -334,8 +334,8 @@
     };
   };
 
-  const TASK_CN = { BUILD: "建造房屋", FARM: "开垦农田", DIG: "开山伐林", FILL: "填海造陆", BRIDGE: "架桥", GATHER: "采集", FISH: "捕鱼", HUNT: "狩猎", CAPTURE: "捕获", PASTURE: "建造牧场", PLANT: "植树", EXCAV: "挖塘", WELL: "打水井", BREWERY: "建造酒坊", PRESS: "建造压榨坊", ROASTERY: "建造烘焙坊", FETCH_WATER: "打水", BREW_BEER: "酿酒", PRESS_JUICE: "榨汁", BREW_COFFEE: "烘焙咖啡" };
-  const STATE_CN = { walk: "赶路中", eat: "进食", sleep: "酣睡", work: "干活", idle: "闲逛", voyage: "航海中", drink: "喝水" };
+  const TASK_CN = { BUILD: "建造房屋", FARM: "开垦农田", DIG: "开山伐林", FILL: "填海造陆", BRIDGE: "架桥", GATHER: "采集", FISH: "捕鱼", HUNT: "狩猎", CAPTURE: "捕获", PASTURE: "建造牧场", PLANT: "植树", EXCAV: "挖塘", WELL: "打水井", BREWERY: "建造酒坊", PRESS: "建造压榨坊", ROASTERY: "建造烘焙坊", FETCH_WATER: "打水", BREW_BEER: "酿酒", PRESS_JUICE: "榨汁", BREW_COFFEE: "烘焙咖啡", GAZEBO: "建凉亭", THEATER: "搭戏台", ARENA: "建斗兽场", PARK: "兴建游乐园", FERRIS: "造摩天轮", CAROUSEL: "造旋转木马", COASTER: "修过山车" };
+  const STATE_CN = { walk: "赶路中", eat: "进食", sleep: "酣睡", work: "干活", idle: "闲逛", voyage: "航海中", drink: "喝水", play: "游玩中" };
   const SETTLE_CN = ["定居点", "村庄", "城镇", "城市"];
 
   // ---- 信息档位命名 ----
@@ -343,6 +343,8 @@
   const energyTier = e => e > 65 ? "精力充沛" : e > 30 ? "有些疲惫" : "筋疲力尽";
   // 渴值档位：thirst(0-100) 越高越水润，≤10 已是干渴难忍（与饥饿"危在旦夕"同级的最终档）
   const thirstTier = th => th > 75 ? "水润" : th > 50 ? "不渴" : th > 25 ? "有点渴" : th > 10 ? "口渴" : "干渴难忍";
+  // 心情档位（v0.5.0）：mood(0-100) 越高越开心，≤10 濒临抑郁边缘
+  const moodTier = m => m > 75 ? "乐呵呵" : m > 50 ? "心情不错" : m > 25 ? "闷闷不乐" : m > 10 ? "郁郁寡欢" : "濒临崩溃";
   const adventureTier = v => v > 0.75 ? "天生探险家" : v > 0.5 ? "向往外面" : v > 0.25 ? "安分守己" : "家里蹲";
   const diligenceTier = v => v > 0.8 ? "工作狂" : v > 0.55 ? "勤快" : v > 0.3 ? "随大流" : "偷奸耍滑";
   const healthTier = a => a.sick ? "生病了" : hungerTier(a.hunger) === "危在旦夕" || energyTier(a.energy) === "筋疲力尽" ? "状态很差" : "健康";
@@ -466,6 +468,8 @@
     const enC = a.energy > 35 ? "#5a8fd0" : "#c2623b";
     // 渴值条配色：青蓝系梯度——充足时明亮青蓝，干渴时转为灰蓝示警
     const thirstC = a.thirst > 40 ? "#4aa0c2" : a.thirst > 15 ? "#7ab8cc" : "#8ba0ac";
+    // 心情条配色（v0.5.0）：暖色梯度——开心金黄，低落转灰紫
+    const moodC = a.mood > 60 ? "#e8c15a" : a.mood > 30 ? "#d9915a" : "#9a8ba8";
     const home = a.home ? (() => {
       const s = settleOf(a.home.x, a.home.y);
       return s ? s.name : "自宅";
@@ -485,7 +489,7 @@
       ? `<br>背着：${hauling.map(h => (ITEM_VIEW[h.item] || ["", "物品"])[1] + "×" + h.n).join("、")}（回仓入库中）`
       : "";
     return `职业：${JOBS_CN[a.job] || a.job}<br>` +
-      `状态：${a.sick ? "生病了" : (STATE_CN[a.state] || a.state)}${a.task ? "（" + TASK_CN[a.task.type] + "）" : ""}${a.drunkT > 0 ? "（醉醺醺）" : ""}${a.coffeeT > 0 ? "（咖啡提神）" : ""}` +
+      `状态：${a.sick ? "生病了" : (STATE_CN[a.state] || a.state)}${a.task ? "（" + TASK_CN[a.task.type] + "）" : ""}${a.drunkT > 0 ? "（醉醺醺）" : ""}${a.coffeeT > 0 ? "（咖啡提神）" : ""}${a.depressed ? "（抑郁）" : ""}${(a.cheerT || 0) > 0 ? "（尽兴而归）" : ""}` +
       // 搬运动物标注：rescuing 指向被困动物且 carriedBy 是自己时正在搬运（物种名查不到则兜底泛称）
       (a.rescuing && a.rescuing.carriedBy === a ? (CREATURE_META[a.rescuing.type] ? "（搬运中：移动" + CREATURE_META[a.rescuing.type].name + "）" : "（搬运动物中）") : "") +
       `<br>` +
@@ -497,6 +501,8 @@
       // 渴值条：thirst 未接入（undefined/null）时整行不显示，避免出现 NaN
       (a.thirst == null ? "" : `渴值：${thirstTier(a.thirst)}<div class="ip-bar"><div style="width:${a.thirst}%;background:${thirstC}"></div></div>`) +
       `精力：${energyTier(a.energy)}<div class="ip-bar"><div style="width:${a.energy}%;background:${enC}"></div></div>` +
+      // 心情条（v0.5.0）：mood 未接入时整行不显示（falsy 容错，与渴值条同款）
+      (a.mood == null ? "" : `心情：${moodTier(a.mood)}<div class="ip-bar"><div style="width:${a.mood}%;background:${moodC}"></div></div>`) +
       `探索欲：${adventureTier(a.adventure)}<br>` +
       `勤劳：${diligenceTier(a.diligence)}<br>` +
       `喜好：${HOBBY_CN[a.hobby] || "随遇而安"}<br>` +
@@ -515,19 +521,23 @@
   function creaturePanelHtml(c) {
     const meta = CREATURE_META[c.type];
     let status;
-    if (c.type === "dog") status = c.tamed && c.owner ? "陪伴着 " + c.owner.name : "野生 · 靠近可驯化";
+    if (meta.tamable) status = c.tamed && c.owner ? "陪伴着 " + c.owner.name : "野生 · 靠近可驯化";   // 驯化泛化（狗/独角兽）
     else if (c.pasture) status = "圈养于牧场";
+    else if (meta.rare) status = "珍稀 · 在野";
     else status = "在野";
     return `物种：${meta.name}<br>` +
       `年龄：${Math.floor(c.age)} 岁 · ${ageTier(c.age, c.type)}<br>` +
-      `状态：${status}${c.isWild() && !c.dead && c.type !== "dog" ? "<br>· 可狩猎/可捕获" : ""}`;
+      `状态：${status}${c.isWild() && !c.dead && meta.hunt ? "<br>· 可狩猎/可捕获" : ""}`;
   }
 
   function showCreaturePanel(c) {
     const s = TILE_PX * camera.zoom;
     const px = CW / 2 + (c.x - camera.x) * s;
     const py = CH / 2 + (c.y - camera.y) * s;
-    const title = c.type === "dog" ? "狗 · " + (c.tamed ? "家犬" : "野犬") : meta2name(c.type) + " · " + (c.pasture ? "圈养" : "野生");
+    const meta = CREATURE_META[c.type];
+    const title = meta.tamable
+      ? meta.name + " · " + (c.tamed ? "家养" : "野生")
+      : meta2name(c.type) + " · " + (c.pasture ? "圈养" : "野生");
     showPanel(title, creaturePanelHtml(c), px, py);
   }
 
@@ -697,7 +707,7 @@
   // ---- 世界动态面板：活动目录纯派生（只读逻辑层状态，不改任何逻辑），0.6s 节流 ----
   const activityBody = el("activity-body");
   let actCd = 0;
-  const ACT_CN = { voyage: "航海", drunk: "喝酒", coffee: "喝咖啡", water: "喝水", fish: "垂钓", rescue: "搬运动物", shepherd: "牧羊", brew: "酿造", explore: "探索" };
+  const ACT_CN = { voyage: "航海", drunk: "喝酒", coffee: "喝咖啡", water: "喝水", fish: "垂钓", rescue: "搬运动物", shepherd: "牧羊", brew: "酿造", explore: "探索", play: "游玩", sad: "抑郁" };
   // 活动判据汇总：一人可同属多项；只统计存活居民
   function collectActivities() {
     const map = {};
@@ -713,6 +723,8 @@
       if (a.hobby === "animal" && creatures.some(c => c.pasture && !c.dead && Math.hypot(c.x - a.x, c.y - a.y) < 4)) map.shepherd.push(a);
       if (a.state === "work" && a.task && ["BREW_BEER", "PRESS_JUICE", "BREW_COFFEE"].includes(a.task.type)) map.brew.push(a);
       if (a.exploring) map.explore.push(a);
+      if (a.state === "play") map.play.push(a);
+      if (a.depressed) map.sad.push(a);
     }
     return map;
   }

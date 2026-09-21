@@ -8,7 +8,8 @@ const tasks = {
 };
 
 const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 4, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3, FILL: 10, EXCAV: 8,
-  WELL: 12, BREWERY: 18, PRESS: 14, ROASTERY: 16, FETCH_WATER: 4, PRESS_JUICE: 6, BREW_BEER: 8, BREW_COFFEE: 7 };
+  WELL: 12, BREWERY: 18, PRESS: 14, ROASTERY: 16, FETCH_WATER: 4, PRESS_JUICE: 6, BREW_BEER: 8, BREW_COFFEE: 7,
+  GAZEBO: 8, THEATER: 14, ARENA: 16, PARK: 30, FERRIS: 24, CAROUSEL: 16, COASTER: 20 };
 // 工程资源消耗：架桥耗木材、造陆耗沙土（联合库存结算，doWork 挂起 + tasksTake 跳过双处生效）；
 // 制作型任务耗水/粮/豆（非联合库存：完工时从所属城市库存扣除，tasksTake 领取时同步过滤——不足跳过省工）
 const TASK_RESOURCE_COST = { BRIDGE: { wood: 1 }, FILL: { sand: 1 },
@@ -22,6 +23,15 @@ function tasksAdd(t) {
   t.workers = new Set();
   if (t.type === "BUILD" || t.type === "FARM" || t.type === "PASTURE" ||
       t.type === "WELL" || t.type === "BREWERY" || t.type === "PRESS" || t.type === "ROASTERY") setTile(t.x, t.y, T.SITE); // 立项即圈地（建筑类沿用 PASTURE 先例）
+  // PARK 圈地（v0.5.0）：整个 bounding 铺 SITE 为工地；水面格登记进 waterCells（完工转浮台）
+  if (t.type === "PARK") {
+    t.waterCells = [];
+    for (let y = t.y0; y <= t.y1; y++) for (let x = t.x0; x <= t.x1; x++) {
+      const tt = tileAt(x, y);
+      if (tt === T.WATER || tt === T.DEEP) t.waterCells.push(x + "," + y);
+      setTile(x, y, T.SITE);
+    }
+  }
   tasks.list.push(t);
   return t;
 }
@@ -35,7 +45,8 @@ function taskJobPref(t) {
   switch (t.type) {
     case "FARM": return "FARM";
     case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT": case "EXCAV":
-    case "WELL": case "BREWERY": case "PRESS": case "ROASTERY": return "BUILD";
+    case "WELL": case "BREWERY": case "PRESS": case "ROASTERY":
+    case "GAZEBO": case "THEATER": case "ARENA": case "PARK": case "FERRIS": case "CAROUSEL": case "COASTER": return "BUILD";
     case "CAPTURE": return t.creature && t.creature.type === "fish" ? "FISH" : "HUNT";
     case "HUNT": return "HUNT";
     case "FISH": return "FISH";
@@ -94,6 +105,7 @@ function taskToolOf(t) {
     case "DIG": return t.res === "stone" ? "pick" : "axe";
     case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT":
     case "EXCAV": case "WELL": case "BREWERY": case "PRESS": case "ROASTERY":
+    case "GAZEBO": case "THEATER": case "ARENA": case "PARK": case "FERRIS": case "CAROUSEL": case "COASTER":
     case "BRIDGE": case "FILL": case "DOCK": return "hammer";
     default: return null;   // HUNT/GATHER/CAPTURE/FETCH_WATER 等徒手活不发工具
   }
@@ -172,6 +184,7 @@ function tasksFinish(t, agent, was) {
       setTile(t.x, t.y, T.GRASS);
       // 产出由工人背包搬运回仓：伐木得木材、采石得石材（was 由 workTile 传入——完工后 tile 已改写，不能重读）
       if (was === T.TREE) { grantCarry(agent, "wood", 6); return null; }
+      if (was === T.BAMBOO) { grantCarry(agent, "wood", 4); return null; }   // 竹林：快木材（工时短产出略薄）
       if (was === T.MOUNTAIN) { grantCarry(agent, "stone", 7); return null; }
       break;
     }
@@ -218,12 +231,32 @@ function tasksFinish(t, agent, was) {
       break;
     }
     case "FISH": {
+      // 珍稀渔获（v0.5.0）：鱼点旁有 rare+fishJoy 物种 → 消耗一条，丰厚渔获 + 巨大喜悦 + 纪事
+      let rare = null;
+      for (const c of creatures) {
+        const rm = CREATURE_META[c.type];
+        if (!c.dead && rm.rare && rm.fishJoy &&
+            Math.hypot(c.x - (t.fishX + 0.5), c.y - (t.fishY + 0.5)) < 1.5) { rare = c; break; }
+      }
+      if (rare && agent) {
+        rare.dead = true;
+        grantCarry(agent, "food", 8);
+        agent.mood = Math.min(100, (agent.mood || 0) + CREATURE_META[rare.type].fishJoy);
+        logMsg(`${agent.name} 钓到了珍稀的${CREATURE_META[rare.type].name}！这足以炫耀好些天。`);
+        return null;
+      }
       if (catchFish(t.fishX, t.fishY)) { grantCarry(agent, "food", 4); return null; }
       break;
     }
     case "GATHER": {
-      // 采集：浆果/果树 → 粮；沙滩 → 沙土（产出由工人背包搬运回仓）
+      // 采集：浆果/果树 → 粮；沙滩 → 沙土；蘑菇 → 一次性采粮（tile 变回草地，v0.5.0）
       if (t.res === "sand") { grantCarry(agent, "sand", 3); return null; }
+      if (tileAt(t.x, t.y) === T.MUSHROOM) {
+        setTile(t.x, t.y, T.GRASS);
+        if (world.mushrooms) world.mushrooms.delete(t.x + "," + t.y);
+        grantCarry(agent, "food", 2);
+        return null;
+      }
       if (gatherBerry(t.x, t.y)) { grantCarry(agent, "food", SIM.GATHER_YIELD); return null; }
       break;
     }
@@ -295,6 +328,51 @@ function tasksFinish(t, agent, was) {
     case "ROASTERY": {
       if (T.ROASTERY !== undefined) setTile(t.x, t.y, T.ROASTERY);
       logMsg(`烘焙坊落成，咖啡豆的焦香将唤醒小镇的清晨。`);
+      break;
+    }
+    case "GAZEBO": {
+      setTile(t.x, t.y, T.PAVILION);
+      logMsg(`凉亭落成，路过的居民可以在此歇脚乘凉。`);
+      break;
+    }
+    case "THEATER": {
+      setTile(t.x, t.y, T.THEATER);
+      logMsg(`戏台搭好了，锣鼓一响全城都热闹。`);
+      break;
+    }
+    case "ARENA": {
+      setTile(t.x, t.y, T.ARENA);
+      logMsg(`斗兽场建成，勇者们有了展示胆识的舞台。`);
+      break;
+    }
+    case "PARK": {
+      // 游乐园开园（v0.5.0）：水面格转浮台 PIER，其余工地格还原草地，门楼落成，注册进 world.parks
+      for (const k of (t.waterCells || [])) {
+        const [px, py] = k.split(",").map(Number);
+        setTile(px, py, T.PIER);
+      }
+      for (let y = t.y0; y <= t.y1; y++) for (let x = t.x0; x <= t.x1; x++) {
+        if (tileAt(x, y) === T.SITE) setTile(x, y, T.GRASS);
+      }
+      setTile(t.gx, t.gy, T.PARK_GATE);
+      world.parks.push({ x: t.gx, y: t.gy, x0: t.x0, y0: t.y0, x1: t.x1, y1: t.y1, water: !!t.water });
+      logMsg(`游乐园开园了！摩天轮与旋转木马即将立起，全城都盼着开玩。`);
+      emit("build-done");
+      break;
+    }
+    case "FERRIS": {
+      setTile(t.x, t.y, T.FERRIS);
+      logMsg(`摩天轮立起来了，坐在最高格能看到整片群岛。`);
+      break;
+    }
+    case "CAROUSEL": {
+      setTile(t.x, t.y, T.CAROUSEL);
+      logThrottled(`旋转木马转起来了，音乐盒的旋律飘出很远。`, 30);
+      break;
+    }
+    case "COASTER": {
+      setTile(t.x, t.y, T.COASTER);
+      logThrottled(`过山车铺完了最后一截轨道，尖叫声即将响彻园区。`, 30);
       break;
     }
     case "FETCH_WATER": {

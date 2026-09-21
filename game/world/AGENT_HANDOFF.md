@@ -13,15 +13,18 @@
 
 ```bash
 node dev/build.js        # 构建产物 → 根目录 index.html（改任何 src 后必须重新构建）
-node dev/test/smoke.js   # 逻辑冒烟：headless 12000 sim 秒（120000 步 × 0.1s），10 项断言
+node dev/test/smoke.js   # 逻辑冒烟：headless 12000 sim 秒（120000 步 × 0.1s），11 项断言
 node dev/test/entry.js   # 入口冒烟：stub DOM 跑构建产物启动链，7 项断言
-node dev/test/voyage.js  # 航海专项：满载返航 / 低补给被困救援闭环，18 项断言
+node dev/test/voyage.js  # 航海专项：满载返航 / 低补给被困救援闭环 / 船穿桥，21 项断言
 node dev/test/creature.js # 动物专项：老死 / 搁浅死亡与救援 / 繁衍 / 渔场 / 渔船 / 挖塘 / 运鱼 / 灌溉 / 岛数随机，27 项断言
 node dev/test/explorer.js # 探索者专项：保底转职 / 前沿点亮 / 腿数解除，6 项断言
 node dev/test/family.js  # 亲子专项：固定姓/去重/sex 确定性/随亲姓/出生点，36 项断言
 node dev/test/pixel.js   # 渲染专项：软件光栅化跑 drawScene 与全套 sprite 烘焙，52 项断言
-node dev/test/drink.js   # 饮品专项：口渴/状态差分/饮用结算/醉酒减速/咖啡田不产粮/face 朝向契约（含持锁迟滞），29 项断言（依赖 build 产物 .tmp_logic.js，先 node dev/build.js）
+node dev/test/drink.js   # 饮品专项：口渴/状态差分/饮用结算/醉酒减速/咖啡田不产粮/face 朝向契约（含持锁迟滞），28 项断言（依赖 build 产物 .tmp_logic.js，先 node dev/build.js）
 node dev/test/pack.js    # 背包专项：槽位合并/容量/haul 搬运链/deposit/工具与加成，41 项断言
+node dev/test/mood.js    # 心情专项：衰减/喜好快乐/饮用分档/抑郁闭环/找乐子/宴席/余韵，26 项断言（依赖 .tmp_logic.js）
+node dev/test/species.js # 物种专项：新物种表/栖息地/上限守卫/驯化泛化/珍稀渔获/月光花光环/海豚追随，21 项断言（依赖 .tmp_logic.js）
+node dev/test/park.js    # 娱乐专项：立项门槛/完工 tile/游乐园圈地浮台/设施补建/游玩闭环，26 项断言（依赖 .tmp_logic.js）
 open index.html          # 人工验收（agent 每次修改完成后必须自动执行，见第 6 节）
 ```
 
@@ -44,6 +47,9 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 11. **航海状态冻结需求**：`agent.state === "voyage"` 时 `update` 提前 return（坐标由船携带、hunger/energy 不衰减）——防止远航饿死；船实体在 `world.ships`（sailing/return/docked 三态 + 航程上限），靠岸/返航/清理见 `shipTick`；造船消耗联合木材 `SIM.SHIP_COST`。
 12. **出生与测试种子**：`main.js` 用随机种子开局（每次新地图），`dev/test/*.js` 固定 `simInit(42)`——新增断言必须对任意 seed 稳定（禁止依赖具体人口数值，用范围/趋势断言；entry.js 的出生断言即因此用 `>= 12`）。
 13. **Sprite 图集（sprites.js）三条铁律**：a) **缓存键 = 全部视觉输入**（tile/海拔档/hash 变体/动画帧/楼层/石砌/粮仓/亮窗/姿态/果量/**视图**；小人分层缓存键含 pose/性别/发型/背包资源，f 腿层另含肤色），漏键 = 复用错图；b) **`shade()` 只吃 hex**——产出的 `rgb(...)` 字符串再喂回 `shade()`/`stampArt` 调色板会变 NaN 色（必须走 `shadeHex` 或由调用方预着色，历史 bug ×2：池塘波纹、小人暗部）；c) 渲染缩放语义：zoom≥1 关平滑（方块感）、0.4~1 开平滑、<0.4 缩略图关平滑——勿在 drawScene 外部改 `imageSmoothingEnabled`。小人/动物按 `face` 取视图（down=front/up=back/左右=side+left 水平镜像，**face undefined 容错按 "right"**）；船内划手固定 side 视图（船体旋转已带方向感）。渲染回归用 `test/pixel.js`（软件光栅化，能抓全空 sprite/NaN 色；S6 类契约断言未落地时自动 SKIP、落地后半成品如实 FAIL）。
+14. **生物位置取整一律 Math.floor**（v0.5.0）：实体坐标是 tile 中心 +0.5，`Math.round(10.5)=11` 会向东偏一格——岸边生物被误判「假搁浅」→ 救援吸干劳动力 → 农田停摆饥荒（round/floor 家族，同死锁 #20）。habitatOk 的搁浅判定与 moveBy 的移动判定双处都要 floor。
+15. **生物生成必带上限**（v0.5.0）：generateRegion 的 hash 散布与 populateIslandCreatures 的每岛散布都要查 `SIM.SPECIES_CAP` 全局计数；鱼点登记（fishStock）与鱼群实体解耦——上限只限实体，渔场经济资源恒定登记。死生物必须从 `creatures` 数组退场（simUpdate 内 splice），否则尸体会被全表扫描白白遍历（性能杀手）。
+16. **任务冻结必须有出口**（v0.5.0）：追踪/采集类（HUNT/CAPTURE/GATHER/FISH/FETCH_WATER/PLANT/PLANT_BERRY/EXCAV）冻结 180s、DIG 300s 按 `freezeTotal`（永不重置——60s 自愈会清 freezeAge，别用它做放弃判定）放弃撤销；DIG 自愈 5×5 撒种受 40 条总量护栏；goTo 的 blocked 补救立项同受护栏。否则跨海不可达目标会让任务表永动膨胀（观测 259 条、plannerTick 单次 10ms）。
 
 ## 3. 代码地图
 
@@ -87,6 +93,8 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 | 18 | **开局死亡螺旋（v0.3.0 集成回归，已修复）**：seed42 下开局 12 人曾在 t≈100~600s 大批死于脱水/饥饿（人口一度跌至 0~4，smoke 3 项 + voyage 1 项 FAIL；T1 插桩定位后修复，全套 8 套件复跑全绿，smoke 人口 12→35） | 三因叠加：①渴值快速衰减（walk 1.68/s）×「步行隧道视野」（decide 有目的地时不重入）——48 步 HUNT 往返途中渴值无人照看；②低体力 sleep↔idle 抖动期（isDaytime 即醒）睡觉分支无条件抢占吃喝，抖动期渴饿双归零；③夜间睡眠照常脱水（-69/夜）且睡中无法喝水，dehydrT 睡眠中照常累计 → 睡梦中病倒不治 | **行程预算抢救**（config.SAFE_THIRST=12/SAFE_HUNGER=8：decide 头部按剩余路程×1.5 冲刺包络推算抵达时渴/饿值，跌破即弃程先吃喝；目的地为水/食点豁免防抖动活锁）+ **分支 1 放行**（hunger/thirst ≥30 才允许睡，抖动期生命需求优先）+ **分支 3 行程门**（thirst<min(65,22+d×1.7)/hunger<min(55,18+d×1.3) 缓领任务，任务老化保证远任务仍被领）；配套 `seekDrink()` 提取共用。教训：叠加会衰减的新需求时，必须审查全部「移动隧道/睡眠/抖动」路径的需求可达性 |
 | 19 | **世界记事面板永久停更（v0.3.1 修复）**：纪事一旦累积到 200 条封顶就再不刷新（前 200 条正常，之后冻结） | logs 截断在 200 条（`logMsg` 超 200 弹出最旧），`world.logs.length` 从此恒定不变；HUD 曾以 `logs.length !== lastLogLen` 判「有新日志」——达到上限后该判据**永假**，面板从此静默 | `world.logSeq` 单调计数（`logMsg` 内每条 +1，与截断无关），main.js 改用 `logSeq !== lastLogSeq` 判刷新且取 `world.logSeq \|\| logs.length` 容错回退（logSeq 未接入的旧产物退回 length 判据不崩）；smoke.js 断言 `logSeq >= 100` 兜底回归（日志断流即 FAIL）。教训：**以「容器长度变化」当变更信号的地方，凡容器有上限截断都会永久失效——必须用单调计数** |
 | 20 | **负坐标 `\|0` 向零截断（v0.3.2 修复）**：开局同坐标连环渴死/饿死（10 连亡）、救援超时、寻路离奇失败 | 位置取整用 `\|0`：负坐标向零截断（y=-3 格的居民被当成 y=-2 行）——站草地被判进山体、寻路起点必败、gTo/选址全错行；探针实锤开局 10 连亡全在同一坐标 | **位置取整一律 `Math.floor`**（agent.js goTo/walkComponentHas/findEscapeSpot/闲逛基点、tasks.js tasksTake、sim.js 选址×2、world.js 发现岛锚点）；受困补「挤缝隙」脱身兜底。教训：**JS `\|0` 是向零截断不是向下取整，tile 坐标必须 Math.floor** |
+| 21 | **物种扩容后人口崩到 0（v0.5.0 修复）**：smoke minPop=0、开局 144s 饥荒连环死亡、creature 鲸救援场景卡死 | 生物坐标 tile 中心 +0.5 但栖息地判定用 `Math.round`（10.5→11 向东偏一格）——岸边鱼/蟹/锦鲤被误判假搁浅（16 秒 19 只）→ 救援分支吸走 3-6 名工人 → 农田停摆 → 饥荒螺旋；叠加驯化 tameness 从未初始化（undefined+dt=NaN 永远 <3，**驯化自上线起静默失效**） | 生物位置取整统一 Math.floor（铁律 14）+ Creature 构造器初始化 tameness=0；教训：**给实体加新字段必须初始化，NaN 比较恒 false 是静默失效之王** |
+| 22 | **性能雪崩：smoke 15 分钟超时（v0.5.0 修复）**：每步 1.1ms → 5ms，全套验证 >25 分钟 | 四处叠加：①死生物从不 splice（900+ 尸体被全表扫描遍历）；②鱼群生成无上限（211+）与每岛散布不受繁衍上限约束；③冻结任务永动膨胀（DIG 自愈每 60s 撒 24 个新任务 + 不可达 HUNT/CAPTURE 永久占位，259 条任务表）；④findFrontier 80×80 螺旋 + neighborsOf 每格分配数组（19.4s/万步）、每只可猎兽每帧遍历全部小人找威胁、资源选址 findSpot 每规划周期全扫 | 死者退场（simUpdate splice）+ SPECIES_CAP 生成/散布双处守卫 + freezeTotal 永不重置的放弃表（180/300s）与 40 条护栏 + findFrontier 内联 4 邻且 8s 节流 + 威胁 0.3s 缓存 + 资源选址 20s 节流 + tileAt 单槽 chunk 记忆 → smoke 189s |
 
 数值敏感点：农田真实产能 **6.6 人/块**（4 粮÷55s vs 0.011 粮/s/人），规划器按 6 人/块开荒；人口出生由「农田承载余量」驱动（`田×5 >= 人口+4`），只看存粮会导致繁荣-饥荒震荡。**v0.3.0 产能口径已改**：咖啡田（`crop:"coffee"`）不产粮——开荒线/出生线/进食点统一按 `foodFarms`（`!f.crop`）过滤，**边界含等号语义未动**；咖啡田 90s 产 2 豆进城市 `beans`（90s/2 豆 = `COFFEE_MATURITY/COFFEE_YIELD`）。工程任务（BRIDGE/FILL）的资源消耗检查在 `doWork`（挂起）与 `tasksTake`（跳过领取）**双处**生效且都用**联合库存** `jointStock`，改一处必须改另一处；榨汁/酿酒/烘咖啡的制作成本（水/粮/豆）同理双处，但走**所属城市库存**（`ownerSettle`，非联合库存）。聚落本地库存（`settlement.stock`）含 food 与饮品链 9 字段——**粮食城市内共享**（进食/出生/宴席城内结算，`totalFood()` 仅为全局视角指标），木/石/沙仍走联合库存结算；名册展示各城自己的库存（含水/饮/酒/咖）。
 
@@ -143,15 +151,18 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 ```
 主 agent 拆分任务 → 按规模选模式（6.0）下发
 → 全部子 agent 完成 → 主 agent：node dev/build.js    （产物刷到根目录 index.html）
-→ node dev/test/smoke.js   （逻辑回归，10 项）
+→ node dev/test/smoke.js   （逻辑回归，11 项）
 → node dev/test/entry.js   （入口回归，7 项）
-→ node dev/test/voyage.js  （航海回归，18 项）
+→ node dev/test/voyage.js  （航海回归，21 项）
 → node dev/test/creature.js（动物回归，27 项）
 → node dev/test/explorer.js（探索者回归，6 项）
 → node dev/test/pixel.js   （渲染回归，52 项）
 → node dev/test/family.js  （亲子回归，36 项）
 → node dev/test/pack.js    （背包回归，41 项）
-→ node dev/test/drink.js   （饮品回归，29 项）
+→ node dev/test/drink.js   （饮品回归，28 项）
+→ node dev/test/mood.js    （心情回归，26 项）
+→ node dev/test/species.js （物种回归，21 项）
+→ node dev/test/park.js    （娱乐回归，26 项）
 → open index.html          （运行游戏，只开一次）
 ```
 
@@ -159,8 +170,17 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 
 测试失败的处理顺序：先看是不是**新代码**破坏了既有语义（对照第 4 节死锁表），再考虑断言本身是否需要随设计更新（改断言要说明理由，禁止静默放松）。
 
-## 7. 当前状态快照（2026-09-20 交接 · v0.4.1 增量）
+## 7. 当前状态快照（2026-09-22 交接 · v0.5.0 增量）
 
+- **v0.5.0 大版本（心情 + 船桥 + 物种 + 娱乐，一次发布）**：
+  - **心情系统**：`a.mood` 0~100（id hash 确定性起步 80~100，**不消耗 rand 流**）；`STATE_MOOD` 状态差分（work ×1.9）；`likedJoyOf`（agent.js 顶层）判定喜好匹配的快乐（explore=航海/BRIDGE/FILL/探索远行、animal=CAPTURE/PASTURE/牧羊邻近[pastureNear 1s 缓存]、fishing=FISH、homebody=守家、none=衰减 ×0.8）；睡眠回复 MOOD_SLEEP_REGEN；饮用分档（`SIM["MOOD_"+RES]`）；抑郁三计时器（depressT/moodOkT/depressAge）→ `sickSource="mood"` 走 60s 不治线；decide 分支 2.9 找乐子（`seekDrink(["beer","juice"])` 偏好参数，落空冷却 JOY_CD）；工作分支（3/3.5/3.8/3.95/4/2.8）全部 `!this.depressed` 门控；**航海喜悦必须插在 update 的 voyage 早退之前**
+  - **船穿桥**：world.js 五处碰撞判定（sailing/return/rescue/fishing/fishingReturn）桥格视为水域 + 靠岸点搜索排除桥格——改船舶碰撞必须五处同改
+  - **物种扩充 17 种**：CREATURE_META 数据驱动（tamable/tameJoy/flier/rare/fishJoy 标志）；`updateDog` 泛化为 tamable 通用驯化、`updateBird` 泛化为 flier；habitat "sand"；海豚追随船（updateDolphin）；散布在 populateIslandCreatures（上限守卫 underCap）+ generateRegion hash（cap 守卫）；`SIM.SPECIES_CAP` 驱动繁衍；**fishStock 与鱼群实体解耦**；sprites：四足兽进 QUAD_VIEW 自动得正/背视、flier 走 FLYER_PAL 点阵、其余手写 side+vert
+  - **娱乐链**：tile 28~35（PAVILION/THEATER/ARENA/PARK_GATE/FERRIS/CAROUSEL/COASTER/PIER）；7 新任务（TASK_DEFAULT_NEED/SITE/taskJobPref→BUILD/taskToolOf→hammer 铁律全接线）；PARK 立项铺 SITE 全域 + waterCells 登记 → 完工水面转 PIER + 门楼 + `world.parks` 注册；planner 2f2 娱乐分支（单格设施 per-city 查重 settlementFacility + **busy 集合防同帧撞格**；游乐园选址先陆后海 3×3；园区设施每周期一项目 + **placed 短路**）；agent 分支 2.95 游玩（mood<45 必去 / <70 掷骰 0.15 / 粮荒 totalFood<pop×2 不玩 / PLAY_CD 120s）+ state "play"（decide 早退已含）+ cheerT 余韵（MOOD_CHEER_FACTOR 0.35）
+  - **珍稀捕获喜悦**：FISH 完工查鱼点 1.5 格内 rare+fishJoy → 消耗 + 8 粮 + mood + fishJoy + 纪事
+  - **驯化修复**：tameness 初始化（死锁 #21）
+  - **性能护栏**（死锁 #22）：死者 splice / SPECIES_CAP / freezeTotal 放弃表 / findFrontier 内联+8s / 威胁 0.3s / 资源选址 20s（`_resScanTick`）/ tileAt 单槽记忆（ensureChunk 与 genWorld 换 Map 时失效）
+  - 回归：mood.js 26 + species.js 21 + park.js 26；voyage +3（船穿桥场景 C）
 - **背包系统（v0.4.0）**：每人 10 格随身背包 `a.pack`（food/water/juice/beer/coffee 堆叠 ×3 + rod/axe/pick/hoe/hammer ×1）——补给三触发点（吃饭结算/入库 deposit/领远任务 d>15，扣城库、工具不补）；路上自用（update 内 hunger/thirst<35 原地秒用不停步，包空才走 seekDrink/SAFE_* 老路，**睡眠中也可自用**——顺带封死锁 #18 的睡中脱水路径）；工具首次做对应工作经 tasksTake 挂钩自动领取（FISH→rod 扣联合木 1 不足照发、DIG伐木→axe、DIG石→pick、FARM→hoe、BUILD/BRIDGE/FILL/DOCK→hammer），永久持有，doWork/workTile 双进度路径共用 effort 源头 ×1.2；信息框 2×5 格子（packGridHtml，falsy 容错全暗格）；**渴节奏重调**：THIRST_DECAY **0.7**、DRINK_RESTORE 四项 **100**、直饮 100、drinkWait 1s（探针：直饮 -31%/城库饮用 -72%）；数值全在 config PACK_* 表；回归 test/pack.js 24 项。历史注：v0.3.2 曾报 THIRST_DECAY 落 1.1 但实文件未落（1.4 残留），v0.4.0 直落 0.7——**改 config 后必须 grep 复核实值**
 - **槽位背包（v0.4.1）**：背包重构为**真·槽位制**——`a.pack = Array(10).fill(null)`，槽位 `null | {item, n, haul?}`；4 助手（agent.js 顶层 `packCount/packAdd/packTake/packFree` + `packHaulCount`）为唯一读写入口；同 item 同 haul 先合并、堆满开新格、**总容量 10 格**；堆叠消耗品/资源（wood/stone/sand 新增）×3、工具 ×1；**搬运系统并入**：`a.carrying` 已删除，tasksFinish 产出经 `grantCarry` 入 haul 槽（包满差额就地入库），`deposit()` 只清 haul 槽（个人口粮不上缴、无主时保留不蒸发），decide 搬运分支/die 遗产/render 叠加层/main「背着」行全部由 haul 槽派生；drink.js 的 zeroPack 改 `new Array(10).fill(null)`；回归 test/pack.js 41 项。**朝向修正（v0.4.1 末）**：鲸鱼/小鱼侧视图曾头尾反置（尾鳍画在右侧、与全游戏「头朝右」约定相反），bakeWhale/bakeFish 重绘；**鲸鱼喷水柱系 v0.2.0 像素化时遗失、已恢复**（相位 world.time，与缩放解耦）
 

@@ -16,7 +16,7 @@ function emit(name, data) {
 
 "use strict";
 // ============ 全局配置 ============
-const BUILD_ID = "v0.1.0";
+const BUILD_ID = "v0.5.0";
 
 // tile 类型
 const T = {
@@ -25,6 +25,9 @@ const T = {
   BERRY: 12, FRUIT: 13, PASTURE: 14, CAVE: 15, CLIFF: 16, FENCE: 17,
   QUARRY: 18, SANDPIT: 19, DOCK: 20,
   WELL: 21, BREWERY: 22, PRESS: 23, ROASTERY: 24,
+  BAMBOO: 25, MUSHROOM: 26, MOONBLOOM: 27,   // v0.5.0 新植物：竹林（快木材）/蘑菇（林地小粮）/月光花（夜光环）
+  PAVILION: 28, THEATER: 29, ARENA: 30,      // v0.5.0 娱乐链：凉亭（era1）/戏台（era2）/斗兽场（era2）
+  PARK_GATE: 31, FERRIS: 32, CAROUSEL: 33, COASTER: 34, PIER: 35,   // 游乐园：门楼/摩天轮/旋转木马/过山车/水上浮台
 };
 
 const TILE_META = {
@@ -53,6 +56,17 @@ const TILE_META = {
   [T.BREWERY]:  { name: "酒坊",   color: "#7a4a3a", walk: false, h: 0 },
   [T.PRESS]:    { name: "压榨坊", color: "#6a7a4a", walk: false, h: 0 },
   [T.ROASTERY]: { name: "烘焙坊", color: "#5a4a3a", walk: false, h: 0 },
+  [T.BAMBOO]:   { name: "竹林",   color: "#3f7a3f", walk: false, diggable: true, digTo: T.GRASS, hp: 3 },
+  [T.MUSHROOM]: { name: "蘑菇",   color: "#c9a37a", walk: true, h: 0 },
+  [T.MOONBLOOM]:{ name: "月光花", color: "#aebfe4", walk: true, h: 0 },
+  [T.PAVILION]: { name: "凉亭",   color: "#b0554a", walk: false, h: 0 },
+  [T.THEATER]:  { name: "戏台",   color: "#a06048", walk: false, h: 0 },
+  [T.ARENA]:    { name: "斗兽场", color: "#b0a088", walk: false, h: 0 },
+  [T.PARK_GATE]:{ name: "游乐园门楼", color: "#d0885a", walk: false, h: 0 },
+  [T.FERRIS]:   { name: "摩天轮", color: "#6a9ad0", walk: false, h: 0 },
+  [T.CAROUSEL]: { name: "旋转木马", color: "#d08aa0", walk: false, h: 0 },
+  [T.COASTER]:  { name: "过山车", color: "#c07840", walk: false, h: 0 },
+  [T.PIER]:     { name: "水上浮台", color: "#9a8468", walk: true, h: 0 },
 };
 
 const WORLD_W = 240, WORLD_H = 180;   // 仅作语义参考：无限地图时代初始生成以主岛原点为中心（genWorld），无固定区域
@@ -89,6 +103,9 @@ const SIM = {
   WILD_BREED_CAP: 60,   // 野生可猎动物总量上限
   TURTLE_CAP: 12,       // 海龟总量上限
   WHALE_CAP: 5,         // 鲸总量上限
+  // ---- 物种扩充（v0.5.0）：新物种繁衍上限（珍稀物种种群小而延续；flier 飞行类不在此繁衍）----
+  SPECIES_CAP: { fish: 60, rabbit: 30, fox: 16, bear: 8, horse: 14, penguin: 20, crab: 26,
+    dolphin: 14, shark: 8, unicorn: 6, moonfish: 10, koi: 12, mermaid: 6 },
   ANIMAL_STRAND_DEATH: 180, // 动物被困（脚下不再是栖息地）坚持时长（秒），超时死亡——给救援留足窗口
   // ---- 航海 ----
   SHIP_COST: 10,        // 造一艘远航船耗木材（联合库存）
@@ -124,6 +141,36 @@ const SIM = {
   PACK_RESTOCK: { food: 3, water: 2, juice: 1, beer: 1, coffee: 1 },          // 补给目标量（有城库货才拿并扣城库 stock；工具不补）
   PACK_RESTORE: { food: 50, water: 65, juice: 75, beer: 60, coffee: 50 },     // 路上自用恢复量（果汁/麦酒/咖啡另有精力/醉/咖啡因效果）
   PACK_JUICE_ENERGY: 10,      // 果汁自用额外恢复的精力
+  // ---- 心情与抑郁（v0.5.0）----
+  MOOD_DECAY: 0.35,           // 心情基准衰减/秒（idle；工作最磨人，低落会找乐子）
+  STATE_MOOD: { idle: 1.0, walk: 0.9, run: 1.1, work: 1.9, sleep: 0 },   // 心情衰减状态倍率（睡觉不衰减，另行回复）
+  MOOD_SLEEP_REGEN: 1.0,      // 睡觉心情回复/秒（一夜约 +30：不用花钱的慢通道自愈）
+  MOOD_BEER: 30,              // 喝麦酒的开心（附赠微醺）
+  MOOD_JUICE: 12,             // 喝果汁的开心
+  MOOD_COFFEE: 8,             // 喝咖啡的开心
+  MOOD_WATER: 3,              // 喝清水的开心（解渴不等于开心）
+  MOOD_DRUNK_JOY: 0.4,        // 醉醺醺期间持续微醺快乐/秒
+  MOOD_LIKED_JOY: 1.0,        // 做喜好匹配的事/秒（覆盖工作衰减：干自己爱干的活不叫上班）
+  MOOD_FEAST: 25,             // 丰收宴席全体+
+  MOOD_TAME_BONUS: 15,        // 驯服狗的喜悦（奇幻物种另有 tameJoy）
+  MOOD_SEEK: 35,              // 低于此 → 决策找乐子（城库有酒先喝一杯）
+  MOOD_DEPRESS: 12,           // 心情低于此持续 DEPRESS_TIME → 抑郁
+  DEPRESS_TIME: 60,           // 抑郁判定持续时长（秒）
+  MOOD_RECOVER: 45,           // 心情回到此线持续 MOOD_RECOVER_TIME → 走出抑郁
+  MOOD_RECOVER_TIME: 20,
+  MOOD_SICK_TIME: 300,        // 抑郁累计此时长 → 郁结成疾病倒（sickSource="mood"，走不出则不治）
+  JOY_CD: 60,                 // 找乐子失败冷却（城库无酒时防连帧重试）
+  // ---- 娱乐链与游乐园（v0.5.0）----
+  ENT_POP_MIN: 6,             // 凉亭人口门槛（era≥1，每城一座）
+  THEATER_POP_MIN: 10,        // 戏台/斗兽场人口门槛（era≥2，每城各一座）
+  PARK_POP_MIN: 16,           // 游乐园人口门槛（era≥3，全域唯一）
+  PARK_SIZE: 3,               // 游乐园边长（3×3）
+  PLAY_MOOD: { gazebo: 12, theater: 18, arena: 20, park: 35 },   // 各设施游玩心情回复
+  PLAY_TIME: { gazebo: 3, theater: 5, arena: 6, park: 8 },        // 游玩驻留秒数
+  PLAY_SEEK: 70,              // 心情低于此会想去玩（<45 必去；45~70 看心情掷骰）
+  PLAY_CD: 120,               // 玩过一次的冷却（防一直赖在游乐设施里）
+  CHEER_TIME: 300,            // 尽兴而归：游乐园余韵时长（期间心情衰减 ×CHEER）
+  MOOD_CHEER_FACTOR: 0.35,    // 余韵期间心情衰减倍率（「开心值很持久」的机制落点）
   // ---- 咖啡田 ----
   COFFEE_MATURITY: 90,        // 咖啡田成熟秒数（粮食田用 FARM_MATURITY）
   COFFEE_YIELD: 2,            // 咖啡田每次成熟产豆量
@@ -147,6 +194,21 @@ const SPECIES_AGE = {
   turtle:{ name: "海龟", lifespan: 30, stages: [5, 15, 22] },
   whale: { name: "鲸",   lifespan: 50, stages: [10, 25, 38] },
   bird:  { name: "鸟",   lifespan: 6,  stages: [1, 3, 4] },
+  // ---- 物种扩充（v0.5.0）----
+  rabbit:  { name: "兔",     lifespan: 7,   stages: [0.5, 2, 4] },
+  fox:     { name: "狐",     lifespan: 10,  stages: [1, 4, 7] },
+  bear:    { name: "熊",     lifespan: 20,  stages: [2, 8, 14] },
+  horse:   { name: "马",     lifespan: 22,  stages: [2, 8, 15] },
+  penguin: { name: "企鹅",   lifespan: 12,  stages: [1, 4, 8] },
+  crab:    { name: "蟹",     lifespan: 5,   stages: [0.5, 2, 3] },
+  dolphin: { name: "海豚",   lifespan: 30,  stages: [3, 10, 20] },
+  shark:   { name: "鲨",     lifespan: 25,  stages: [3, 10, 18] },
+  unicorn: { name: "独角兽", lifespan: 120, stages: [10, 40, 80] },
+  moonfish:{ name: "月光鱼", lifespan: 8,   stages: [1, 3, 5] },
+  koi:     { name: "锦鲤",   lifespan: 15,  stages: [1, 5, 10] },
+  phoenix: { name: "凤凰",   lifespan: 200, stages: [20, 80, 150] },
+  fairy:   { name: "小仙龙", lifespan: 150, stages: [10, 50, 100] },
+  mermaid: { name: "人鱼",   lifespan: 100, stages: [10, 40, 70] },
 };
 
 // 时代划分：按已达到的最高聚落等级 / 人口里程碑
@@ -326,6 +388,8 @@ const world = {
   berryStock: new Map(),// 浆果/果树果量 "x,y" → 份数
   fishStock: new Map(), // 浅海鱼群 "x,y" → 份数
   ponds: new Set(),     // 人工池塘格 "x,y"（EXCAV 挖出来的水，显示为池塘而非浅海）
+  mushrooms: new Set(), // 蘑菇格 "x,y"（v0.5.0：一次性行走粮点，采完消失）
+  parks: [],            // [{x,y,x0,y0,x1,y1,water}] 游乐园（v0.5.0 娱乐链，园区 bounding + 门楼）
   lastBridgeHead: null, // 上一条桥线的桥头（续接锚点）
   lastBridgeDir: null,  // 上一条桥线的走向（续接沿此直线延伸，保证笔直）
   pastures: [],         // [{x,y}] 牧场
@@ -335,6 +399,8 @@ const world = {
   quarries: [],         // [{x,y}] 采石场（定期产石材）
   sandpits: [],         // [{x,y}] 沙场（定期产沙土）
   ponds: new Set(),     // 人工池塘（genWorld 重置）
+  mushrooms: new Set(), // 蘑菇格（genWorld 重置）
+  parks: [],            // 游乐园（genWorld 重置）
   lastBridgeHead: null,
   lastBridgeDir: null,
   logs: [],
@@ -355,15 +421,23 @@ function ensureChunk(cx, cy) {
   if (!c) {
     c = { tiles: new Uint8Array(CHUNK * CHUNK), hp: new Float32Array(CHUNK * CHUNK), gen: false };
     world.chunks.set(k, c);
+    _lastChunkKey = null; _lastChunk = null;   // 单槽记忆失效（新 chunk 可能让旧缓存里 undefined 过期）
   }
   return c;
 }
 
 const cIdx = (x, y) => (y & (CHUNK - 1)) * CHUNK + (x & (CHUNK - 1));
 
-// 未生成的 chunk = 虚空（不可走、渲染为深渊色），探索到后由 generateRegion 显现内容
+// 未生成的 chunk = 虚空（不可走、渲染为深渊色），探索到后由 generateRegion 显现内容。
+// v0.5.0 性能：单槽 chunk 记忆——tile 读取有强空间局部性（BFS/扫描连续命中同 chunk），
+// 省掉热路径上每次的 chunkKey 字符串拼接 + Map.get；Map 身份校验兼容 genWorld 重置
+let _memoMap = null, _lastChunkKey = null, _lastChunk = null;
 function tileAt(x, y) {
-  const c = world.chunks.get(chunkKey(x >> 5, y >> 5));
+  const chunks = world.chunks;
+  const k = (x >> 5) + "," + (y >> 5);
+  let c;
+  if (chunks === _memoMap && k === _lastChunkKey) c = _lastChunk;
+  else { c = chunks.get(k); _memoMap = chunks; _lastChunkKey = k; _lastChunk = c; }
   if (!c || !c.gen) return T.VOID;
   return c.tiles[cIdx(x, y)];
 }
@@ -483,14 +557,31 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
         t = T.DEEP;
         // 深海鲸：概率极低，同格防重（区域重算不重复生成）
         if (hash2(x + 441, y + 819) < 0.008 && !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "whale");
+        // 深海新物种（v0.5.0）：鲨（氛围捕食者）/月光鱼（珍稀渔获）——hash 确定性 + 全局上限防泛滥
+        else if (hash2(x + 371, y + 533) < 0.004 &&
+                 creatures.filter(c => c.type === "shark" && !c.dead).length < (SIM.SPECIES_CAP.shark || 8) &&
+                 !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "shark");
+        else if (hash2(x + 719, y + 421) < 0.002 &&
+                 creatures.filter(c => c.type === "moonfish" && !c.dead).length < (SIM.SPECIES_CAP.moonfish || 10) &&
+                 !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "moonfish");
       }
       else if (e < 0.38) {
         t = T.WATER;
+        // 鱼点登记与鱼群实体解耦（v0.5.0）：fishStock 是渔场经济的资源位（渔船/垂钓目标），
+        // 恒定登记；鱼群实体（视觉+生态）另受 SPECIES_CAP.fish 上限约束
         if (hash2(x + 555, y + 777) < 0.02) {
           world.fishStock.set(x + "," + y, 3);
-          if (!creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "fish");
+          if (creatures.filter(c => c.type === "fish" && !c.dead).length < (SIM.SPECIES_CAP.fish || 60) &&
+              !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "fish");
         }
         else if (hash2(x + 613, y + 209) < 0.005 && !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "turtle");
+        // 浅海新物种（v0.5.0）：锦鲤（珍稀渔获）/人鱼（氛围幻影）——hash 确定性 + 全局上限
+        else if (hash2(x + 827, y + 619) < 0.0025 &&
+                 creatures.filter(c => c.type === "koi" && !c.dead).length < (SIM.SPECIES_CAP.koi || 12) &&
+                 !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "koi");
+        else if (hash2(x + 941, y + 701) < 0.0012 &&
+                 creatures.filter(c => c.type === "mermaid" && !c.dead).length < (SIM.SPECIES_CAP.mermaid || 6) &&
+                 !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "mermaid");
       }
       else if (e < 0.42) t = T.SAND;
       else if (e > 0.68) {
@@ -502,6 +593,10 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
         if (m > 0.58 && hash2(x, y) < 0.55) t = T.TREE;
         else if (hash2(x + 777, y + 331) < 0.012) { t = T.BERRY; world.berryStock.set(x + "," + y, SIM.BERRY_STOCK); }
         else if (hash2(x + 919, y + 553) < 0.005) { t = T.FRUIT; world.berryStock.set(x + "," + y, SIM.BERRY_STOCK); }
+        // 新植物（v0.5.0）：竹林（快木材）/蘑菇（一次性行走粮点，采完消失）/月光花（夜光环，兼作奇景点缀）
+        else if (hash2(x + 257, y + 839) < 0.008) t = T.BAMBOO;
+        else if (hash2(x + 457, y + 139) < 0.006) { t = T.MUSHROOM; world.mushrooms.add(x + "," + y); }
+        else if (hash2(x + 613, y + 971) < 0.0012) t = T.MOONBLOOM;
       }
       c.tiles[i] = t;
     }
@@ -584,10 +679,12 @@ function shipTick(dt) {
     if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 15); }
     const aheadX = Math.round(nx + Math.cos(s.ang) * 2.5), aheadY = Math.round(ny + Math.sin(s.ang) * 2.5);
     const ahead = tileAt(aheadX, aheadY);
-    if (ahead !== T.VOID && ahead !== T.DEEP && ahead !== T.WATER) {
+    if (ahead !== T.VOID && ahead !== T.DEEP && ahead !== T.WATER && ahead !== T.BRIDGE) {
       // 发现陆地：靠岸下船（登岛命名/定居化由小人自身逻辑触发）
+      // 靠岸点排除桥格（v0.5.0 船穿桥：船贴桥走时应继续航行，不能在桥头靠岸）
       const sailor = s.sailor;
-      const shore = [{ x: aheadX, y: aheadY }, ...neighborsOf(aheadX, aheadY)].find(p => walkable(p.x, p.y));
+      const shore = [{ x: aheadX, y: aheadY }, ...neighborsOf(aheadX, aheadY)]
+        .find(p => walkable(p.x, p.y) && tileAt(p.x, p.y) !== T.BRIDGE);
       if (shore && sailor) {
         s.state = "docked";
         s.dockedAt = world.time;
@@ -621,7 +718,7 @@ function shipTick(dt) {
     s.revealCd -= dt;
     if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 15); }
     const aheadT = tileAt(Math.round(nx), Math.round(ny));
-    if (walkable(Math.round(nx), Math.round(ny)) && aheadT !== T.WATER && aheadT !== T.DEEP) {
+    if (walkable(Math.round(nx), Math.round(ny)) && aheadT !== T.WATER && aheadT !== T.DEEP && aheadT !== T.BRIDGE) {
       s.state = "docked"; s.dockedAt = world.time;
       if (s.sailor) { s.sailor.x = nx; s.sailor.y = ny; s.sailor.state = "idle"; s.sailor.voyaging = false; }
       continue;
@@ -649,7 +746,7 @@ function shipTick(dt) {
     // 朝目标平滑转向；前方近处是陆地则侧向绕行
     const ax = Math.round(s.x + Math.cos(s.ang) * 3), ay = Math.round(s.y + Math.sin(s.ang) * 3);
     const aheadT = tileAt(ax, ay);
-    if (aheadT !== T.VOID && aheadT !== T.DEEP && aheadT !== T.WATER) {
+    if (aheadT !== T.VOID && aheadT !== T.DEEP && aheadT !== T.WATER && aheadT !== T.BRIDGE) {
       s.ang += (hash2(Math.round(s.x), Math.round(s.y)) < 0.5 ? 1 : -1) * 1.8 * dt;
     } else {
       let diff = Math.atan2(Math.sin(Math.atan2(dy, dx) - s.ang), Math.cos(Math.atan2(dy, dx) - s.ang));
@@ -725,7 +822,7 @@ function tickFishingBoats(dt) {
     const d = Math.hypot(dx, dy) || 1;
     const nx = s.x + (dx / d) * SIM.SHIP_SPEED * dt, ny = s.y + (dy / d) * SIM.SHIP_SPEED * dt;
     const aheadT = tileAt(Math.round(nx), Math.round(ny));
-    if (walkable(Math.round(nx), Math.round(ny)) && aheadT !== T.WATER && aheadT !== T.DEEP) {
+    if (walkable(Math.round(nx), Math.round(ny)) && aheadT !== T.WATER && aheadT !== T.DEEP && aheadT !== T.BRIDGE) {
       // 靠岸卸货：渔获就地入粮池，渔民下船休整（渔船停靠码头，由常规清理回收）
       s.state = "docked"; s.dockedAt = world.time;
       if (s.sailor) {
@@ -1050,7 +1147,7 @@ function expand() {
     // 跨水段不预置桥：工人的 goTo 被水挡住时动态立项（blocked 必邻工人所站格，首格必可达），
     // 完工后沿 corridor 链式续立到对岸
     if (t === T.WATER || t === T.DEEP) { bridges++; }
-    else if (t === T.TREE || t === T.MOUNTAIN) { tasksAdd({ type: "DIG", x, y }); digs++; }
+    else if (t === T.TREE || t === T.BAMBOO || t === T.MOUNTAIN) { tasksAdd({ type: "DIG", x, y }); digs++; }
   };
   for (let i = 0; i <= steps; i++) {
     const x = Math.round(sx0 + dxs * i), y = Math.round(sy0 + dys * i);
@@ -1265,7 +1362,8 @@ const tasks = {
 };
 
 const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 4, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3, FILL: 10, EXCAV: 8,
-  WELL: 12, BREWERY: 18, PRESS: 14, ROASTERY: 16, FETCH_WATER: 4, PRESS_JUICE: 6, BREW_BEER: 8, BREW_COFFEE: 7 };
+  WELL: 12, BREWERY: 18, PRESS: 14, ROASTERY: 16, FETCH_WATER: 4, PRESS_JUICE: 6, BREW_BEER: 8, BREW_COFFEE: 7,
+  GAZEBO: 8, THEATER: 14, ARENA: 16, PARK: 30, FERRIS: 24, CAROUSEL: 16, COASTER: 20 };
 // 工程资源消耗：架桥耗木材、造陆耗沙土（联合库存结算，doWork 挂起 + tasksTake 跳过双处生效）；
 // 制作型任务耗水/粮/豆（非联合库存：完工时从所属城市库存扣除，tasksTake 领取时同步过滤——不足跳过省工）
 const TASK_RESOURCE_COST = { BRIDGE: { wood: 1 }, FILL: { sand: 1 },
@@ -1279,6 +1377,15 @@ function tasksAdd(t) {
   t.workers = new Set();
   if (t.type === "BUILD" || t.type === "FARM" || t.type === "PASTURE" ||
       t.type === "WELL" || t.type === "BREWERY" || t.type === "PRESS" || t.type === "ROASTERY") setTile(t.x, t.y, T.SITE); // 立项即圈地（建筑类沿用 PASTURE 先例）
+  // PARK 圈地（v0.5.0）：整个 bounding 铺 SITE 为工地；水面格登记进 waterCells（完工转浮台）
+  if (t.type === "PARK") {
+    t.waterCells = [];
+    for (let y = t.y0; y <= t.y1; y++) for (let x = t.x0; x <= t.x1; x++) {
+      const tt = tileAt(x, y);
+      if (tt === T.WATER || tt === T.DEEP) t.waterCells.push(x + "," + y);
+      setTile(x, y, T.SITE);
+    }
+  }
   tasks.list.push(t);
   return t;
 }
@@ -1292,7 +1399,8 @@ function taskJobPref(t) {
   switch (t.type) {
     case "FARM": return "FARM";
     case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT": case "EXCAV":
-    case "WELL": case "BREWERY": case "PRESS": case "ROASTERY": return "BUILD";
+    case "WELL": case "BREWERY": case "PRESS": case "ROASTERY":
+    case "GAZEBO": case "THEATER": case "ARENA": case "PARK": case "FERRIS": case "CAROUSEL": case "COASTER": return "BUILD";
     case "CAPTURE": return t.creature && t.creature.type === "fish" ? "FISH" : "HUNT";
     case "HUNT": return "HUNT";
     case "FISH": return "FISH";
@@ -1351,6 +1459,7 @@ function taskToolOf(t) {
     case "DIG": return t.res === "stone" ? "pick" : "axe";
     case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT":
     case "EXCAV": case "WELL": case "BREWERY": case "PRESS": case "ROASTERY":
+    case "GAZEBO": case "THEATER": case "ARENA": case "PARK": case "FERRIS": case "CAROUSEL": case "COASTER":
     case "BRIDGE": case "FILL": case "DOCK": return "hammer";
     default: return null;   // HUNT/GATHER/CAPTURE/FETCH_WATER 等徒手活不发工具
   }
@@ -1429,6 +1538,7 @@ function tasksFinish(t, agent, was) {
       setTile(t.x, t.y, T.GRASS);
       // 产出由工人背包搬运回仓：伐木得木材、采石得石材（was 由 workTile 传入——完工后 tile 已改写，不能重读）
       if (was === T.TREE) { grantCarry(agent, "wood", 6); return null; }
+      if (was === T.BAMBOO) { grantCarry(agent, "wood", 4); return null; }   // 竹林：快木材（工时短产出略薄）
       if (was === T.MOUNTAIN) { grantCarry(agent, "stone", 7); return null; }
       break;
     }
@@ -1475,12 +1585,32 @@ function tasksFinish(t, agent, was) {
       break;
     }
     case "FISH": {
+      // 珍稀渔获（v0.5.0）：鱼点旁有 rare+fishJoy 物种 → 消耗一条，丰厚渔获 + 巨大喜悦 + 纪事
+      let rare = null;
+      for (const c of creatures) {
+        const rm = CREATURE_META[c.type];
+        if (!c.dead && rm.rare && rm.fishJoy &&
+            Math.hypot(c.x - (t.fishX + 0.5), c.y - (t.fishY + 0.5)) < 1.5) { rare = c; break; }
+      }
+      if (rare && agent) {
+        rare.dead = true;
+        grantCarry(agent, "food", 8);
+        agent.mood = Math.min(100, (agent.mood || 0) + CREATURE_META[rare.type].fishJoy);
+        logMsg(`${agent.name} 钓到了珍稀的${CREATURE_META[rare.type].name}！这足以炫耀好些天。`);
+        return null;
+      }
       if (catchFish(t.fishX, t.fishY)) { grantCarry(agent, "food", 4); return null; }
       break;
     }
     case "GATHER": {
-      // 采集：浆果/果树 → 粮；沙滩 → 沙土（产出由工人背包搬运回仓）
+      // 采集：浆果/果树 → 粮；沙滩 → 沙土；蘑菇 → 一次性采粮（tile 变回草地，v0.5.0）
       if (t.res === "sand") { grantCarry(agent, "sand", 3); return null; }
+      if (tileAt(t.x, t.y) === T.MUSHROOM) {
+        setTile(t.x, t.y, T.GRASS);
+        if (world.mushrooms) world.mushrooms.delete(t.x + "," + t.y);
+        grantCarry(agent, "food", 2);
+        return null;
+      }
       if (gatherBerry(t.x, t.y)) { grantCarry(agent, "food", SIM.GATHER_YIELD); return null; }
       break;
     }
@@ -1554,6 +1684,51 @@ function tasksFinish(t, agent, was) {
       logMsg(`烘焙坊落成，咖啡豆的焦香将唤醒小镇的清晨。`);
       break;
     }
+    case "GAZEBO": {
+      setTile(t.x, t.y, T.PAVILION);
+      logMsg(`凉亭落成，路过的居民可以在此歇脚乘凉。`);
+      break;
+    }
+    case "THEATER": {
+      setTile(t.x, t.y, T.THEATER);
+      logMsg(`戏台搭好了，锣鼓一响全城都热闹。`);
+      break;
+    }
+    case "ARENA": {
+      setTile(t.x, t.y, T.ARENA);
+      logMsg(`斗兽场建成，勇者们有了展示胆识的舞台。`);
+      break;
+    }
+    case "PARK": {
+      // 游乐园开园（v0.5.0）：水面格转浮台 PIER，其余工地格还原草地，门楼落成，注册进 world.parks
+      for (const k of (t.waterCells || [])) {
+        const [px, py] = k.split(",").map(Number);
+        setTile(px, py, T.PIER);
+      }
+      for (let y = t.y0; y <= t.y1; y++) for (let x = t.x0; x <= t.x1; x++) {
+        if (tileAt(x, y) === T.SITE) setTile(x, y, T.GRASS);
+      }
+      setTile(t.gx, t.gy, T.PARK_GATE);
+      world.parks.push({ x: t.gx, y: t.gy, x0: t.x0, y0: t.y0, x1: t.x1, y1: t.y1, water: !!t.water });
+      logMsg(`游乐园开园了！摩天轮与旋转木马即将立起，全城都盼着开玩。`);
+      emit("build-done");
+      break;
+    }
+    case "FERRIS": {
+      setTile(t.x, t.y, T.FERRIS);
+      logMsg(`摩天轮立起来了，坐在最高格能看到整片群岛。`);
+      break;
+    }
+    case "CAROUSEL": {
+      setTile(t.x, t.y, T.CAROUSEL);
+      logThrottled(`旋转木马转起来了，音乐盒的旋律飘出很远。`, 30);
+      break;
+    }
+    case "COASTER": {
+      setTile(t.x, t.y, T.COASTER);
+      logThrottled(`过山车铺完了最后一截轨道，尖叫声即将响彻园区。`, 30);
+      break;
+    }
     case "FETCH_WATER": {
       // 打水：完成者背包驮水回仓（haul 槽，deposit 入所属城市 water 字段）；
       // 一趟 5 桶跨两格驮（3+2，低衰减口径下一次直饮约抵 5 桶，库存才攒得起来，酿造链才有原料）
@@ -1614,12 +1789,27 @@ const CREATURE_META = {
   goat:  { name: "羊",   yield: 5, speed: 0.7,  flee: 1.25, size: 0.8,  habitat: "grass",  hunt: true },
   deer:  { name: "鹿",   yield: 4, speed: 1.3,  flee: 1.7,  size: 0.85, habitat: "grass",  hunt: true },
   boar:  { name: "野猪", yield: 6, speed: 0.9,  flee: 1.0,  size: 0.9,  habitat: "forest", hunt: true },
-  dog:   { name: "狗",   yield: 0, speed: 2.2,  flee: 0,    size: 0.55, habitat: "grass",  hunt: false },
+  dog:   { name: "狗",   yield: 0, speed: 2.2,  flee: 0,    size: 0.55, habitat: "grass",  hunt: false, tamable: true, tameJoy: 15 },
   wolf:  { name: "狼",   yield: 0, speed: 1.2,  flee: 0,    size: 0.7,  habitat: "forest", hunt: false, predates: "goat" },
   fish:  { name: "鱼群", yield: 0, speed: 0.8,  flee: 0,    size: 0.5,  habitat: "water",  hunt: false, school: 4 },
   turtle:{ name: "海龟", yield: 0, speed: 0.25, flee: 0,    size: 0.6,  habitat: "water",  hunt: false },
   whale: { name: "鲸",   yield: 0, speed: 0.6,  flee: 0,    size: 2.6,  habitat: "deep",   hunt: false },
-  bird:  { name: "鸟",   yield: 0, speed: 2.5,  flee: 0,    size: 0.3,  habitat: "air",    hunt: false },
+  bird:  { name: "鸟",   yield: 0, speed: 2.5,  flee: 0,    size: 0.3,  habitat: "air",    hunt: false, flier: true },
+  // ---- 物种扩充（v0.5.0）----
+  rabbit:  { name: "兔",     yield: 2, speed: 1.7,  flee: 2.0,  size: 0.4,  habitat: "grass",  hunt: true },
+  fox:     { name: "狐",     yield: 3, speed: 1.5,  flee: 1.9,  size: 0.6,  habitat: "forest", hunt: true },
+  bear:    { name: "熊",     yield: 10, speed: 0.85, flee: 0.7, size: 1.2,  habitat: "forest", hunt: true },
+  horse:   { name: "马",     yield: 0, speed: 1.3,  flee: 1.7,  size: 1.1,  habitat: "grass",  hunt: false },
+  penguin: { name: "企鹅",   yield: 0, speed: 0.45, flee: 0.8,  size: 0.45, habitat: "sand",   hunt: false },
+  crab:    { name: "蟹",     yield: 1, speed: 0.5,  flee: 0.9,  size: 0.3,  habitat: "sand",   hunt: true },
+  dolphin: { name: "海豚",   yield: 0, speed: 2.2,  flee: 0,    size: 0.9,  habitat: "water",  hunt: false },
+  shark:   { name: "鲨",     yield: 0, speed: 1.2,  flee: 0,    size: 1.7,  habitat: "deep",   hunt: false },
+  unicorn: { name: "独角兽", yield: 0, speed: 1.6,  flee: 1.5,  size: 0.9,  habitat: "grass",  hunt: false, tamable: true, tameJoy: 25, rare: true },
+  moonfish:{ name: "月光鱼", yield: 0, speed: 0.7,  flee: 0,    size: 0.45, habitat: "deep",   hunt: false, rare: true, fishJoy: 25 },
+  koi:     { name: "锦鲤",   yield: 0, speed: 0.9,  flee: 0,    size: 0.4,  habitat: "water",  hunt: false, rare: true, fishJoy: 15 },
+  phoenix: { name: "凤凰",   yield: 0, speed: 2.4,  flee: 0,    size: 0.65, habitat: "air",    hunt: false, flier: true, rare: true },
+  fairy:   { name: "小仙龙", yield: 0, speed: 2.6,  flee: 0,    size: 0.4,  habitat: "air",    hunt: false, flier: true, rare: true },
+  mermaid: { name: "人鱼",   yield: 0, speed: 0.6,  flee: 0,    size: 0.7,  habitat: "water",  hunt: false, rare: true },
 };
 
 // 栖息地判定：生物只在自己的栖息地内活动
@@ -1629,6 +1819,7 @@ function habitatOk(c, x, y) {
     case "water":  return t === T.WATER;
     case "deep":   return t === T.DEEP || t === T.WATER;
     case "forest": return t === T.GRASS || t === T.TREE;
+    case "sand":   return t === T.SAND;                    // 沙滩：企鹅与螃蟹的沿岸栖息带（v0.5.0）
     case "air":    return true;   // 鸟在天上飞，不受地形限制
     default:       return t === T.GRASS || t === T.SAND;
   }
@@ -1651,6 +1842,7 @@ class Creature {
     this.moveCd = randRange(0, 2);
     this.breedCd = 120;
     this.outputCd = SIM.PASTURE_INTERVAL;
+    this.tameness = 0;        // 驯化进度（v0.5.0 修正：原版从未初始化——undefined+dt=NaN 永远到不了 3，驯化静默失效）
   }
 
   isWild() { return !this.pasture && this.type !== "dog" && this.type !== "bird"; }
@@ -1676,7 +1868,9 @@ class Creature {
     }
     // 搁浅/被困：施工（填海/造陆）改变地形后脚下不再是栖息地，困太久会死，等待有人救援
     // （圈养动物在人类管理的牧场里，脚下是 PASTURE tile，不参与搁浅判定）
-    if (this.type !== "bird" && !this.pasture && !habitatOk(this, Math.round(this.x), Math.round(this.y))) {
+    // 位置取整必须 Math.floor（v0.5.0 修正）：实体坐标是 tile 中心 +0.5，Math.round(10.5)=11 会向东偏一格——
+    // 岸边的鱼/蟹/锦鲤被误判站上沙滩/虚空 → 假搁浅潮 → 救援吸干劳动力 → 农田停摆饥荒（round/floor 家族，同死锁 #20）
+    if (this.type !== "bird" && !this.pasture && !habitatOk(this, Math.floor(this.x), Math.floor(this.y))) {
       this.strandT = (this.strandT || 0) + dt;
       if (this.strandT > SIM.ANIMAL_STRAND_DEATH) {
         this.dead = true;
@@ -1689,30 +1883,41 @@ class Creature {
     }
     this.strandT = 0;
     if (this.pasture) { this.updatePasture(dt); return; }
-    if (this.type === "dog") { this.updateDog(dt); return; }
-    if (this.type === "bird") { this.updateBird(dt); return; }
+    // 行为分发泛化（v0.5.0）：tamable 走驯化/跟随路径（狗/独角兽），flier 走飞行路径（鸟/凤凰/仙龙）
+    if (CREATURE_META[this.type].tamable) { this.updateDog(dt); return; }
+    if (CREATURE_META[this.type].flier) { this.updateBird(dt); return; }
     if (this.type === "wolf") { this.updateWolf(dt); return; }
+    if (this.type === "dolphin") { this.updateDolphin(dt); return; }
     this.updateWild(dt);
   }
 
   // 野生：游荡（栖息地内）；可猎物种会被猎人逼近而逃离（附近有狗则被围堵减速）
   updateWild(dt) {
     const meta = CREATURE_META[this.type];
-    // 逃跑判定：只对可猎物种生效
+    // 逃跑判定：只对可猎物种生效（0.3s 节流 v0.5.0——45 小人 × 每只可猎兽逐帧扫描是热点；
+    // 威胁与狗缓存 0.3s，逃跑移动仍逐帧进行）
     if (meta.hunt) {
-      let threat = null, threatD = 2.8;
-      for (const a of agents) {
-        const d = Math.hypot(a.x - this.x, a.y - this.y);
-        if (d < threatD) { threatD = d; threat = a; }
+      this.threatCd = (this.threatCd || 0) - dt;
+      if (this.threatCd <= 0) {
+        this.threatCd = 0.3;
+        let threat = null, threatD = 2.8;
+        for (const a of agents) {
+          const d = Math.hypot(a.x - this.x, a.y - this.y);
+          if (d < threatD) { threatD = d; threat = a; }
+        }
+        let dogNear = false;
+        for (const c of creatures) {
+          if (c.type === "dog" && !c.dead && Math.hypot(c.x - this.x, c.y - this.y) < 4) { dogNear = true; break; }
+        }
+        this.threat = threat;
+        this.dogNear = dogNear;
       }
-      let dogNear = false;
-      for (const c of creatures) {
-        if (c.type === "dog" && !c.dead && Math.hypot(c.x - this.x, c.y - this.y) < 4) { dogNear = true; break; }
-      }
+      const threat = (this.threat && !this.threat.dead && Math.hypot(this.threat.x - this.x, this.threat.y - this.y) < 3.5)
+        ? this.threat : null;
       if (threat) {
         this.fleeT = (this.fleeT || 0) + dt;
         const tired = this.fleeT > 8 ? 0.4 : 1;
-        const sp = (dogNear ? 0.55 : meta.flee) * tired * dt;
+        const sp = ((this.dogNear ? 0.55 : meta.flee) * tired) * dt;
         const dx = this.x - threat.x, dy = this.y - threat.y;
         const d = Math.hypot(dx, dy) || 1;
         const fox = this.x, foy = this.y;
@@ -1737,7 +1942,7 @@ class Creature {
       const sp = meta.speed * dt;
       const ox = this.x, oy = this.y;
       const nx = this.x + (dx / d) * sp, ny = this.y + (dy / d) * sp;
-      if (habitatOk(this, Math.round(nx), Math.round(ny))) { this.x = nx; this.y = ny; }
+      if (habitatOk(this, Math.floor(nx), Math.floor(ny))) { this.x = nx; this.y = ny; }
       if (this.x !== ox || this.y !== oy) this.updateFace(dx, dy);   // 实际位移才更新（被栖息地挡住则保持）——与 stepToward 同口径
       if (d <= sp) this.target = null;
     }
@@ -1770,7 +1975,7 @@ class Creature {
       const sp = CREATURE_META[this.type].speed * dt;
       const ox = this.x, oy = this.y;
       const nx = this.x + (dx / d) * sp, ny = this.y + (dy / d) * sp;
-      if (habitatOk(this, Math.round(nx), Math.round(ny))) { this.x = nx; this.y = ny; }
+      if (habitatOk(this, Math.floor(nx), Math.floor(ny))) { this.x = nx; this.y = ny; }
       if (this.x !== ox || this.y !== oy) this.updateFace(dx, dy);   // 同 updateWild：实际位移才更新朝向
       if (d <= sp) this.target = null;
     }
@@ -1788,7 +1993,8 @@ class Creature {
   }
 
   // 狗：认定了固定主人就一生跟随（主人去世后才重新认主）
-  // 狗：野生幼犬需要被驯化——有人靠近停留累计驯化进度，成功后一生认定固定主人
+  // 驯化（v0.5.0 泛化）：野生个体需要被靠近驯化——有人停留累计驯化进度，成功后认定固定主人；
+  // tamable 物种共用本路径（狗 / 独角兽），驯化成功的喜悦按 meta.tameJoy 回馈驯服者
   updateDog(dt) {
     if (!this.tamed || !this.owner || this.owner.dead) {
       // 未驯化（或主人去世重新待驯）：游荡 + 驯化检测
@@ -1813,13 +2019,27 @@ class Creature {
         if (this.tameness >= 3) {
           this.tamed = true;
           this.owner = tamer;
-          logThrottled(`${tamer.name} 驯服了一条狗，狗认定他为主人。`, 15);
+          // 驯化的喜悦（v0.5.0）：驯服者心情大涨（独角兽 25 / 狗 15，meta.tameJoy 定义）
+          tamer.mood = Math.min(100, (tamer.mood || 0) + (CREATURE_META[this.type].tameJoy || SIM.MOOD_TAME_BONUS || 15));
+          logThrottled(`${tamer.name} 驯服了一条${CREATURE_META[this.type].name}，它认定他为主人。`, 15);
         }
       }
       return;
     }
     const d = Math.hypot(this.owner.x - this.x, this.owner.y - this.y);
     if (d > 4) this.stepToward(this.owner, this.speed * dt);
+  }
+
+  // 海豚（v0.5.0）：追随航行的船嬉戏（追随 26 格内最近的海上船只；无船则普通游荡）
+  updateDolphin(dt) {
+    let best = null, bd = 26;
+    for (const s of world.ships) {
+      if (s.state !== "sailing" && s.state !== "fishing" && s.state !== "return") continue;
+      const d = Math.hypot(s.x - this.x, s.y - this.y);
+      if (d < bd) { bd = d; best = s; }
+    }
+    if (best) { this.stepToward(best, this.speed * dt); return; }
+    this.updateWild(dt);
   }
 
   // 圈养：在栏内小范围活动，定期产粮 + 繁殖（水生物种圈养于水域渔场，游荡判定走栖息地）
@@ -1875,7 +2095,7 @@ class Creature {
 
   moveBy(mx, my) {
     const nx = this.x + mx, ny = this.y + my;
-    if (habitatOk(this, Math.round(nx), Math.round(ny))) { this.x = nx; this.y = ny; }
+    if (habitatOk(this, Math.floor(nx), Math.floor(ny))) { this.x = nx; this.y = ny; }
     else this.target = null;
   }
 }
@@ -1888,14 +2108,15 @@ function spawnCreature(x, y, type, captured) {
   return c;
 }
 
-// 在一座岛上散布生物：牲畜兽群 + 野生鹿/野猪/狼 + 海龟（按栖息地落位）
+// 在一座岛上散布生物：牲畜兽群 + 野生鹿/野猪/狼 + 海龟（按栖息地落位）+ 新物种散布（v0.5.0）
 function populateIslandCreatures(bx, by, r) {
-  let grass = 0, forestEdge = 0, water = 0;
+  let grass = 0, forestEdge = 0, water = 0, sand = 0;
   for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
     const t = tileAt(bx + dx, by + dy);
     if (t === T.GRASS) grass++;
     if (t === T.TREE) forestEdge++;
     if (t === T.WATER) water++;
+    if (t === T.SAND) sand++;
   }
   let n = 0;
   if (grass < 12) return 0;
@@ -1934,6 +2155,44 @@ function populateIslandCreatures(bx, by, r) {
       if (tileAt(cx, cy) === T.WATER) { spawnCreature(cx, cy, "turtle"); n++; break; }
     }
   }
+  // ---- 新物种散布（v0.5.0）----
+  // 上限守卫：每岛散布不受繁衍上限约束会让种群随岛屿数无界增长（性能与生态双重问题）——
+  // 生成前查全局计数，已达 SIM.SPECIES_CAP 的物种跳过
+  const underCap = type => creatures.filter(c => c.type === type && !c.dead).length < (SIM.SPECIES_CAP[type] || 1e9);
+  // 沙滩：企鹅与螃蟹混居（沿岸栖息带）
+  if (sand > 5 && (underCap("penguin") || underCap("crab"))) {
+    for (let i = 0; i < 1 + randInt(0, 2); i++) {
+      const kind = rand() < 0.5 ? "penguin" : "crab";
+      if (!underCap(kind)) continue;
+      const s = findSpot(bx, by, 1, r, T.SAND);
+      if (s) { spawnCreature(s.x, s.y, kind); n++; }
+    }
+  }
+  // 草地加种：兔群（快繁衍）+ 零星野马
+  for (let i = 0; i < 1 + randInt(0, 3) && underCap("rabbit"); i++) {
+    const s = findSpot(bx, by, 2, r, T.GRASS);
+    if (s) { spawnCreature(s.x, s.y, "rabbit"); n++; }
+  }
+  if (rand() < 0.4 && underCap("horse")) {
+    const s = findSpot(bx, by, 3, r, T.GRASS);
+    if (s) { spawnCreature(s.x, s.y, "horse"); n++; }
+  }
+  // 林地加种：狐；大森林偶见熊（猎物丰厚但危险）
+  if (forestEdge > 6) {
+    for (let i = 0; i < 1 + randInt(0, 2) && underCap("fox"); i++) {
+      const s = findSpot(bx, by, 2, r, T.GRASS, [T.BERRY, T.FRUIT]);
+      if (s) { spawnCreature(s.x, s.y, "fox"); n++; }
+    }
+    if (rand() < 0.3 && underCap("bear")) {
+      const s = findSpot(bx, by, 2, r, T.TREE);
+      if (s) { spawnCreature(s.x, s.y, "bear"); n++; }
+    }
+  }
+  // 珍稀：独角兽（约 1/8 的岛有一只，雪白草地幻兽，可驯化）
+  if (rand() < 0.12 && underCap("unicorn")) {
+    const s = findSpot(bx, by, 3, r, T.GRASS);
+    if (s) { spawnCreature(s.x, s.y, "unicorn"); n++; logThrottled("传闻这座岛上有独角兽出没。", 60); }
+  }
   return n;
 }
 
@@ -1961,6 +2220,18 @@ function wildBreedTick() {
     const w0 = whales[randInt(0, whales.length - 1)];
     const pw = findSpot(Math.round(w0.x), Math.round(w0.y), 0, 8, T.DEEP);
     if (pw) spawnCreature(pw.x, pw.y, "whale");
+  }
+  // 新物种按上限表繁衍（v0.5.0）：SIM.SPECIES_CAP 驱动，栖息地→tile 映射选址；flier 不在此繁衍
+  const habTile = { grass: T.GRASS, forest: T.TREE, sand: T.SAND, water: T.WATER, deep: T.DEEP };
+  for (const type of Object.keys(SIM.SPECIES_CAP || {})) {
+    const cap = SIM.SPECIES_CAP[type];
+    const meta = CREATURE_META[type];
+    if (!meta || meta.flier) continue;
+    const pool = creatures.filter(c => c.isWild() && !c.dead && c.type === type);
+    if (pool.length === 0 || pool.length >= cap) continue;
+    const p0 = pool[randInt(0, pool.length - 1)];
+    const ps = findSpot(Math.round(p0.x), Math.round(p0.y), 0, 6, habTile[meta.habitat] || T.GRASS);
+    if (ps) spawnCreature(ps.x, ps.y, type);
   }
 }
 // 鲸：深海罕见生物（航海氛围），随深海探索偶现
@@ -2033,6 +2304,9 @@ function pickNativeName() {
 
 let _agentIdSeq = 1;
 
+// 受困动物扫描缓存（decide 2.8 全局 1s 节流，见 decide）
+const _rescueScan = { t: -9, victim: null };
+
 // 职业表与社会需求比例：探险家看探索欲、工匠看勤劳，其余随机
 const JOBS = {
   farmer:      { name: "农夫",   task: "FARM" },
@@ -2056,6 +2330,31 @@ const _HOBBY_ROLL = () => {
   const r = rand();
   return r < 0.22 ? "explore" : r < 0.44 ? "homebody" : r < 0.64 ? "animal" : r < 0.84 ? "fishing" : "none";
 };
+
+// ---- 心情与喜好快乐（冻结契约 v0.5.0）----
+// likedJoyOf：小人此刻是否在做「喜好匹配」的事——命中返回 1（每秒回 MOOD_LIKED_JOY，覆盖工作衰减），否则 0。
+// 映射（用户口径逐字落地）：
+//   explore 向往远方 → 航海（voyage）/铺路搭桥（BRIDGE/FILL 工程）/自发探索远行
+//   animal  喜爱牲畜 → 捕获/建牧场任务；idle/walk 时 4 格内有圈养牲畜（牧羊）
+//   fishing 垂钓爱好者 → FISH 捕鱼任务
+//   homebody 恋家 → idle 时守在家里 2.5 格内
+//   none 随遇而安 → 无专属快乐，但心情衰减 ×0.8（看得开，在 updateMood 内实现）
+// 判定纯读 agent/creature 状态零副作用；creature.js 在拼接序中先于 agent.js，creatures 可直接引用
+function likedJoyOf(a) {
+  if (a.hobby === "explore") {
+    if (a.state === "voyage" || a.exploring) return 1;
+    if (a.state === "work" && a.task && (a.task.type === "BRIDGE" || a.task.type === "FILL")) return 1;
+  }
+  if (a.hobby === "fishing" && a.state === "work" && a.task && a.task.type === "FISH") return 1;
+  if (a.hobby === "animal") {
+    if (a.state === "work" && a.task && (a.task.type === "CAPTURE" || a.task.type === "PASTURE")) return 1;
+    // 牧羊邻近判定走 1s 节流缓存（a.pastureNear，update 内扫描）——生物扩容后逐帧全表扫是性能热点
+    if ((a.state === "idle" || a.state === "walk") && a.pastureNear) return 1;
+  }
+  if (a.hobby === "homebody" && a.home && (a.state === "idle" || a.state === "walk") &&
+      Math.hypot(a.home.x + 0.5 - a.x, a.home.y + 0.5 - a.y) < 2.5) return 1;
+  return 0;
+}
 
 // ---- 四方向朝向（冻结契约）：主轴判定 + 持锁迟滞（agent 与 creature 统一口径）----
 // faceOf：位移方向 → 朝向主轴（|dx|>|dy| 取水平，否则取垂直）
@@ -2174,6 +2473,11 @@ class Agent {
                                            // 60 起步的居民会在头粮前饿穿进入必死病程——开局崩盘的种子）
     this.energy = randRange(55, 100);
     this.thirst = 100;                     // 水分：0~100，100 = 不渴（<30 找水喝，<8 持续脱水病倒）
+    // 心情：0~100，100 = 开心（工作磨人、喜好回甘；<12 持续抑郁，走不出会郁结成疾）。
+    // 初值走 id hash 确定性（80~100 起步），不消耗 rand 流——保持既有随机序列逐位一致（v0.5.0 契约）
+    this.mood = 80 + hash2(this.id, 7777) * 20;
+    this.depressed = false;                // 抑郁：什么都不想干，长期走不出会病倒
+    this.cheerT = 0;                       // 尽兴而归：游乐园游玩后心情衰减放缓的剩余秒数
     this.drunkT = 0;                       // 醉酒剩余秒数（喝麦酒：移速放缓、饥饿衰减放缓）
     this.coffeeT = 0;                      // 咖啡因剩余秒数（喝咖啡：精力衰减放缓）
     // 随身背包（冻结契约 v0.4.1）：10 个物理槽位装任意东西（slot = { item, n, haul? }，全空起步）
@@ -2199,8 +2503,12 @@ class Agent {
     // 年龄：1 游戏年（12 昼夜）长 1 岁，寿命封顶
     this.age = Math.min(SPECIES_AGE.human.lifespan, this.age + dt / (SIM.DAY_LEN * SIM.YEAR_DAYS));
 
-    // 航海中：一切需求冻结（船上有补给），坐标由船携带
-    if (this.state === "voyage") return;
+    // 航海中：一切需求冻结（船上有补给），坐标由船携带。
+    // 例外——航海喜悦（v0.5.0）：向往远方的人出海是圆梦，心情照涨（必须在早退之前处理，否则远航心情永远冻结）
+    if (this.state === "voyage") {
+      if (this.hobby === "explore") this.mood = Math.min(100, this.mood + SIM.MOOD_LIKED_JOY * dt);
+      return;
+    }
 
     // 被动点亮：所有人类单位走到已点亮区边缘时，顺手点亮眼前的虚空（探索不只属于探险家）
     this.litCd = (this.litCd || 0) - dt;
@@ -2281,9 +2589,44 @@ class Agent {
       }
     } else this.dehydrT = 0;
 
-    // 生病：饥饿或精力归零持续 30 秒 → 病倒；脱水（thirst<8）持续 40 秒 → 病倒；再持续 60 秒无救治 → 死亡
-    //      痊愈条件：饱食与精力都恢复到 40 以上（脱水病倒还需水分恢复）
-    const ailment = this.hunger <= 0 ? "hunger" : (this.energy <= 0 ? "energy" : (this.thirst < 8 ? "thirst" : null));
+    // ---- 心情与抑郁（v0.5.0）----
+    // mood < MOOD_DEPRESS 持续 DEPRESS_TIME → 抑郁（放下手头一切活计）；
+    // mood ≥ MOOD_RECOVER 持续 MOOD_RECOVER_TIME → 走出抑郁；抑郁累计 MOOD_SICK_TIME → 郁结成疾
+    if (this.mood < SIM.MOOD_DEPRESS && !this.depressed) {
+      this.depressT = (this.depressT || 0) + dt;
+      if (this.depressT >= SIM.DEPRESS_TIME) {
+        this.depressed = true;
+        this.depressT = 0;
+        this.depressAge = 0;
+        if (this.task) this.abandonTask();   // 什么都不想干：在施工地也一并放下（工位释放，防死任务占名额）
+        logMsg(`${this.name} 陷入了抑郁，对什么都提不起劲……`);
+      }
+    } else if (this.mood >= SIM.MOOD_DEPRESS) this.depressT = 0;
+    if (this.depressed) {
+      if (this.mood >= SIM.MOOD_RECOVER) {
+        this.moodOkT = (this.moodOkT || 0) + dt;
+        if (this.moodOkT >= SIM.MOOD_RECOVER_TIME) {
+          this.depressed = false;
+          this.moodOkT = 0;
+          this.depressAge = 0;
+          logMsg(`${this.name} 走出了抑郁的阴影，重新振作起来。`);
+        }
+      } else this.moodOkT = 0;
+      if (this.depressed) {   // 走出判定可能在上一帧刚生效：仍抑郁才累计病倒计时
+        this.depressAge = (this.depressAge || 0) + dt;
+        if (!this.sick && this.depressAge >= SIM.MOOD_SICK_TIME) {
+          this.sick = true;
+          this.sickSource = "mood";
+          this.sickTime = 0;
+          logMsg(`${this.name} 郁结于心，病倒了。`);
+        }
+      }
+    } else this.depressAge = 0;
+
+    // 生病：饥饿或精力归零持续 30 秒 → 病倒；脱水（thirst<8）持续 40 秒 → 病倒；抑郁走不出 → 郁结成疾；
+    //      再持续 60 秒无救治 → 死亡。痊愈条件：饱食与精力都恢复到 40 以上（脱水另需水分恢复；抑郁另需走出）
+    const ailment = this.hunger <= 0 ? "hunger" : (this.energy <= 0 ? "energy" :
+      (this.thirst < 8 ? "thirst" : (this.depressed && this.sickSource === "mood" ? "mood" : null)));
     if (ailment === "hunger" || ailment === "energy") {
       this.ailmentCd = (this.ailmentCd || 0) + dt;
       if (!this.sick && this.ailmentCd > 30) {
@@ -2301,11 +2644,13 @@ class Agent {
       if (this.sickTime > 60) {
         this.die(ailment === "hunger" ? "因长期饥饿病倒，不治身亡"
                : ailment === "thirst" ? "因脱水病倒，不治身亡"
+               : ailment === "mood" ? "因长期抑郁病倒，不治身亡"
                : "积劳成疾，撒手人寰");
         return;
       }
     } else if (!ailment && this.sick && this.hunger > 40 && this.energy > 40 &&
-               (this.sickSource !== "thirst" || this.thirst > 30)) {
+               (this.sickSource !== "thirst" || this.thirst > 30) &&
+               (this.sickSource !== "mood" || !this.depressed)) {
       this.sick = false;
       logThrottled(`${this.name} 痊愈了，重新投入生活。`, 20);
     }
@@ -2320,10 +2665,24 @@ class Agent {
     this.hunger -= SIM.HUNGER_DECAY * stMul(SIM.STATE_HUNGER) * (this.drunkT > 0 ? SIM.BEER_HUNGER_FACTOR : 1) * dt;
     if (this.state !== "sleep") this.energy -= SIM.ENERGY_DECAY * stMul(SIM.STATE_ENERGY) * (this.coffeeT > 0 ? SIM.COFFEE_ENERGY_FACTOR : 1) * dt;
     this.thirst = Math.max(0, this.thirst - SIM.THIRST_DECAY * stMul(SIM.STATE_THIRST) * dt);
+    this.updateMood(dt, stMul);
 
     // 饮品效果计时：醉酒/咖啡因随时间消退
     if (this.drunkT > 0) this.drunkT = Math.max(0, this.drunkT - dt);
     if (this.coffeeT > 0) this.coffeeT = Math.max(0, this.coffeeT - dt);
+
+    // 月光花光环 + 牧羊邻近扫描（1s 节流；夜晚花田夜游的浪漫与牧羊的快乐，见 updateMood/likedJoyOf）
+    this.bloomCd = (this.bloomCd || 0) - dt;
+    if (this.bloomCd <= 0) {
+      this.bloomCd = 1;
+      this.scanBloom();
+      this.pastureNear = false;
+      if (this.hobby === "animal") {
+        for (const c of creatures) {
+          if (!c.dead && c.pasture && Math.hypot(c.x - this.x, c.y - this.y) < 4) { this.pastureNear = true; break; }
+        }
+      }
+    }
 
     if (this.hunger <= 0) {
       this.hunger = 0;
@@ -2355,7 +2714,7 @@ class Agent {
             packTake(pk, alt, 1);
             this.thirst = Math.min(100, this.thirst + SIM.PACK_RESTORE[alt]);
             if (alt === "juice") this.energy = Math.min(100, this.energy + SIM.PACK_JUICE_ENERGY);
-            else if (alt === "beer") this.drunkT = SIM.DRUNK_TIME;
+            else if (alt === "beer") { this.drunkT = SIM.DRUNK_TIME; this.mood = Math.min(100, this.mood + SIM.MOOD_BEER); }
             else this.coffeeT = SIM.COFFEE_TIME;
           }
         }
@@ -2392,6 +2751,8 @@ class Agent {
           if ((st[this.drinkRes] || 0) > 0) {
             st[this.drinkRes] -= 1;
             this.thirst = Math.min(100, this.thirst + SIM.DRINK_RESTORE[this.drinkRes]);
+            // 心情分档回复（v0.5.0）：酒最开心、果汁/咖啡其次、清水只是解渴
+            this.mood = Math.min(100, this.mood + (SIM["MOOD_" + this.drinkRes.toUpperCase()] || 0));
             if (this.drinkRes === "beer") { this.drunkT = SIM.DRUNK_TIME; logThrottled(`${this.name} 畅饮了麦酒，脚步都有点飘了。`, 20); }
             else if (this.drinkRes === "coffee") { this.coffeeT = SIM.COFFEE_TIME; logThrottled(`${this.name} 畅饮了热咖啡，精神抖擞。`, 20); }
             else if (this.drinkRes === "juice") { this.energy = Math.min(100, this.energy + 10); logThrottled(`${this.name} 畅饮了鲜果汁。`, 20); }
@@ -2400,6 +2761,7 @@ class Agent {
           // 库存恰被喝光：白跑一趟，等下次决策另寻水源
         } else {
           this.thirst = Math.min(100, this.thirst + SIM.DRINK_RESTORE.water);   // 井水/河水直饮（恢复量与城库清水同源：100）
+          this.mood = Math.min(100, this.mood + SIM.MOOD_WATER);
           logThrottled(`${this.name} 趴在水边畅饮了一通。`, 20);
         }
         this.drinkRes = null; this.drinkCity = null;
@@ -2410,12 +2772,93 @@ class Agent {
         this.energy += SIM.ENERGY_REGEN * dt;
         if (this.energy >= 100 || isDaytime()) this.state = "idle";
         break;
+      case "play": {
+        // 游玩驻留（v0.5.0 娱乐链）：到点结算心情；游乐园另给 cheerT 余韵（衰减 ×0.35，开心很持久）
+        this.playWait -= dt;
+        if (this.playWait <= 0) {
+          const m = SIM.PLAY_MOOD[this.playKind] || 10;
+          this.mood = Math.min(100, this.mood + m);
+          if (this.playKind === "park") {
+            this.cheerT = SIM.CHEER_TIME;
+            logThrottled(`${this.name} 在游乐园玩了个痛快，尽兴而归。`, 30);
+          } else {
+            logThrottled(`${this.name} 玩得很开心，心情舒畅多了。`, 30);
+          }
+          this.playCdUntil = world.time + (SIM.PLAY_CD || 120);
+          this.state = "idle";
+        }
+        break;
+      }
       case "work": this.doWork(dt); break;
     }
   }
 
+  // 月光花光环扫描（1s 节流，T.MOONBLOOM 未接入时恒 false）：夜晚身旁 3 格内有月光花 → updateMood 缓慢回复
+  scanBloom() {
+    const bl = T.MOONBLOOM;
+    if (bl === undefined) { this.bloomNear = false; return; }
+    const bx = Math.round(this.x), by = Math.round(this.y);
+    let near = false;
+    for (let dy = -3; dy <= 3 && !near; dy++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        if (tileAt(bx + dx, by + dy) === bl) { near = true; break; }
+      }
+    }
+    this.bloomNear = near;
+  }
+
+  // 最近娱乐设施（decide 2.95 用，结果缓存 2s 防高频扫描）：
+  // 游乐园走 world.parks 注册表（免扫屏）；单格设施（凉亭/戏台/斗兽场）螺旋扫 24 格。
+  // mood<50 时优先游乐园（大乐子），否则取最近的任意设施
+  nearestFunSpot() {
+    if (this.funCache && world.time - (this.funScanT || 0) < 2) return this.funCache;
+    this.funScanT = world.time;
+    let park = null, parkD = Infinity;
+    for (const p of (world.parks || [])) {
+      const d = Math.hypot(p.x - this.x, p.y - this.y);
+      if (d < parkD) { parkD = d; park = { x: p.x, y: p.y, kind: "park" }; }
+    }
+    if (park && parkD < 80 && this.mood < 50) { this.funCache = park; return park; }
+    const cx = Math.round(this.x), cy = Math.round(this.y);
+    let best = null, bestD = Infinity;
+    const R = 24;
+    for (let dy = -R; dy <= R; dy++) {
+      for (let dx = -R; dx <= R; dx++) {
+        const t = tileAt(cx + dx, cy + dy);
+        let kind = null;
+        if (t === T.PAVILION) kind = "gazebo";
+        else if (t === T.THEATER) kind = "theater";
+        else if (t === T.ARENA) kind = "arena";
+        if (!kind) continue;
+        const d = Math.hypot(dx, dy);
+        if (d < bestD) { bestD = d; best = { x: cx + dx, y: cy + dy, kind }; }
+      }
+    }
+    if (!best && park && parkD < 80) best = park;
+    this.funCache = best;
+    return best;
+  }
+
+  // 心情演化（v0.5.0）：基准衰减 × 状态倍率（睡觉不衰减、改按 MOOD_SLEEP_REGEN 回复——
+  // 睡一觉约 +30，是不花资源的慢通道自愈）；做喜好匹配的事 → 快乐回复；醉酒微醺持续回甘；
+  // 月光花夜间光环；cheerT 余韵（游乐园尽兴而归）期间衰减 ×MOOD_CHEER_FACTOR
+  updateMood(dt, stMul) {
+    if (this.cheerT > 0) this.cheerT = Math.max(0, this.cheerT - dt);
+    if (this.state === "sleep") {
+      this.mood = Math.min(100, this.mood + SIM.MOOD_SLEEP_REGEN * dt);
+      return;
+    }
+    let decay = SIM.MOOD_DECAY * stMul(SIM.STATE_MOOD) * (this.hobby === "none" ? 0.8 : 1);
+    if (this.cheerT > 0) decay *= SIM.MOOD_CHEER_FACTOR || 0.35;
+    this.mood -= decay * dt;
+    if (likedJoyOf(this) > 0) this.mood = Math.min(100, this.mood + SIM.MOOD_LIKED_JOY * dt);
+    if (this.drunkT > 0) this.mood = Math.min(100, this.mood + SIM.MOOD_DRUNK_JOY * dt);
+    if (this.bloomNear && !isDaytime()) this.mood = Math.min(100, this.mood + 0.5 * dt);
+    if (this.mood < 0) this.mood = 0;
+  }
+
   decide() {
-    if (this.state === "sleep" || this.state === "drink") return;
+    if (this.state === "sleep" || this.state === "drink" || this.state === "play") return;
     // 有明确目的地的行走途中不做重新决策，防止反复重设路径；
     // 例外（行程预算抢救）：按当前路径剩余距离推算到达时的渴/饿值，预计跌破生命线 →
     // 放弃当前目的地先吃喝（任务不清空，复工由下方"手上有任务但走丢了"分支承接）。
@@ -2468,10 +2911,20 @@ class Agent {
     // 2.8 救助被困动物：施工改变地形后，搁浅的动物需要有人送回栖息地（紧急事项，优先于领任务；喜爱牲畜者更积极）
     //     任务在身者同样响应：救援是短途使命，任务引用保留，放归后经「手上有任务」分支自动复工——
     //     否则全员在岗时救援无人可派（旧版只轮空手者，谁有空全看运气）。受困者（trapUntil，见 goTo）不参与
-    if (!this.voyaging && world.time >= (this.trapUntil || 0)) {
-      const victim = creatures.find(c => !c.dead && !c.carriedBy && !c.rescuer &&
-        (c.strandT || 0) > 3 && c.type !== "bird" && c.type !== "fish" &&
-        (!c.noRescueT || world.time > c.noRescueT));   // 曾接近失败：冷却 60s 后可重试（地形可能已改变）
+    //     抑郁者不参与（什么都不想干）
+    //     受困扫描 1s 全局节流（v0.5.0）：生物扩容后 decide 高频全表扫成为热点——结果缓存共享，
+    //     认领条件（rescuer/carriedBy/存活）在使用前重验，失效即强制重扫
+    if (!this.voyaging && !this.depressed && world.time >= (this.trapUntil || 0)) {
+      if (world.time - _rescueScan.t > 1) {
+        _rescueScan.t = world.time;
+        _rescueScan.victim = creatures.find(c => !c.dead && !c.carriedBy && !c.rescuer &&
+          (c.strandT || 0) > 3 && c.type !== "bird" && c.type !== "fish" &&
+          (!c.noRescueT || world.time > c.noRescueT)) || null;
+      }
+      let victim = _rescueScan.victim;
+      if (victim && (victim.dead || victim.carriedBy || victim.rescuer || (victim.strandT || 0) <= 3)) {
+        _rescueScan.t = -9; victim = null;   // 缓存失效：下帧重扫
+      }
       if (victim && rand() < (this.hobby === "animal" ? 0.5 : 0.15)) {
         if (this.goTo(victim.x, victim.y)) {
           victim.rescuer = this;
@@ -2481,11 +2934,38 @@ class Agent {
           return;
         }
         victim.noRescueT = world.time + 60;   // 暂时无法接近：冷却重试，不永久放弃
+        _rescueScan.t = -9;
       }
     }
 
-    // 3. 领任务干活（受困者跳过：寻路必败只会把远处任务的 blockedCount 刷到冻结）
-    if (!this.task && world.time >= (this.trapUntil || 0)) {
+    // 2.9 心情低落 → 找乐子（v0.5.0）：城库有酒/果汁就先去喝一杯——人不只为解渴而饮，也为开心。
+    //     指定偏好清单（beer>juice），城库无货则放弃（不拿白水糊弄）并冷却 JOY_CD 防连帧重试；
+    //     抑郁者跳过（连开心都懒得找，只能靠睡觉与运气自愈）
+    if (!this.depressed && this.mood < SIM.MOOD_SEEK &&
+        this.hunger >= 30 && this.thirst >= 30 && world.time >= (this.joyUntil || 0)) {
+      if (!this.seekDrink(["beer", "juice"])) this.joyUntil = world.time + SIM.JOY_CD;
+    }
+
+    // 2.95 游玩（v0.5.0 娱乐链）：心情不满且附近有娱乐设施 → 去玩（凉亭/戏台/斗兽场/游乐园）。
+    //     mood<45 必去，45~70 看心情掷骰；玩过有 PLAY_CD 冷却；抑郁者连玩都提不起劲；
+    //     粮食紧张（<2 天消耗）时不游玩——肚子比开心优先，防娱乐挤垮食物链
+    if (!this.depressed && this.hunger >= 30 && this.thirst >= 30 && this.energy > 25 &&
+        totalFood() > agents.length * 2 &&
+        world.time >= (this.playCdUntil || 0) &&
+        (this.mood < 45 || (this.mood < SIM.PLAY_SEEK && rand() < 0.15))) {
+      const spot = this.nearestFunSpot();
+      if (spot) {
+        if (this.goTo(spot.x, spot.y)) {
+          this.state = "walk";
+          this.onArrive = () => { this.state = "play"; this.playKind = spot.kind; this.playWait = SIM.PLAY_TIME[spot.kind] || 4; };
+          return;
+        }
+        this.playCdUntil = world.time + 60;   // 设施不可达：冷却后重试（路修好再去）
+      }
+    }
+
+    // 3. 领任务干活（受困者跳过：寻路必败只会把远处任务的 blockedCount 刷到冻结；抑郁者不想干活）
+    if (!this.depressed && !this.task && world.time >= (this.trapUntil || 0)) {
       // 保险：手上有产出先就地登记入库（否则领新任务 → 旧产出被下次完工覆盖而蒸发）
       if (packHaulCount(this.pack) > 0) this.deposit();
       const t = tasksTake(this);
@@ -2517,13 +2997,13 @@ class Agent {
         this.abandonTask();
         return;
       }
-    } else if (this.task && this.state !== "work" && this.state !== "walk") {
+    } else if (!this.depressed && this.task && this.state !== "work" && this.state !== "walk") {
       // 手上有任务但走丢了（被打断）→ 继续去工地
       const tk = this.task;   // 闭包捕获：onArrive 触发时任务可能已被协同完工释放
       if (this.goTo(tk.x, tk.y)) { this.state = "walk"; this.onArrive = () => { this.state = "work"; this.faceTo(tk.x + 0.5, tk.y + 0.5); }; return; }
     }
-    // 3.5 搬运：身上有产出（haul 槽）先送回仓库入库（名称即语义：仓库里的才算资源）
-    if (packHaulCount(this.pack) > 0 && this.state === "idle") {
+    // 3.5 搬运：身上有产出（haul 槽）先送回仓库入库（名称即语义：仓库里的才算资源）；抑郁者不搬
+    if (!this.depressed && packHaulCount(this.pack) > 0 && this.state === "idle") {
       const s = nearestSettlement(Math.round(this.x), Math.round(this.y));
       if (s && this.goTo(s.x, s.y)) {
         this.state = "walk";
@@ -2533,8 +3013,8 @@ class Agent {
       this.deposit();   // 仓库不可达的兜底（就地登记入库）
     }
 
-    // 3.8 航海：探险家/向往远方的居民从码头坐船出海开拓（消耗联合木材造船）
-    if (!this.task && !this.voyaging && world.docks.length &&
+    // 3.8 航海：探险家/向往远方的居民从码头坐船出海开拓（消耗联合木材造船）；抑郁者不出海
+    if (!this.depressed && !this.task && !this.voyaging && world.docks.length &&
         (this.job === "explorer" || this.hobby === "explore") && this.adventure > 0.4 &&
         rand() < 0.08) {
       const dock = world.docks.reduce((b, d) =>
@@ -2548,9 +3028,9 @@ class Agent {
 
     // 3.95 专职探索者：前沿螺旋探索——找到最近「陆地与虚空接壤」的前沿格前往大面积点亮；
     //      局部扫不到前沿（或前沿被水隔开）时倾向出海（航海回退，点亮新海域后前沿自然出现）
-    if (this.job === "explorer" && !this.task && !this.voyaging && this.energy > 30 && this.hunger > 40) {
-      // 前沿扫描节流：每 2 sim 秒一次，期间复用缓存（deide 高频不重复扫屏）
-      if (world.time - (this.frontScanT || -9) > 2) {
+    if (!this.depressed && this.job === "explorer" && !this.task && !this.voyaging && this.energy > 30 && this.hunger > 40) {
+      // 前沿扫描节流：每 8 sim 秒一次（v0.5.0 原 2s——80 格螺旋扫是热点，前沿推进速度用不着高频）
+      if (world.time - (this.frontScanT || -9) > 8) {
         this.frontScanT = world.time;
         this.frontCache = findFrontier(Math.round(this.x), Math.round(this.y), 80);   // 扫描 80 格：点亮推进后新前沿仍在视野
       }
@@ -2585,8 +3065,8 @@ class Agent {
       }
     }
 
-    // 4. 探索欲：高探索欲的居民会主动向未知远方进发（点亮虚空、发现新岛）
-    if (!this.task) {
+    // 4. 探索欲：高探索欲的居民会主动向未知远方进发（点亮虚空、发现新岛）；抑郁者连远方都懒得看
+    if (!this.depressed && !this.task) {
       if (this.exploring) {
         // 探索旅程进行中：精力/饥饿尚可且腿数未满 → 继续向外延伸（专职探索者不受腿数限制）
         if (this.energy > 30 && this.hunger > 40 &&
@@ -2675,29 +3155,40 @@ class Agent {
     emit("agent-death", this);
   }
 
-  // 抱起搁浅动物：找最近的可达栖息地（水生物种由岸边送回水中），动身前往
+  // 抱起搁浅动物：找最近的可达栖息地（水生物种由岸边送回水中），动身前往。
+  // v0.5.0 加固：岸边不可达（跨海峡）曾直接放弃认领 → 无限「认领→失败→再认领」直到动物
+  // 超过搁浅死亡线——现在多轮换候选栖息地重试，全败才放弃并给 noRescueT 冷却
   pickupAnimal(c) {
     if (c.dead || c.rescuer !== this) { this.rescuing = null; return; }
     const want = c.type === "whale" ? T.DEEP : (CREATURE_META[c.type].habitat === "water" ? T.WATER : T.GRASS);
-    // 栖息格 + 小人可站立的岸边格配对（水格本身不可通行，从岸边把动物送下水）
-    let spot = null, stand = null;
-    for (let i = 0; i < 6 && !spot; i++) {
-      const s = findSpot(Math.round(this.x), Math.round(this.y), 2, 30, want);
-      if (!s) break;
-      if (want === T.GRASS) { spot = s; stand = s; break; }   // 陆生直接走到放归点
-      const sh = neighborsOf(s.x, s.y).find(p => walkable(p.x, p.y));
-      if (sh) { spot = s; stand = sh; }
+    let carried = false;
+    for (let attempt = 0; attempt < 4 && !carried; attempt++) {
+      // 栖息格 + 小人可站立的岸边格配对（水格本身不可通行，从岸边把动物送下水）
+      let spot = null, stand = null;
+      for (let i = 0; i < 6 && !spot; i++) {
+        const s = findSpot(Math.round(this.x), Math.round(this.y), 2, 30, want);
+        if (!s) break;
+        if (want === T.GRASS) { spot = s; stand = s; break; }   // 陆生直接走到放归点
+        const sh = neighborsOf(s.x, s.y).find(p => walkable(p.x, p.y));
+        if (sh) { spot = s; stand = sh; }
+      }
+      if (!spot) break;   // 附近找不到栖息地：放弃
+      c.carriedBy = this;
+      c.strandT = 0;
+      if (this.goTo(stand.x, stand.y)) {
+        this.state = "walk";
+        this.onArrive = () => this.releaseAnimal(c, spot);
+        carried = true;
+      } else {
+        c.carriedBy = null;   // 这处岸边不可达：换下一候选（跨海峡的放归点走不过去）
+      }
     }
-    if (!spot) { c.rescuer = null; this.rescuing = null; return; }   // 附近找不到栖息地：放弃
-    c.carriedBy = this;
-    c.strandT = 0;
-    if (!this.goTo(stand.x, stand.y)) {
-      // 岸边不可达：就地放下（尽力了，动物回到原状态）
-      c.carriedBy = null; c.rescuer = null; this.rescuing = null;
-      return;
+    if (!carried) {
+      // 尽力了仍送不到：放下动物原地等待 + 60s 冷却（防无限认领循环耗尽搁浅耐受时长）
+      c.rescuer = null;
+      this.rescuing = null;
+      c.noRescueT = world.time + 60;
     }
-    this.state = "walk";
-    this.onArrive = () => this.releaseAnimal(c, spot);
   }
 
   // 到达放归点：动物回到栖息地，恢复自由
@@ -2848,13 +3339,18 @@ class Agent {
   }
 
   // 寻水解渴（decide 2.5 与领任务行程门共用）：成功派出取水行程 → true，找不到水源 → false
-  // ① 城库存有饮品：去最近聚落粮仓饮用（coffee > juice > beer > water，有货者优先喝高阶）
+  // ① 城库存有饮品：去最近聚落粮仓饮用（缺省按 coffee > juice > beer > water，有货者优先喝高阶；
+  //    传 prefer 数组（如找乐子的 ["beer","juice"]）则按偏好序取用，城库无货 → false，不退而求其次）
   // ② 城库无饮品（或无城可归）：找最近水井/河湖水格直饮
-  seekDrink() {
+  seekDrink(prefer) {
     const sc = nearestSettlement(Math.round(this.x), Math.round(this.y));
     const stk = sc && ensureStock(sc);
     let pick = null;
-    if (stk) for (const r of DRINK_ORDER) if ((stk[r] || 0) > 0) { pick = r; break; }
+    if (stk) {
+      const order = Array.isArray(prefer) ? prefer : DRINK_ORDER;
+      for (const r of order) if ((stk[r] || 0) > 0) { pick = r; break; }
+    }
+    if (!pick && Array.isArray(prefer)) return false;   // 偏好落空：找乐子不能拿白水解，交由调用方冷却兜底
     if (pick && sc && this.goTo(sc.x, sc.y)) {
       this.state = "walk";
       this.onArrive = () => { this.state = "drink"; this.drinkWait = 1; this.drinkRes = pick; this.drinkCity = sc; };
@@ -2912,9 +3408,9 @@ class Agent {
       const t = tileAt(b.x, b.y);
       const meta = TILE_META[t];
       if (meta.diggable) {
-        // 山/树：单格立项开凿
+        // 山/树/竹：单格立项开凿（总量护栏：物种扩容后跨海不可达的 blocked 会 endless 立项——40 条封顶）
         const exist = tasks.list.find(k => !k.done && k.x === b.x && k.y === b.y);
-        if (!exist) {
+        if (!exist && tasksPending("DIG").length < 40) {
           tasksAdd({ type: "DIG", x: b.x, y: b.y });
           logThrottled(`通路受阻：(${b.x},${b.y}) 的${meta.name}挡住了去路，立项改造。`, 15);
         }
@@ -3116,7 +3612,8 @@ function findEscapeSpot(sx, sy) {
   return null;
 }
 
-// 螺旋向外找最近的前沿格：可站立陆地且 4 邻含 VOID（探索者的目标点；只扫局部，成本受 maxR 约束）
+// 螺旋向外找最近的前沿格：可站立陆地且 4 邻含 VOID（探索者的目标点；只扫局部，成本受 maxR 约束）。
+// v0.5.0 性能：内联 4 邻判定（neighborsOf 每格分配数组是扫描热点），调用方另有 2s→8s 节流
 function findFrontier(cx, cy, maxR) {
   for (let r = 1; r <= maxR; r++) {
     for (let dy = -r; dy <= r; dy++) {
@@ -3124,7 +3621,8 @@ function findFrontier(cx, cy, maxR) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;   // 只扫当前圈
         const x = cx + dx, y = cy + dy;
         if (!walkable(x, y)) continue;
-        if (neighborsOf(x, y).some(p => tileAt(p.x, p.y) === T.VOID)) return { x, y };
+        if (tileAt(x + 1, y) === T.VOID || tileAt(x - 1, y) === T.VOID ||
+            tileAt(x, y + 1) === T.VOID || tileAt(x, y - 1) === T.VOID) return { x, y };
       }
     }
   }
@@ -3418,6 +3916,18 @@ function plannerTick() {
       }
     }
   }
+  // 2b2. 蘑菇采集（v0.5.0）：附近有蘑菇格 → 一次性采粮（采完 tile 变回草地）
+  if (totalFood() < 60 + pop * 3 && tasksPending("GATHER", true).length < 3 &&
+      world.mushrooms && world.mushrooms.size) {
+    const a = pickAnchor();
+    for (const k of world.mushrooms) {
+      const [bx, by] = k.split(",").map(Number);
+      if (Math.abs(bx - a.x) + Math.abs(by - a.y) < 26 && tileAt(bx, by) === T.MUSHROOM) {
+        tasksAdd({ type: "GATHER", x: bx, y: by, need: 3 });
+        break;
+      }
+    }
+  }
   // 2c. 狩猎：附近有野生牛羊 → 猎队（立项前确认动物存活，且未被捕获任务占用）
   if (totalFood() < 60 + pop * 3 && tasksPending("HUNT", true).length < 1) {
     const a = pickAnchor();
@@ -3502,11 +4012,12 @@ function plannerTick() {
     }
   }
   // 2e. 资源采集：各聚落木材/石材/沙土低于阈值 → 立项伐木/采石/采沙/植树
-  for (const s of world.settlements) {
+  //     20s 节流（v0.5.0）：findSpot 半径 30 螺旋扫是规划器热点，资源点位变化慢，无需每 4s 全扫
+  if (++_resScanTick % 5 === 0) for (const s of world.settlements) {
     const stock = ensureStock(s);
     const digPending = type => tasksPending("DIG", true).filter(t => t.res === type).length;
     if (stock.wood < 25 && digPending("wood") < 6) {   // 储备线 25：造船消耗大，伐木要跑在前面
-      const t = findSpot(s.x, s.y, 2, 30, T.TREE);
+      const t = findSpot(s.x, s.y, 2, 30, T.TREE) || findSpot(s.x, s.y, 2, 30, T.BAMBOO);   // 竹林是快木材（v0.5.0）
       if (t) tasksAdd({ type: "DIG", x: t.x, y: t.y, res: "wood" });
     }
     if (stock.stone < 8 && digPending("stone") < 1) {
@@ -3682,6 +4193,92 @@ function plannerTick() {
       }
     }
   }
+  // 2f2. 娱乐链（v0.5.0）：凉亭（era1·pop6，每城一座）→ 戏台/斗兽场（era2·pop10，每城各一座）
+  //      → 游乐园（era3·pop16，全域唯一，选址陆地或海洋皆可）→ 园区逐个补建大型设施
+  {
+    // 单格设施：逐城查重（辖区粮仓 ±9 邻域即覆盖本城）后立粮仓周边；
+    // 占位护栏：busy 集合（在办任务格）传入 expandSpot exclude——否则 THEATER/ARENA 同帧选址会撞格互相覆盖
+    const busy = new Set(tasks.list.filter(k => !k.done).map(k => k.x + "," + k.y));
+    for (const s of world.settlements) {
+      if (world.era >= 1 && pop >= SIM.ENT_POP_MIN && !settlementFacility(s, T.PAVILION) &&
+          tasksPending("GAZEBO", true).length < 1) {
+        const g = world.houses.find(h => h.granary && ownerSettle(h.x, h.y) === s) || s;
+        const b = expandSpot(g, 1, 8, T.GRASS, busy) || findSpot(g.x, g.y, 1, 10, T.GRASS);
+        if (b && !busy.has(b.x + "," + b.y)) { tasksAdd({ type: "GAZEBO", x: b.x, y: b.y }); busy.add(b.x + "," + b.y); }
+      }
+      if (world.era >= 2 && pop >= SIM.THEATER_POP_MIN && !settlementFacility(s, T.THEATER) &&
+          tasksPending("THEATER", true).length < 1) {
+        const g = world.houses.find(h => h.granary && ownerSettle(h.x, h.y) === s) || s;
+        const b = expandSpot(g, 1, 8, T.GRASS, busy) || findSpot(g.x, g.y, 1, 10, T.GRASS);
+        if (b && !busy.has(b.x + "," + b.y)) { tasksAdd({ type: "THEATER", x: b.x, y: b.y }); busy.add(b.x + "," + b.y); }
+      }
+      if (world.era >= 2 && pop >= SIM.THEATER_POP_MIN && !settlementFacility(s, T.ARENA) &&
+          tasksPending("ARENA", true).length < 1) {
+        const g = world.houses.find(h => h.granary && ownerSettle(h.x, h.y) === s) || s;
+        const b = expandSpot(g, 2, 10, T.GRASS, busy) || findSpot(g.x, g.y, 2, 12, T.GRASS);
+        if (b && !busy.has(b.x + "," + b.y)) { tasksAdd({ type: "ARENA", x: b.x, y: b.y }); busy.add(b.x + "," + b.y); }
+      }
+    }
+    // 游乐园：全域唯一，选址「先陆后海」——城市旁 3×3 连片草地，找不到则临城 3×3 连片浅水（水上乐园）
+    if (world.era >= 3 && pop >= SIM.PARK_POP_MIN && world.parks.length === 0 &&
+        tasksPending("PARK", true).length < 1) {
+      const S = SIM.PARK_SIZE;
+      let site = null;
+      outerPark:
+      for (const s of world.settlements) {
+        for (let r = 3; r <= 14 && !site; r++) {
+          for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+            const x0 = s.x + dx, y0 = s.y + dy;
+            let landOk = true, waterOk = true;
+            const wc = [];
+            for (let yy = 0; yy < S && (landOk || waterOk); yy++) for (let xx = 0; xx < S; xx++) {
+              const tt = tileAt(x0 + xx, y0 + yy);
+              if (tt !== T.GRASS) landOk = false;
+              if (tt !== T.WATER) waterOk = false; else wc.push((x0 + xx) + "," + (y0 + yy));
+            }
+            if (landOk) { site = { x0, y0, x1: x0 + S - 1, y1: y0 + S - 1, gx: x0 + (S >> 1), gy: y0 + (S >> 1), water: false }; break outerPark; }
+            if (waterOk) { site = { x0, y0, x1: x0 + S - 1, y1: y0 + S - 1, gx: x0 + (S >> 1), gy: y0 + (S >> 1), water: true, waterCells: wc }; break outerPark; }
+          }
+        }
+      }
+      if (site) {
+        const t = tasksAdd({ type: "PARK", x: site.gx, y: site.gy, need: 30,
+          x0: site.x0, y0: site.y0, x1: site.x1, y1: site.y1, gx: site.gx, gy: site.gy,
+          water: site.water, waterCells: site.waterCells || [] });
+        logMsg(site.water
+          ? `规划署选定近海海面兴建水上乐园（${S}×${S} 浮台园区），工地已圈定。`
+          : `规划署圈定了一块 ${S}×${S} 的草地，游乐园破土动工！`);
+        void t;
+      }
+    }
+    // 园区设施补建：摩天轮 → 旋转木马 → 过山车，每规划周期最多立一项（园区格：非门楼的草地/浮台空格）
+    if (world.parks.length) {
+      const p = world.parks[0];
+      const rides = ["FERRIS", "CAROUSEL", "COASTER"];
+      const rideTiles = [T.FERRIS, T.CAROUSEL, T.COASTER];
+      const inPark = (x, y) => x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1;
+      for (let i = 0; i < 3; i++) {
+        const pending = tasks.list.some(k => !k.done && k.type === rides[i] && inPark(k.x, k.y));
+        let built = false;
+        for (let y = p.y0; y <= p.y1 && !built; y++) for (let x = p.x0; x <= p.x1; x++) {
+          if (tileAt(x, y) === rideTiles[i]) { built = true; break; }
+        }
+        if (pending || built) continue;   // 该设施在建或已成：看下一个
+        // 立项：园区内第一个非门楼的可建格（草地或浮台）
+        let placed = false;
+        for (let y = p.y0; y <= p.y1 && !placed; y++) for (let x = p.x0; x <= p.x1 && !placed; x++) {
+          if (x === p.x && y === p.y) continue;
+          const tt = tileAt(x, y);
+          if ((tt === T.GRASS || tt === T.PIER) && !tasks.list.some(k => !k.done && k.x === x && k.y === y)) {
+            tasksAdd({ type: rides[i], x, y });
+            placed = true;
+          }
+        }
+        break;   // 每周期最多立一项
+      }
+    }
+  }
   // 2g. 浆果可持续：丛数低于人口需求（且有丛可采种）→ 培育新丛
   const berryTotal = world.berryStock.size;
   const berryHealthy = [...world.berryStock.values()].filter(v => v >= 1).length;
@@ -3812,19 +4409,44 @@ function plannerTick() {
     const t = tasks.list[i];
     if ((t.blockedCount || 0) < 3) continue;
     t.freezeAge = (t.freezeAge || 0) + SIM.PLANNER_INTERVAL;
+    t.freezeTotal = (t.freezeTotal || 0) + SIM.PLANNER_INTERVAL;   // 永不重置的冻结累计（60s 自愈会清 freezeAge——放弃判定要用它）
 
     // 新式饮品建筑与建房同款：累计冻结 180s 仍无法施工 → 放弃恢复草地，释放名额（防堵死饮品链）
     if (t.freezeAge >= 180 && (t.type === "BUILD" || t.type === "FARM" || t.type === "FILL" ||
-        t.type === "WELL" || t.type === "BREWERY" || t.type === "PRESS" || t.type === "ROASTERY")) {
+        t.type === "WELL" || t.type === "BREWERY" || t.type === "PRESS" || t.type === "ROASTERY" ||
+        t.type === "GAZEBO" || t.type === "THEATER" || t.type === "ARENA")) {
       setTile(t.x, t.y, t.type === "FILL" ? T.WATER : T.GRASS);   // 填海放弃恢复为水
       tasks.list.splice(i, 1);
       logThrottled("规划署放弃了一处无法施工的地块。", 60);
+      continue;
+    }
+    // 游乐园圈地放弃（v0.5.0）：300s 无法施工 → 水面格还原浅水、工地格还原草地，选址门保留
+    if (t.freezeAge >= 300 && t.type === "PARK") {
+      for (const k of (t.waterCells || [])) {
+        const [px, py] = k.split(",").map(Number);
+        setTile(px, py, T.WATER);
+      }
+      for (let yy = t.y0; yy <= t.y1; yy++) for (let xx = t.x0; xx <= t.x1; xx++) {
+        if (tileAt(xx, yy) === T.SITE) setTile(xx, yy, T.GRASS);
+      }
+      tasks.list.splice(i, 1);
+      logThrottled("规划署放弃了游乐园选址，等待更合适的场地。", 60);
+      continue;
+    }
+    // 追踪/采集类冻结放弃（v0.5.0）：物种扩容后跨海不可达目标会让冻结任务无限堆积——
+    // 按类型 180s 撤销（DIG 300s，tile 不动，路径再受阻时 goTo 会重新立项）；
+    // BRIDGE 是国家工程不放弃（对岸终将接通），FILL/BUILD/FARM 沿用上方 revert 规则
+    const giveUpAt = { HUNT: 180, CAPTURE: 180, GATHER: 180, FISH: 180, FETCH_WATER: 180, PLANT: 180, PLANT_BERRY: 180, EXCAV: 180, DIG: 300 }[t.type];
+    if (giveUpAt && t.freezeTotal >= giveUpAt) {
+      for (const w of t.workers) { if (w.task === t) { w.task = null; if (w.state === "walk" || w.state === "work") w.state = "idle"; } }
+      tasks.list.splice(i, 1);
       continue;
     }
     if (t.freezeAge < 60) continue;
     t.freezeAge = 0;
     t.blockedCount = 0;
     if (t.type !== "DIG") continue;   // 只有开凿需要横向扩宽（凹形山壁卡死），水路已改用桥线
+    if (tasksPending("DIG").length >= 40) continue;   // 自愈扩宽总量护栏：冻结 DIG 的 5×5 撒种不再无界繁衍
     for (let dy2 = -2; dy2 <= 2; dy2++) {
       for (let dx2 = -2; dx2 <= 2; dx2++) {
         const nx2 = t.x + dx2, ny2 = t.y + dy2;
@@ -3842,7 +4464,7 @@ function plannerTick() {
     const rich = world.settlements.slice().sort((a, b) => (b.stock ? b.stock.food || 0 : 0) - (a.stock ? a.stock.food || 0 : 0))[0];
     if (rich) ensureStock(rich).food = Math.max(0, ensureStock(rich).food - (40 + pop));
     _lastFeast = world.time;
-    for (const a of agents) { a.hunger = 100; a.energy = Math.min(100, a.energy + 30); }
+    for (const a of agents) { a.hunger = 100; a.energy = Math.min(100, a.energy + 30); a.mood = Math.min(100, (a.mood || 0) + (SIM.MOOD_FEAST || 25)); }
     logMsg("丰收宴席：全城共食，欢声笑语。");
     emit("feast");
   }
@@ -3991,6 +4613,7 @@ function farmTick(dt) {
 // ---- 模拟主步进 ----
 let _plannerCd = SIM.PLANNER_INTERVAL;
 let _lastFeast = -999;
+let _resScanTick = 0;   // 资源采集选址扫描节流计数（每 5 个规划周期扫一次，见 plannerTick 2e）
 let _frontierCd = -999;
 
 function simUpdate(dt) {
@@ -4003,6 +4626,11 @@ function simUpdate(dt) {
   // 死者退场（名册/住房/任务引用同步释放）
   for (let i = agents.length - 1; i >= 0; i--) {
     if (agents[i].dead) agents.splice(i, 1);
+  }
+  // 生物死者退场（v0.5.0）：死尸留守会被所有全表扫描白白遍历——物种扩容后泄漏放大成性能杀手
+  // （任务/驯化/救援等外部引用持有对象本身，出列不影响引用有效性）
+  for (let i = creatures.length - 1; i >= 0; i--) {
+    if (creatures[i].dead) creatures.splice(i, 1);
   }
   farmTick(dt);
   berryTick();

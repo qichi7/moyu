@@ -25,7 +25,15 @@ const STEP = 0.1;
 
 // ---- 场景 A：老死 ----
 simInit(42);
-const oldCow = spawnCreature(4, 4, "cow");
+// v0.5.0 生成含竹林/蘑菇（walk:false）：固定坐标不再保证是草地——动态找可栖息格
+const cowSpot = (function () {
+  for (let r = 0; r <= 8; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    if (habitatOk({ type: "cow" }, 4 + dx, 4 + dy)) return { x: 4 + dx, y: 4 + dy };
+  }
+  return { x: 4, y: 4 };
+})();
+const oldCow = spawnCreature(cowSpot.x, cowSpot.y, "cow");
 oldCow.age = SPECIES_AGE.cow.lifespan;   // 寿命已到
 let died = false;
 for (let i = 0; i < 9000; i++) {   // 900s：期望平均 3 天（180s）内离世
@@ -33,7 +41,7 @@ for (let i = 0; i < 9000; i++) {   // 900s：期望平均 3 天（180s）内离�
   if (oldCow.dead) { died = true; break; }
 }
 assert(died, "场景A：寿命耗尽的牛自然老死");
-const youngCow = spawnCreature(4, 4, "cow");
+const youngCow = spawnCreature(cowSpot.x, cowSpot.y, "cow");
 youngCow.age = 3;   // 青年
 let diedYoung = false;
 for (let i = 0; i < 6000; i++) youngCow.update(STEP);
@@ -57,6 +65,7 @@ assert(!okWhale.dead, "场景B：未满坚持时长不死亡（对照）");
 // ---- 场景 C：搁浅鲸被救援 ----
 simInit(42);
 for (let i = 0; i < 3000; i++) simUpdate(STEP);   // 预热世界
+revealArea(world.store.x, world.store.y, 40);   // 探明周边海域（否则放归点 30 格内的深海未生成，findSpot(T.DEEP) 必败）
 // 岛缘草地（确定性扫描，不用 rand——跨场景轨迹分叉下保持稳定）：小人可达且 30 格内有深海可放归
 let beachSpot = null;
 outerC:
@@ -64,9 +73,10 @@ for (let r = 4; r <= 10; r++) {   // 近圈：靠近聚落人群，救援响应�
   for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
     if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
     const x = world.store.x + dx, y = world.store.y + dy;
-    // 内陆草地（4 邻至少 3 格 GRASS）：救援小人必然可达，且放归点 30 格内通常有深海
+    // 岛缘草地（4 邻至少 3 格 GRASS 且 10 格内有深海）：救援小人可达，放归岸线路径短不易跨海峡
     const landN = neighborsOf(x, y).filter(p => tileAt(p.x, p.y) === T.GRASS).length;
-    if (tileAt(x, y) === T.GRASS && walkable(x, y) && landN >= 3 && !nearAny(x, y, [T.HOUSE, T.FARM, T.SITE], 2)) {
+    if (tileAt(x, y) === T.GRASS && walkable(x, y) && landN >= 3 &&
+        nearAny(x, y, [T.DEEP], 10) && !nearAny(x, y, [T.HOUSE, T.FARM, T.SITE], 2)) {
       beachSpot = { x, y };
       break outerC;
     }

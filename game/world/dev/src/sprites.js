@@ -384,6 +384,51 @@ function bakeTileArt(tile, v, bright) {
       pxF(g, 7, 4, shade("#6e5232", bright));
       return cv;
     }
+    case T.BAMBOO: {
+      const { cv, g } = groundCopy(v, bright, "#5e8c4f", "#4d7842", "#6f9c5e");
+      for (const [cx2, hh] of [[3, 11], [7, 14], [12, 9]]) {   // 三两根竹竿 + 竹节 + 叶
+        rectF(g, cx2, 15 - hh, 2, hh, shade("#6fae4e", bright));
+        rectF(g, cx2, 15 - hh + 3, 2, 1, shade("#4d8038", bright));
+        rectF(g, cx2, 15 - hh + 7, 2, 1, shade("#4d8038", bright));
+        pxF(g, cx2 - 1, 15 - hh + 1, shade("#8ac46a", bright));
+        pxF(g, cx2 + 2, 15 - hh + 2, shade("#8ac46a", bright));
+      }
+      return cv;
+    }
+    case T.MUSHROOM: {
+      const { cv, g } = groundCopy(v, bright, "#5e8c4f", "#4d7842", "#6f9c5e");
+      for (const [mx, my, ms] of [[2, 10, 0.8], [6, 9, 1.3], [11, 10, 0.9]]) {   // 一丛蘑菇
+        fillEllipseF(g, mx + 1.4, my, 2.6 * ms, 1.5 * ms, shade("#c95a3a", bright));   // 菌盖
+        rectF(g, mx + 0.8, my, 1.4 * ms, 3.4 * ms, shade("#f0e8d8", bright));           // 柄
+        pxF(g, mx + 0.8, my - 1, shade("#f0e8d8", bright));
+        pxF(g, mx + 2.4, my - 0.6, shade("#e87858", bright));   // 盖上斑点
+      }
+      return cv;
+    }
+    case T.MOONBLOOM: {
+      const { cv, g } = groundCopy(v, bright, "#5e8c4f", "#4d7842", "#6f9c5e");
+      rectF(g, 7, 9, 1, 5, shade("#4d8038", bright));           // 茎
+      for (const [dx, dy] of [[0, -1.8], [1.8, 0], [0, 1.8], [-1.8, 0]]) {
+        fillEllipseF(g, 7.5 + dx, 8 + dy, 1.6, 1.6, shade("#aebfe4", bright));   // 四瓣淡蓝
+      }
+      fillEllipseF(g, 7.5, 8, 1.3, 1.3, shade("#f0e68a", bright));   // 亮黄花心（夜光感）
+      pxF(g, 5, 12, shade("#6fae4e", bright)); pxF(g, 10, 11, shade("#6fae4e", bright));   // 叶
+      return cv;
+    }
+    case T.PIER: {
+      // 水上浮台：木平台 + 桩脚透水 + 波纹（可走的园区地面）
+      const { cv, g } = sprCtx(SPR, SPR);
+      rectF(g, 0, 0, 16, 16, shade("#235d96", bright));
+      rectF(g, 2, 12, 4, 1, shade("#3172ae", bright)); rectF(g, 10, 13, 4, 1, shade("#3172ae", bright));
+      rectF(g, 0, 0, 16, 12, shade("#a08454", bright));          // 平台
+      for (const x of [0, 5, 10, 15]) rectF(g, x, 0, 1, 12, shade("#85693e", bright));   // 板缝
+      rectF(g, 0, 0, 16, 1, shade("#b89968", bright));           // 亮缘
+      rectF(g, 0, 11, 16, 1, shade("#6e5232", bright));          // 平台暗缘
+      for (const [px2, py2] of [[2, 12], [12, 12]]) {            // 桩脚入水
+        rectF(g, px2, 12, 2, 4, shade("#5c4426", bright));
+      }
+      return cv;
+    }
   }
   return bakeGround(v, bright, "#5e8c4f", "#4d7842", "#6f9c5e");   // 兜底：未覆盖 tile 用草地
 }
@@ -1003,14 +1048,177 @@ function bakeBird(frame, view) {
   return bakeArt(10, 5, rows, { w: "#3a3a44", b: "#4a4a56" }, 1);
 }
 
+// ---- 新物种侧视图（v0.5.0，头朝右与全游戏约定一致）----
+function bakeRabbit() {
+  const { cv, g } = sprCtx(10, 11);
+  fillEllipseF(g, 4, 7, 3.4, 2.4, "#c9b8a8");            // 圆身
+  fillEllipseF(g, 7, 5, 2.2, 2, "#c9b8a8");              // 头（右）
+  rectF(g, 6, 1, 1, 3, "#c9b8a8"); rectF(g, 8, 1, 1, 3, "#c9b8a8");   // 长耳
+  pxF(g, 8, 5, "#1a1a1a");
+  fillEllipseF(g, 1.2, 6.5, 1.6, 1.4, "#f0ece4");        // 短尾（左）
+  rectF(g, 3, 9, 1, 2, "#8a7a68"); rectF(g, 6, 9, 1, 2, "#8a7a68");
+  return outlineSprite(cv, "#5a4a3a");
+}
+function bakeFox() {
+  const { cv, g } = sprCtx(20, 12);
+  fillEllipseF(g, 9, 7, 6.4, 3, "#d9762e");              // 躯干
+  fillEllipseF(g, 15, 5, 3, 2.4, "#d9762e");             // 头
+  fillEllipseF(g, 18, 6, 1.8, 1.2, "#f0e8dc");           // 尖吻
+  pxF(g, 16, 4, "#1a1a1a");
+  rectF(g, 13, 1, 1, 2, "#8a4a1a"); rectF(g, 16, 1, 1, 2, "#8a4a1a"); // 竖耳
+  fillEllipseF(g, 2.5, 5, 3, 1.6, "#d9762e");            // 蓬尾（左）
+  pxF(g, 0.5, 5, "#f0e8dc");                             // 尾尖白
+  for (const lx of [5, 8, 12, 14]) rectF(g, lx, 9, 1, 2, "#8a4a1a");
+  return outlineSprite(cv, "#5a2a10");
+}
+function bakeBear() {
+  const { cv, g } = sprCtx(26, 17);
+  fillEllipseF(g, 11, 9, 9, 5, "#6b4a33");               // 壮躯
+  fillEllipseF(g, 19, 7, 4, 3.6, "#6b4a33");             // 头
+  fillEllipseF(g, 22, 9, 1.8, 1.4, "#4a3222");           // 吻
+  pxF(g, 20, 6, "#111111");
+  rectF(g, 16, 3, 1, 2, "#4a3222"); rectF(g, 20, 3, 1, 2, "#4a3222"); // 圆耳
+  for (const lx of [4, 8, 13, 17]) {
+    rectF(g, lx, 13, 2, 3, "#5a3e2a");
+    pxF(g, lx, 16, "#2a1a10"); pxF(g, lx + 1, 16, "#2a1a10");
+  }
+  return outlineSprite(cv, "#2a1a10");
+}
+function bakeHorse() {
+  const { cv, g } = sprCtx(24, 17);
+  fillEllipseF(g, 10, 8, 8, 3.8, "#8a6238");             // 躯干
+  rectF(g, 16, 4, 2, 4, "#8a6238");                      // 颈
+  rectF(g, 17, 2, 5, 4, "#8a6238");                      // 头
+  rectF(g, 21, 3, 2, 1.4, "#6a4a28");                    // 吻
+  pxF(g, 19, 3, "#111111");
+  rectF(g, 16, 0, 1, 3, "#4a3220");                      // 鬃
+  fillEllipseF(g, 2, 7, 2.2, 2.6, "#4a3220");            // 尾
+  for (const lx of [4, 8, 13, 17]) { rectF(g, lx, 11, 1.6, 5, "#7a5430"); pxF(g, lx, 16, "#2a1a10"); }
+  return outlineSprite(cv, "#2a1a10");
+}
+function bakeUnicorn() {
+  const { cv, g } = sprCtx(24, 17);
+  fillEllipseF(g, 10, 8, 8, 3.8, "#f0ecf4");             // 雪白躯干
+  rectF(g, 16, 4, 2, 4, "#f0ecf4");                      // 颈
+  rectF(g, 17, 2, 5, 4, "#f0ecf4");                      // 头
+  rectF(g, 22, 3, 2, 1.4, "#d8cfe4");                    // 吻
+  pxF(g, 19, 3, "#4a7ac2");                              // 蓝眼
+  rectF(g, 22, 0, 1, 2, "#e8c85a");                      // 金角
+  fillEllipseF(g, 2, 6, 2, 3, "#d8c8e8");                // 淡紫尾
+  for (const lx of [4, 8, 13, 17]) rectF(g, lx, 11, 1.6, 5, "#d8d0e4");
+  return outlineSprite(cv, "#8a80a0");
+}
+function bakePenguin() {
+  const { cv, g } = sprCtx(11, 13);
+  fillEllipseF(g, 5, 7.5, 3.6, 4.8, "#2c3440");          // 直立身体
+  fillEllipseF(g, 5.5, 8.5, 2.2, 3.2, "#f0f4f8");        // 白腹
+  fillEllipseF(g, 5.5, 2.8, 2.3, 2, "#2c3440");          // 头
+  pxF(g, 6.5, 2.2, "#111111");                           // 眼
+  rectF(g, 7.5, 2.8, 2, 1, "#f0b030");                   // 喙（朝右）
+  rectF(g, 2.2, 6, 1, 3, "#222a34"); rectF(g, 7.2, 6, 1, 3, "#222a34"); // 鳍翅
+  rectF(g, 3.5, 12, 1.4, 1, "#f0b030"); rectF(g, 6, 12, 1.4, 1, "#f0b030"); // 橙脚
+  return outlineSprite(cv, "#141a22");
+}
+function bakeCrab() {
+  const { cv, g } = sprCtx(13, 9);
+  fillEllipseF(g, 6.5, 4.5, 4, 2.6, "#d95a3a");          // 甲壳
+  pxF(g, 8.5, 2.8, "#111111"); pxF(g, 10, 3.4, "#111111"); // 眼（头右）
+  fillEllipseF(g, 1.5, 2, 1.6, 1.2, "#b8422a"); fillEllipseF(g, 1.5, 7, 1.6, 1.2, "#b8422a"); // 左螯
+  fillEllipseF(g, 11.5, 2, 1.6, 1.2, "#b8422a"); fillEllipseF(g, 11.5, 7, 1.6, 1.2, "#b8422a"); // 右螯
+  for (const lx of [4, 6.5, 9]) { pxF(g, lx, 8, "#b8422a"); pxF(g, lx, 1, "#b8422a"); }   // 步足
+  return outlineSprite(cv, "#7a2a18");
+}
+function bakeDolphin() {
+  const { cv, g } = sprCtx(24, 12);
+  fillEllipseF(g, 12, 6, 9, 3.4, "#7a9ab8");             // 纺锤身（头右）
+  fillEllipseF(g, 19, 5.5, 3.6, 2.6, "#8aa8c4");         // 头
+  rectF(g, 22, 5, 2, 1.4, "#8aa8c4");                    // 喙
+  pxF(g, 20, 4.5, "#101820");                            // 眼
+  fillEllipseF(g, 10, 2.6, 3, 1.6, "#6a8aa8");           // 背鳍
+  fillEllipseF(g, 12, 9.4, 2.6, 1.4, "#6a8aa8");         // 腹鳍
+  rectF(g, 2, 4.5, 3, 3, "#7a9ab8");                     // 尾柄
+  fillEllipseF(g, 1.5, 4, 1.6, 2, "#6a8aa8");            // 尾叶上
+  fillEllipseF(g, 1.5, 8.5, 1.6, 2, "#6a8aa8");          // 尾叶下
+  return outlineSprite(cv, "#3a5a78");
+}
+function bakeShark() {
+  const { cv, g } = sprCtx(30, 14);
+  fillEllipseF(g, 15, 7, 12, 4, "#5a6a78");
+  fillEllipseF(g, 24, 7, 4.4, 3.2, "#5a6a78");           // 头
+  rectF(g, 27, 6, 3, 1.6, "#8a9aac");                    // 吻
+  pxF(g, 25, 5.5, "#101820");                            // 眼
+  rectF(g, 22, 10, 5, 1, "#c9d2dc");                     // 白腹线
+  fillEllipseF(g, 14, 2.2, 3.4, 2, "#4a5a68");           // 高背鳍
+  fillEllipseF(g, 13, 11.5, 2.6, 1.4, "#4a5a68");        // 腹鳍
+  rectF(g, 3, 5, 4, 4, "#5a6a78");                       // 尾柄
+  fillEllipseF(g, 2, 3.5, 2, 2.4, "#4a5a68");            // 尾上叶
+  fillEllipseF(g, 2, 10.5, 2, 2.4, "#4a5a68");           // 尾下叶
+  return outlineSprite(cv, "#2a3644");
+}
+function bakeMermaid() {   // 人鱼：青绿鳞尾 + 橙发，侧游姿态（头右）
+  const { cv, g } = sprCtx(18, 14);
+  fillEllipseF(g, 11, 4, 2.6, 2.6, "#f0d0b0");           // 头
+  pxF(g, 12.5, 3.6, "#111111");                          // 眼
+  fillEllipseF(g, 8.5, 3.6, 2.6, 1.8, "#e88a4a");        // 橙红长发
+  rectF(g, 8, 6, 6, 3, "#3aa88a");                       // 身躯
+  fillEllipseF(g, 4, 8.5, 4, 2, "#3aa88a");              // 尾根
+  fillEllipseF(g, 1, 8.5, 1.8, 3, "#2a8870");            // 尾鳍
+  pxF(g, 10, 7, "#8ad8c0"); pxF(g, 11, 8, "#8ad8c0");    // 鳞光
+  return outlineSprite(cv, "#1a5a48");
+}
+function bakeKoi() {       // 锦鲤：白底红斑金尾，头朝右
+  const { cv, g } = sprCtx(12, 6);
+  fillEllipseF(g, 7, 3, 4.2, 2.2, "#f0ece4");
+  fillEllipseF(g, 6, 2.4, 1.6, 1, "#d94a3a");            // 红斑
+  fillEllipseF(g, 9, 3.8, 1.2, 0.8, "#d94a3a");
+  rectF(g, 0.5, 2, 3, 2, "#e8a03a");                     // 金尾
+  pxF(g, 10, 2, "#101820");
+  rectF(g, 8, 4.8, 1.4, 1, "#e8a03a");                   // 腹鳍
+  return outlineSprite(cv, "#8a5a2a");
+}
+function bakeMoonfish() {  // 月光鱼：幽蓝发光，头朝右
+  const { cv, g } = sprCtx(12, 6);
+  fillEllipseF(g, 7, 3, 4.2, 2.2, "#8ab8e8");
+  fillEllipseF(g, 7, 3, 2.4, 1.2, "#d8ecfc");            // 月晕腹
+  rectF(g, 0.5, 2, 3, 2, "#5a88c4");                     // 尾
+  pxF(g, 10, 2, "#101830");
+  pxF(g, 4, 0.8, "#f0f8ff"); pxF(g, 9, 4.6, "#f0f8ff");  // 星光点
+  return outlineSprite(cv, "#3a5a8a");
+}
+
+// ---- 飞行生物泛化（v0.5.0）：鸟/凤凰/小仙龙共用扑翼两帧点阵，配色区分 ----
+const FLYER_PAL = {
+  bird:    { w: "#3a3a44", b: "#4a4a56" },
+  phoenix: { w: "#e8a03a", b: "#d94a3a", g: "#f0d060" },   // 金红凤羽 + 亮焰
+  fairy:   { w: "#8ad8c0", b: "#c08ae8", g: "#e8fff4" },   // 仙龙青紫 + 荧光
+};
+function bakeFlier(type, frame, vw) {
+  if (type === "bird") return bakeBird(frame, vw);
+  const pal = FLYER_PAL[type] || FLYER_PAL.bird;
+  if (vw === "front" || vw === "back") {
+    const rows = frame
+      ? ["..........", "...b..b...", "....bb....", ".w......w.", "..w..g.w.."]
+      : ["..........", "..w....w..", ".w......w.", "....bb....", "...b.gb..."];
+    return bakeArt(10, 5, rows, pal, 1);
+  }
+  const rows = frame
+    ? ["..........", "....bb....", "...gbbw...", "..w....w..", ".w......w."]
+    : ["..........", ".w......w.", "..w....w..", "...wbbg...", "....bb...."];
+  return bakeArt(10, 5, rows, pal, 1);
+}
+
 const BAKE_CREATURES = {
   cow: bakeCow, goat: bakeGoat, deer: bakeDeer, boar: bakeBoar, wolf: bakeWolf,
   dog: bakeDog, turtle: bakeTurtle, whale: bakeWhale, fish: bakeFish,
+  rabbit: bakeRabbit, fox: bakeFox, bear: bakeBear, horse: bakeHorse,
+  penguin: bakePenguin, crab: bakeCrab, dolphin: bakeDolphin, shark: bakeShark,
+  unicorn: bakeUnicorn, mermaid: bakeMermaid, koi: bakeKoi, moonfish: bakeMoonfish,
 };
 function creatureSprite(type, frame, view) {
   const vw = view === "front" || view === "back" ? view : "side";
   return sprGet(`c${type}_${frame || 0}_${vw}`, () => {
-    if (type === "bird") return bakeBird(frame || 0, vw);
+    const meta = CREATURE_META[type];
+    if (meta && meta.flier) return bakeFlier(type, frame || 0, vw);   // 飞行生物泛化（两帧扑翼）
     if (vw !== "side") return bakeCreatureVert(type, vw);
     return BAKE_CREATURES[type] ? BAKE_CREATURES[type]() : bakeCow();
   });
@@ -1024,6 +1232,12 @@ const QUAD_VIEW = {   // 四足兽配色与体型（正/背视通用）
   boar: { body: "#5c4632", patch: null,      dk: "#241a10", w: 13, hh: 5, head: 7 },
   wolf: { body: "#787882", patch: null,      dk: "#2c2c34", w: 13, hh: 4, head: 6 },
   dog:  { body: "#8a8a92", patch: null,      dk: "#33333c", w: 11, hh: 3, head: 5 },
+  // v0.5.0 新四足兽：兔/狐/熊/马/独角兽（正/背视图由通用四足画法自动获得）
+  rabbit:  { body: "#c9b8a8", patch: null,      dk: "#5a4a3a", w: 9,  hh: 3, head: 5 },
+  fox:     { body: "#d9762e", patch: null,      dk: "#5a2a10", w: 10, hh: 3, head: 5 },
+  bear:    { body: "#6b4a33", patch: null,      dk: "#2a1a10", w: 14, hh: 5, head: 7 },
+  horse:   { body: "#8a6238", patch: null,      dk: "#2a1a10", w: 13, hh: 4, head: 6 },
+  unicorn: { body: "#f0ecf4", patch: null,      dk: "#8a80a0", w: 13, hh: 4, head: 6 },
 };
 function bakeCreatureVert(type, view) {
   const front = view === "front";
@@ -1082,6 +1296,97 @@ function bakeCreatureVert(type, view) {
     }
     return outlineSprite(cv, "#122234");
   }
+  if (type === "penguin") {   // v0.5.0：企鹅正/背视（直立小胖身）
+    const { cv, g } = sprCtx(12, 13);
+    if (front) {
+      fillEllipseF(g, 6, 7.5, 4, 5, "#2c3440");
+      fillEllipseF(g, 6, 8.5, 2.4, 3.4, "#f0f4f8");       // 白腹
+      fillEllipseF(g, 6, 2.8, 2.4, 2, "#2c3440");
+      pxF(g, 4.5, 2.4, "#111111"); pxF(g, 7.5, 2.4, "#111111");   // 双眼
+      rectF(g, 5, 3.8, 2, 1, "#f0b030");                   // 喙中缝
+      rectF(g, 1.5, 6, 1.2, 3.4, "#222a34"); rectF(g, 9.3, 6, 1.2, 3.4, "#222a34"); // 双鳍
+      rectF(g, 3.5, 12, 1.6, 1, "#f0b030"); rectF(g, 7, 12, 1.6, 1, "#f0b030");
+    } else {
+      fillEllipseF(g, 6, 7.5, 4, 5, "#2c3440");
+      fillEllipseF(g, 6, 2.8, 2.4, 2, "#2c3440");
+      rectF(g, 4, 0.5, 1.2, 2, "#2c3440"); rectF(g, 7, 0.5, 1.2, 2, "#2c3440");   // 背视露耳/头顶
+      rectF(g, 1.5, 6, 1.2, 3.4, "#222a34"); rectF(g, 9.3, 6, 1.2, 3.4, "#222a34");
+      rectF(g, 3.5, 12, 1.6, 1, "#f0b030"); rectF(g, 7, 12, 1.6, 1, "#f0b030");
+    }
+    return outlineSprite(cv, "#141a22");
+  }
+  if (type === "crab") {      // v0.5.0：蟹正/背视（对称圆身 + 双螯）
+    const { cv, g } = sprCtx(14, 10);
+    fillEllipseF(g, 7, 5, 4.4, 2.8, "#d95a3a");
+    fillEllipseF(g, 2, 3, 1.8, 1.4, "#b8422a"); fillEllipseF(g, 2, 7.5, 1.8, 1.4, "#b8422a");
+    fillEllipseF(g, 12, 3, 1.8, 1.4, "#b8422a"); fillEllipseF(g, 12, 7.5, 1.8, 1.4, "#b8422a");
+    for (const lx of [4.5, 7, 9.5]) { pxF(g, lx, 9, "#b8422a"); pxF(g, lx, 1, "#b8422a"); }
+    if (front) { pxF(g, 5.5, 3.4, "#111111"); pxF(g, 8.5, 3.4, "#111111"); }   // 正视双眼前缘
+    return outlineSprite(cv, "#7a2a18");
+  }
+  if (type === "dolphin") {   // v0.5.0：海豚正/背视（小号鲸式）
+    const { cv, g } = sprCtx(20, 12);
+    if (front) {
+      fillEllipseF(g, 10, 6, 7, 4.4, "#7a9ab8");
+      fillEllipseF(g, 10, 9, 5, 2, "#8aa8c4");
+      pxF(g, 7, 4.5, "#101820"); pxF(g, 13, 4.5, "#101820");
+      fillEllipseF(g, 2.5, 9, 2, 1.2, "#6a8aa8"); fillEllipseF(g, 17.5, 9, 2, 1.2, "#6a8aa8");
+    } else {
+      fillEllipseF(g, 10, 6, 4, 3, "#7a9ab8");
+      fillEllipseF(g, 4.5, 5, 4.5, 3, "#6a8aa8"); fillEllipseF(g, 15.5, 5, 4.5, 3, "#6a8aa8");
+      fillEllipseF(g, 4.5, 9, 4.5, 2.4, "#6a8aa8"); fillEllipseF(g, 15.5, 9, 4.5, 2.4, "#6a8aa8");
+      fillEllipseF(g, 10, 2.6, 1.4, 1.2, "#6a8aa8");   // 背鳍
+    }
+    return outlineSprite(cv, "#3a5a78");
+  }
+  if (type === "shark") {     // v0.5.0：鲨正/背视（大号鲸式 + 背鳍）
+    const { cv, g } = sprCtx(28, 16);
+    if (front) {
+      fillEllipseF(g, 14, 8, 10, 6, "#5a6a78");
+      fillEllipseF(g, 14, 11.5, 7, 2.4, "#c9d2dc");
+      pxF(g, 10, 5.5, "#101820"); pxF(g, 18, 5.5, "#101820");
+      fillEllipseF(g, 3, 12, 2.6, 1.6, "#4a5a68"); fillEllipseF(g, 25, 12, 2.6, 1.6, "#4a5a68");
+    } else {
+      fillEllipseF(g, 14, 8, 5, 4, "#5a6a78");
+      fillEllipseF(g, 5.5, 6, 6, 3.6, "#4a5a68"); fillEllipseF(g, 22.5, 6, 6, 3.6, "#4a5a68");
+      fillEllipseF(g, 5.5, 11, 6, 3, "#4a5a68"); fillEllipseF(g, 22.5, 11, 6, 3, "#4a5a68");
+      fillEllipseF(g, 14, 2.4, 2, 1.8, "#4a5a68");   // 背鳍
+    }
+    return outlineSprite(cv, "#2a3644");
+  }
+  if (type === "mermaid") {   // v0.5.0：人鱼正/背视（头肩 + 鳞尾分叉）
+    const { cv, g } = sprCtx(14, 14);
+    if (front) {
+      fillEllipseF(g, 7, 3.5, 2.6, 2.6, "#f0d0b0");
+      pxF(g, 5.5, 3, "#111111"); pxF(g, 8.5, 3, "#111111");
+      fillEllipseF(g, 7, 1.6, 2.6, 1.4, "#e88a4a");       // 发
+      rectF(g, 4.5, 6, 5, 4, "#3aa88a");                   // 身
+      fillEllipseF(g, 7, 11, 2.4, 2.4, "#3aa88a");         // 尾根
+      fillEllipseF(g, 4.5, 12.5, 1.6, 1.6, "#2a8870"); fillEllipseF(g, 9.5, 12.5, 1.6, 1.6, "#2a8870");   // 尾鳍分叉
+    } else {
+      fillEllipseF(g, 7, 3.5, 2.8, 2.6, "#e88a4a");        // 背视满头橙发
+      rectF(g, 4.5, 6, 5, 4, "#2f9078");
+      fillEllipseF(g, 7, 11, 2.4, 2.4, "#2f9078");
+      fillEllipseF(g, 4.5, 12.5, 1.6, 1.6, "#20705c"); fillEllipseF(g, 9.5, 12.5, 1.6, 1.6, "#20705c");
+    }
+    return outlineSprite(cv, "#1a5a48");
+  }
+  if (type === "koi" || type === "moonfish") {   // v0.5.0：珍稀鱼正/背视（小圆身 + 对称尾）
+    const body = type === "koi" ? "#f0ece4" : "#8ab8e8";
+    const fin = type === "koi" ? "#e8a03a" : "#5a88c4";
+    const dk = type === "koi" ? "#8a5a2a" : "#3a5a8a";
+    const { cv, g } = sprCtx(8, 8);
+    if (front) {
+      fillEllipseF(g, 4, 4, 2.6, 2.6, body);
+      pxF(g, 2.8, 3.2, "#101820"); pxF(g, 5.2, 3.2, "#101820");
+      fillEllipseF(g, 4, 6.6, 1.4, 1, fin);
+    } else {
+      fillEllipseF(g, 4, 4, 2, 2, body);
+      fillEllipseF(g, 1.6, 2.6, 1.4, 1.4, fin); fillEllipseF(g, 6.4, 2.6, 1.4, 1.4, fin);
+      fillEllipseF(g, 1.6, 5.6, 1.4, 1.4, fin); fillEllipseF(g, 6.4, 5.6, 1.4, 1.4, fin);
+    }
+    return outlineSprite(cv, dk);
+  }
   // fish（鱼群）：正/背视小圆身 + 对称尾
   const { cv, g } = sprCtx(6, 6);
   if (front) {
@@ -1135,6 +1440,77 @@ function buildingSprite(tile, v) {
       rectF(g, 3, y0 + 11, 10, 4, "#8a6236"); rectF(g, 3, y0 + 11, 10, 1, "#a87c4a"); // 榨槽
       rectF(g, 4, y0 + 8, 8, 2, "#c23b3b"); pxF(g, 5, y0 + 7, "#e8a13b"); pxF(g, 9, y0 + 7, "#e06060");   // 果堆
       rectF(g, 7, y0 + 5, 1, 7, "#5c4426");                        // 压杆
+    } else if (tile === T.PAVILION) {   // 凉亭：四柱 + 攒尖顶 + 石凳
+      rectF(g, 3, y0 + 6, 1, 10, "#7a5a30"); rectF(g, 12, y0 + 6, 1, 10, "#7a5a30");
+      rectF(g, 5, y0 + 8, 1, 8, "#7a5a30"); rectF(g, 10, y0 + 8, 1, 8, "#7a5a30");
+      for (let y = 0; y < 6; y++) {
+        const w = 16 - y * 2;
+        rectF(g, 8 - w / 2, y0 + y, w, 1, y < 2 ? "#b0554a" : "#9c463c");   // 攒尖顶
+      }
+      pxF(g, 7, y0 - 1, "#d9a05a"); pxF(g, 8, y0 - 1, "#d9a05a");   // 顶珠
+      rectF(g, 4, y0 + 12, 3, 2, "#9a9aa2"); rectF(g, 9, y0 + 12, 3, 2, "#9a9aa2");   // 石凳
+    } else if (tile === T.THEATER) {   // 戏台：高台 + 双柱 + 幕幔 + 锣
+      rectF(g, 1, y0 + 10, 14, 6, "#8a6236"); rectF(g, 1, y0 + 15, 14, 1, "#5c4426");
+      rectF(g, 2, y0 + 2, 1, 8, "#7a5a30"); rectF(g, 13, y0 + 2, 1, 8, "#7a5a30");
+      rectF(g, 1, y0 + 1, 14, 1, "#8a6236");                        // 横梁
+      for (const [rx, rc] of [[3, "#c23b3b"], [7, "#e8a13b"], [11, "#c23b3b"]]) {
+        rectF(g, rx, y0 + 3, 2, 6, rc);                             // 幕幔三片
+      }
+      rectF(g, 6, y0 + 4, 4, 4, "#4a3520");                         // 台口深色
+      fillEllipseF(g, 4, y0 + 9, 1.6, 1.6, "#d9a05a");              // 锣
+    } else if (tile === T.ARENA) {   // 斗兽场：环形看台 + 场地 + 旗
+      fillEllipseF(g, 8, y0 + 10, 7, 5, "#b0a088");
+      fillEllipseF(g, 8, y0 + 10, 4.6, 3.2, "#8f8068");
+      fillEllipseF(g, 8, y0 + 10, 3, 2, "#c9b98a");                 // 场地沙
+      for (let a = 0; a < 8; a++) {                                  // 看台坐席点
+        const ax = 8 + Math.cos(a * Math.PI / 4) * 5.8, ay = y0 + 10 + Math.sin(a * Math.PI / 4) * 4;
+        pxF(g, Math.round(ax), Math.round(ay), "#6e6250");
+      }
+      rectF(g, 7, y0 + 1, 1, 5, "#7a5a30"); rectF(g, 8, y0 + 1, 2, 2, "#d9483b");   // 中央旗
+    } else if (tile === T.PARK_GATE) {   // 游乐园门楼：双塔 + 拱门 + 彩旗
+      rectF(g, 2, y0 + 2, 3, 14, "#c07840"); rectF(g, 11, y0 + 2, 3, 14, "#c07840");
+      rectF(g, 2, y0 + 15, 3, 1, "#8a5426"); rectF(g, 11, y0 + 15, 3, 1, "#8a5426");
+      rectF(g, 5, y0 + 4, 6, 2, "#d0885a"); rectF(g, 5, y0 + 2, 6, 1, "#e8a86a");   // 拱梁
+      rectF(g, 6, y0 + 6, 4, 10, "#3a2a1a");                        // 门洞
+      for (const [fx, fc] of [[5, "#c23b3b"], [8, "#4a90d9"], [11, "#e8a13b"]]) {
+        pxF(g, fx, y0 - 1, fc); pxF(g, fx, y0 - 2, fc);             // 彩旗
+      }
+      rectF(g, 5, y0 - 3, 7, 1, "#8a6236");
+    } else if (tile === T.FERRIS) {   // 摩天轮：A 字支架 + 大轮辐 + 吊舱
+      rectF(g, 6, y0 + 8, 1, 8, "#6a6a72"); rectF(g, 9, y0 + 8, 1, 8, "#6a6a72");
+      rectF(g, 5, y0 + 15, 6, 1, "#55555c");
+      const R2 = 6.4, cx2 = 8, cy2 = y0 + 6;
+      for (let a = 0; a < 8; a++) {                                  // 轮辐
+        const ax = cx2 + Math.cos(a * Math.PI / 4) * R2, ay = cy2 + Math.sin(a * Math.PI / 4) * R2;
+        rectF(g, cx2, cy2, 1, 1, "#8a92a0");
+        // 简化辐条：从中心向轮缘分段描点
+        for (let rr = 2; rr <= R2; rr += 1.5) {
+          pxF(g, Math.round(cx2 + Math.cos(a * Math.PI / 4) * rr), Math.round(cy2 + Math.sin(a * Math.PI / 4) * rr), "#8a92a0");
+        }
+        fillEllipseF(g, ax, ay, 1.4, 1.4, ["#c23b3b", "#e8a13b", "#4a90d9", "#6fae4e"][a % 4]);   // 彩色吊舱
+      }
+      fillEllipseF(g, cx2, cy2, 1.6, 1.6, "#d9a05a");                // 轮心
+    } else if (tile === T.CAROUSEL) {   // 旋转木马：圆顶尖顶 + 中心柱 + 两匹木马
+      for (let y = 0; y < 5; y++) {
+        const w = 14 - y * 2;
+        rectF(g, 8 - w / 2, y0 + y, w, 1, y < 1 ? "#e88aa8" : y < 3 ? "#d0688c" : "#b8587a");
+      }
+      pxF(g, 7, y0 - 1, "#f0d060"); pxF(g, 8, y0 - 1, "#f0d060");
+      rectF(g, 3, y0 + 5, 1, 9, "#d9c9a8"); rectF(g, 12, y0 + 5, 1, 9, "#d9c9a8");   // 檐柱
+      rectF(g, 7, y0 + 5, 2, 10, "#c9a08a");                         // 中心柱
+      fillEllipseF(g, 4.6, y0 + 11, 2.2, 1.4, "#f0ead8");            // 白马
+      pxF(g, 5.6, y0 + 10, "#1a1a1a");
+      fillEllipseF(g, 11.4, y0 + 11, 2.2, 1.4, "#c9b0d8");           // 紫马
+      pxF(g, 12.2, y0 + 10, "#1a1a1a");
+      rectF(g, 2, y0 + 15, 12, 1, "#8a5426");                        // 底座
+    } else if (tile === T.COASTER) {   // 过山车：起伏轨道 + 支柱 + 小车
+      rectF(g, 1, y0 + 12, 1, 4, "#7a5a30"); rectF(g, 6, y0 + 9, 1, 7, "#7a5a30");
+      rectF(g, 11, y0 + 6, 1, 10, "#7a5a30"); rectF(g, 14, y0 + 10, 1, 6, "#7a5a30");
+      for (let x = 0; x < 16; x++) {                                  // 正弦轨道
+        const ty = y0 + 9 - Math.round(Math.sin(x / 16 * Math.PI * 2) * 3);
+        pxF(g, x, ty, "#c07840"); pxF(g, x, ty + 1, "#8a5426");
+      }
+      rectF(g, 10, y0 + 4, 3, 2, "#c23b3b"); pxF(g, 10, y0 + 4, "#e06060");   // 小车
     } else {   // ROASTERY 烘焙坊：矮房 + 烟囱 + 炉火 + 咖啡麻袋
       rectF(g, 2, y0 + 7, 12, 9, "#7a6248");
       rectF(g, 2, y0 + 15, 12, 1, shadeHex("#7a6248", 0.72));

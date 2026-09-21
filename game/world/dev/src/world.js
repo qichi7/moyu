@@ -25,6 +25,8 @@ const world = {
   berryStock: new Map(),// 浆果/果树果量 "x,y" → 份数
   fishStock: new Map(), // 浅海鱼群 "x,y" → 份数
   ponds: new Set(),     // 人工池塘格 "x,y"（EXCAV 挖出来的水，显示为池塘而非浅海）
+  mushrooms: new Set(), // 蘑菇格 "x,y"（v0.5.0：一次性行走粮点，采完消失）
+  parks: [],            // [{x,y,x0,y0,x1,y1,water}] 游乐园（v0.5.0 娱乐链，园区 bounding + 门楼）
   lastBridgeHead: null, // 上一条桥线的桥头（续接锚点）
   lastBridgeDir: null,  // 上一条桥线的走向（续接沿此直线延伸，保证笔直）
   pastures: [],         // [{x,y}] 牧场
@@ -34,6 +36,8 @@ const world = {
   quarries: [],         // [{x,y}] 采石场（定期产石材）
   sandpits: [],         // [{x,y}] 沙场（定期产沙土）
   ponds: new Set(),     // 人工池塘（genWorld 重置）
+  mushrooms: new Set(), // 蘑菇格（genWorld 重置）
+  parks: [],            // 游乐园（genWorld 重置）
   lastBridgeHead: null,
   lastBridgeDir: null,
   logs: [],
@@ -54,15 +58,23 @@ function ensureChunk(cx, cy) {
   if (!c) {
     c = { tiles: new Uint8Array(CHUNK * CHUNK), hp: new Float32Array(CHUNK * CHUNK), gen: false };
     world.chunks.set(k, c);
+    _lastChunkKey = null; _lastChunk = null;   // 单槽记忆失效（新 chunk 可能让旧缓存里 undefined 过期）
   }
   return c;
 }
 
 const cIdx = (x, y) => (y & (CHUNK - 1)) * CHUNK + (x & (CHUNK - 1));
 
-// 未生成的 chunk = 虚空（不可走、渲染为深渊色），探索到后由 generateRegion 显现内容
+// 未生成的 chunk = 虚空（不可走、渲染为深渊色），探索到后由 generateRegion 显现内容。
+// v0.5.0 性能：单槽 chunk 记忆——tile 读取有强空间局部性（BFS/扫描连续命中同 chunk），
+// 省掉热路径上每次的 chunkKey 字符串拼接 + Map.get；Map 身份校验兼容 genWorld 重置
+let _memoMap = null, _lastChunkKey = null, _lastChunk = null;
 function tileAt(x, y) {
-  const c = world.chunks.get(chunkKey(x >> 5, y >> 5));
+  const chunks = world.chunks;
+  const k = (x >> 5) + "," + (y >> 5);
+  let c;
+  if (chunks === _memoMap && k === _lastChunkKey) c = _lastChunk;
+  else { c = chunks.get(k); _memoMap = chunks; _lastChunkKey = k; _lastChunk = c; }
   if (!c || !c.gen) return T.VOID;
   return c.tiles[cIdx(x, y)];
 }
@@ -182,14 +194,31 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
         t = T.DEEP;
         // 深海鲸：概率极低，同格防重（区域重算不重复生成）
         if (hash2(x + 441, y + 819) < 0.008 && !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "whale");
+        // 深海新物种（v0.5.0）：鲨（氛围捕食者）/月光鱼（珍稀渔获）——hash 确定性 + 全局上限防泛滥
+        else if (hash2(x + 371, y + 533) < 0.004 &&
+                 creatures.filter(c => c.type === "shark" && !c.dead).length < (SIM.SPECIES_CAP.shark || 8) &&
+                 !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "shark");
+        else if (hash2(x + 719, y + 421) < 0.002 &&
+                 creatures.filter(c => c.type === "moonfish" && !c.dead).length < (SIM.SPECIES_CAP.moonfish || 10) &&
+                 !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "moonfish");
       }
       else if (e < 0.38) {
         t = T.WATER;
+        // 鱼点登记与鱼群实体解耦（v0.5.0）：fishStock 是渔场经济的资源位（渔船/垂钓目标），
+        // 恒定登记；鱼群实体（视觉+生态）另受 SPECIES_CAP.fish 上限约束
         if (hash2(x + 555, y + 777) < 0.02) {
           world.fishStock.set(x + "," + y, 3);
-          if (!creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "fish");
+          if (creatures.filter(c => c.type === "fish" && !c.dead).length < (SIM.SPECIES_CAP.fish || 60) &&
+              !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "fish");
         }
         else if (hash2(x + 613, y + 209) < 0.005 && !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "turtle");
+        // 浅海新物种（v0.5.0）：锦鲤（珍稀渔获）/人鱼（氛围幻影）——hash 确定性 + 全局上限
+        else if (hash2(x + 827, y + 619) < 0.0025 &&
+                 creatures.filter(c => c.type === "koi" && !c.dead).length < (SIM.SPECIES_CAP.koi || 12) &&
+                 !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "koi");
+        else if (hash2(x + 941, y + 701) < 0.0012 &&
+                 creatures.filter(c => c.type === "mermaid" && !c.dead).length < (SIM.SPECIES_CAP.mermaid || 6) &&
+                 !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "mermaid");
       }
       else if (e < 0.42) t = T.SAND;
       else if (e > 0.68) {
@@ -201,6 +230,10 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
         if (m > 0.58 && hash2(x, y) < 0.55) t = T.TREE;
         else if (hash2(x + 777, y + 331) < 0.012) { t = T.BERRY; world.berryStock.set(x + "," + y, SIM.BERRY_STOCK); }
         else if (hash2(x + 919, y + 553) < 0.005) { t = T.FRUIT; world.berryStock.set(x + "," + y, SIM.BERRY_STOCK); }
+        // 新植物（v0.5.0）：竹林（快木材）/蘑菇（一次性行走粮点，采完消失）/月光花（夜光环，兼作奇景点缀）
+        else if (hash2(x + 257, y + 839) < 0.008) t = T.BAMBOO;
+        else if (hash2(x + 457, y + 139) < 0.006) { t = T.MUSHROOM; world.mushrooms.add(x + "," + y); }
+        else if (hash2(x + 613, y + 971) < 0.0012) t = T.MOONBLOOM;
       }
       c.tiles[i] = t;
     }
@@ -283,10 +316,12 @@ function shipTick(dt) {
     if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 15); }
     const aheadX = Math.round(nx + Math.cos(s.ang) * 2.5), aheadY = Math.round(ny + Math.sin(s.ang) * 2.5);
     const ahead = tileAt(aheadX, aheadY);
-    if (ahead !== T.VOID && ahead !== T.DEEP && ahead !== T.WATER) {
+    if (ahead !== T.VOID && ahead !== T.DEEP && ahead !== T.WATER && ahead !== T.BRIDGE) {
       // 发现陆地：靠岸下船（登岛命名/定居化由小人自身逻辑触发）
+      // 靠岸点排除桥格（v0.5.0 船穿桥：船贴桥走时应继续航行，不能在桥头靠岸）
       const sailor = s.sailor;
-      const shore = [{ x: aheadX, y: aheadY }, ...neighborsOf(aheadX, aheadY)].find(p => walkable(p.x, p.y));
+      const shore = [{ x: aheadX, y: aheadY }, ...neighborsOf(aheadX, aheadY)]
+        .find(p => walkable(p.x, p.y) && tileAt(p.x, p.y) !== T.BRIDGE);
       if (shore && sailor) {
         s.state = "docked";
         s.dockedAt = world.time;
@@ -320,7 +355,7 @@ function shipTick(dt) {
     s.revealCd -= dt;
     if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 15); }
     const aheadT = tileAt(Math.round(nx), Math.round(ny));
-    if (walkable(Math.round(nx), Math.round(ny)) && aheadT !== T.WATER && aheadT !== T.DEEP) {
+    if (walkable(Math.round(nx), Math.round(ny)) && aheadT !== T.WATER && aheadT !== T.DEEP && aheadT !== T.BRIDGE) {
       s.state = "docked"; s.dockedAt = world.time;
       if (s.sailor) { s.sailor.x = nx; s.sailor.y = ny; s.sailor.state = "idle"; s.sailor.voyaging = false; }
       continue;
@@ -348,7 +383,7 @@ function shipTick(dt) {
     // 朝目标平滑转向；前方近处是陆地则侧向绕行
     const ax = Math.round(s.x + Math.cos(s.ang) * 3), ay = Math.round(s.y + Math.sin(s.ang) * 3);
     const aheadT = tileAt(ax, ay);
-    if (aheadT !== T.VOID && aheadT !== T.DEEP && aheadT !== T.WATER) {
+    if (aheadT !== T.VOID && aheadT !== T.DEEP && aheadT !== T.WATER && aheadT !== T.BRIDGE) {
       s.ang += (hash2(Math.round(s.x), Math.round(s.y)) < 0.5 ? 1 : -1) * 1.8 * dt;
     } else {
       let diff = Math.atan2(Math.sin(Math.atan2(dy, dx) - s.ang), Math.cos(Math.atan2(dy, dx) - s.ang));
@@ -424,7 +459,7 @@ function tickFishingBoats(dt) {
     const d = Math.hypot(dx, dy) || 1;
     const nx = s.x + (dx / d) * SIM.SHIP_SPEED * dt, ny = s.y + (dy / d) * SIM.SHIP_SPEED * dt;
     const aheadT = tileAt(Math.round(nx), Math.round(ny));
-    if (walkable(Math.round(nx), Math.round(ny)) && aheadT !== T.WATER && aheadT !== T.DEEP) {
+    if (walkable(Math.round(nx), Math.round(ny)) && aheadT !== T.WATER && aheadT !== T.DEEP && aheadT !== T.BRIDGE) {
       // 靠岸卸货：渔获就地入粮池，渔民下船休整（渔船停靠码头，由常规清理回收）
       s.state = "docked"; s.dockedAt = world.time;
       if (s.sailor) {
@@ -749,7 +784,7 @@ function expand() {
     // 跨水段不预置桥：工人的 goTo 被水挡住时动态立项（blocked 必邻工人所站格，首格必可达），
     // 完工后沿 corridor 链式续立到对岸
     if (t === T.WATER || t === T.DEEP) { bridges++; }
-    else if (t === T.TREE || t === T.MOUNTAIN) { tasksAdd({ type: "DIG", x, y }); digs++; }
+    else if (t === T.TREE || t === T.BAMBOO || t === T.MOUNTAIN) { tasksAdd({ type: "DIG", x, y }); digs++; }
   };
   for (let i = 0; i <= steps; i++) {
     const x = Math.round(sx0 + dxs * i), y = Math.round(sy0 + dys * i);

@@ -93,6 +93,10 @@ function agentPoseOf(a) {
   if (a.state === "sleep") return { key: "sleep", legs: null };
   if (a.state === "eat") return { key: Math.floor(a.phase * 2) % 2 ? "eat2" : "eat1", legs: "stand" };
   if (a.state === "drink") return { key: Math.floor(a.phase * 2) % 2 ? "drink2" : "drink1", legs: "stand" };
+  if (a.state === "play") {
+    // 游玩（v0.5.0 娱乐链）：举臂欢呼两帧（复用 drink 举杯帧，观感即「玩得开心」）
+    return { key: Math.floor(a.phase * 2) % 2 ? "drink2" : "drink1", legs: "stand" };
+  }
   if (a.state === "work") {
     const tt = a.task && a.task.type;
     if (tt === "FISH") {
@@ -212,9 +216,11 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
           ctx.lineTo(px + s * 0.53, py - s * 0.28);
           ctx.closePath(); ctx.fill();
         }
-      } else if (tile === T.WELL || tile === T.BREWERY || tile === T.PRESS || tile === T.ROASTERY) {
-        // 新工坊建筑（井/酒坊/压榨坊/烘焙坊）：buildingSprite 画布可 16×24 向上探出，
-        // 参照 HOUSE 锚定 tile 底绘制；S6 未落地时回退旧 tile 底图路径
+      } else if (tile === T.WELL || tile === T.BREWERY || tile === T.PRESS || tile === T.ROASTERY ||
+                 tile === T.PAVILION || tile === T.THEATER || tile === T.ARENA ||
+                 tile === T.PARK_GATE || tile === T.FERRIS || tile === T.CAROUSEL || tile === T.COASTER) {
+        // 工坊与娱乐建筑（井/酒坊/压榨坊/烘焙坊 + 凉亭/戏台/斗兽场/门楼/摩天轮/旋转木马/过山车）：
+        // buildingSprite 画布可 16×24 向上探出，参照 HOUSE 锚定 tile 底绘制；未落地时回退旧 tile 底图路径
         if (typeof buildingSprite === "function") {
           const bspr = buildingSprite(tile, v);
           const scale = s / SPR;
@@ -343,11 +349,11 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
             ctx.restore();
           } else ctx.drawImage(mspr, fx - fs / 2, fy - fs / 3, fs, fs * 0.6);
         }
-      } else if (c.type === "bird") {
-        // 鸟：空中飞行，两帧扑翼
+      } else if (CREATURE_META[c.type].flier) {
+        // 飞行生物（v0.5.0 泛化：鸟/凤凰/小仙龙）：空中两帧扑翼
         const fw = Math.floor(t * 6 + c.phase) % 2;
-        const bw = Math.max(5, s * 0.34);
-        drawC(creatureSprite("bird", fw, cview), px - bw / 2, py - s * 0.4 - bw * 0.25, bw, bw * 0.5);
+        const bw = Math.max(5, s * 0.34 * (meta.size / 0.3));
+        drawC(creatureSprite(c.type, fw, cview), px - bw / 2, py - s * 0.4 - bw * 0.25, bw, bw * 0.5);
       } else {
         const spr = creatureSprite(c.type, 0, cview);
         const w = Math.max(6, s * 0.66 * meta.size);
@@ -545,6 +551,11 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       ctx.font = `${Math.max(7, s * 0.45)}px sans-serif`;
       ctx.fillText("z", px + r * 0.8, py - 0.7 * s);
+    }
+    if (a.depressed && s >= 8) {   // 抑郁阴云（v0.5.0）：头顶灰色雨云，与睡觉 z 同款文字 glyph
+      ctx.fillStyle = "rgba(118,128,148,0.9)";
+      ctx.font = `${Math.max(7, s * 0.42)}px sans-serif`;
+      ctx.fillText("☁", px + r * 1.1, py - 0.85 * s);
     }
   }
 

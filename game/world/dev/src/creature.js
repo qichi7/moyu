@@ -8,12 +8,27 @@ const CREATURE_META = {
   goat:  { name: "羊",   yield: 5, speed: 0.7,  flee: 1.25, size: 0.8,  habitat: "grass",  hunt: true },
   deer:  { name: "鹿",   yield: 4, speed: 1.3,  flee: 1.7,  size: 0.85, habitat: "grass",  hunt: true },
   boar:  { name: "野猪", yield: 6, speed: 0.9,  flee: 1.0,  size: 0.9,  habitat: "forest", hunt: true },
-  dog:   { name: "狗",   yield: 0, speed: 2.2,  flee: 0,    size: 0.55, habitat: "grass",  hunt: false },
+  dog:   { name: "狗",   yield: 0, speed: 2.2,  flee: 0,    size: 0.55, habitat: "grass",  hunt: false, tamable: true, tameJoy: 15 },
   wolf:  { name: "狼",   yield: 0, speed: 1.2,  flee: 0,    size: 0.7,  habitat: "forest", hunt: false, predates: "goat" },
   fish:  { name: "鱼群", yield: 0, speed: 0.8,  flee: 0,    size: 0.5,  habitat: "water",  hunt: false, school: 4 },
   turtle:{ name: "海龟", yield: 0, speed: 0.25, flee: 0,    size: 0.6,  habitat: "water",  hunt: false },
   whale: { name: "鲸",   yield: 0, speed: 0.6,  flee: 0,    size: 2.6,  habitat: "deep",   hunt: false },
-  bird:  { name: "鸟",   yield: 0, speed: 2.5,  flee: 0,    size: 0.3,  habitat: "air",    hunt: false },
+  bird:  { name: "鸟",   yield: 0, speed: 2.5,  flee: 0,    size: 0.3,  habitat: "air",    hunt: false, flier: true },
+  // ---- 物种扩充（v0.5.0）----
+  rabbit:  { name: "兔",     yield: 2, speed: 1.7,  flee: 2.0,  size: 0.4,  habitat: "grass",  hunt: true },
+  fox:     { name: "狐",     yield: 3, speed: 1.5,  flee: 1.9,  size: 0.6,  habitat: "forest", hunt: true },
+  bear:    { name: "熊",     yield: 10, speed: 0.85, flee: 0.7, size: 1.2,  habitat: "forest", hunt: true },
+  horse:   { name: "马",     yield: 0, speed: 1.3,  flee: 1.7,  size: 1.1,  habitat: "grass",  hunt: false },
+  penguin: { name: "企鹅",   yield: 0, speed: 0.45, flee: 0.8,  size: 0.45, habitat: "sand",   hunt: false },
+  crab:    { name: "蟹",     yield: 1, speed: 0.5,  flee: 0.9,  size: 0.3,  habitat: "sand",   hunt: true },
+  dolphin: { name: "海豚",   yield: 0, speed: 2.2,  flee: 0,    size: 0.9,  habitat: "water",  hunt: false },
+  shark:   { name: "鲨",     yield: 0, speed: 1.2,  flee: 0,    size: 1.7,  habitat: "deep",   hunt: false },
+  unicorn: { name: "独角兽", yield: 0, speed: 1.6,  flee: 1.5,  size: 0.9,  habitat: "grass",  hunt: false, tamable: true, tameJoy: 25, rare: true },
+  moonfish:{ name: "月光鱼", yield: 0, speed: 0.7,  flee: 0,    size: 0.45, habitat: "deep",   hunt: false, rare: true, fishJoy: 25 },
+  koi:     { name: "锦鲤",   yield: 0, speed: 0.9,  flee: 0,    size: 0.4,  habitat: "water",  hunt: false, rare: true, fishJoy: 15 },
+  phoenix: { name: "凤凰",   yield: 0, speed: 2.4,  flee: 0,    size: 0.65, habitat: "air",    hunt: false, flier: true, rare: true },
+  fairy:   { name: "小仙龙", yield: 0, speed: 2.6,  flee: 0,    size: 0.4,  habitat: "air",    hunt: false, flier: true, rare: true },
+  mermaid: { name: "人鱼",   yield: 0, speed: 0.6,  flee: 0,    size: 0.7,  habitat: "water",  hunt: false, rare: true },
 };
 
 // 栖息地判定：生物只在自己的栖息地内活动
@@ -23,6 +38,7 @@ function habitatOk(c, x, y) {
     case "water":  return t === T.WATER;
     case "deep":   return t === T.DEEP || t === T.WATER;
     case "forest": return t === T.GRASS || t === T.TREE;
+    case "sand":   return t === T.SAND;                    // 沙滩：企鹅与螃蟹的沿岸栖息带（v0.5.0）
     case "air":    return true;   // 鸟在天上飞，不受地形限制
     default:       return t === T.GRASS || t === T.SAND;
   }
@@ -45,6 +61,7 @@ class Creature {
     this.moveCd = randRange(0, 2);
     this.breedCd = 120;
     this.outputCd = SIM.PASTURE_INTERVAL;
+    this.tameness = 0;        // 驯化进度（v0.5.0 修正：原版从未初始化——undefined+dt=NaN 永远到不了 3，驯化静默失效）
   }
 
   isWild() { return !this.pasture && this.type !== "dog" && this.type !== "bird"; }
@@ -70,7 +87,9 @@ class Creature {
     }
     // 搁浅/被困：施工（填海/造陆）改变地形后脚下不再是栖息地，困太久会死，等待有人救援
     // （圈养动物在人类管理的牧场里，脚下是 PASTURE tile，不参与搁浅判定）
-    if (this.type !== "bird" && !this.pasture && !habitatOk(this, Math.round(this.x), Math.round(this.y))) {
+    // 位置取整必须 Math.floor（v0.5.0 修正）：实体坐标是 tile 中心 +0.5，Math.round(10.5)=11 会向东偏一格——
+    // 岸边的鱼/蟹/锦鲤被误判站上沙滩/虚空 → 假搁浅潮 → 救援吸干劳动力 → 农田停摆饥荒（round/floor 家族，同死锁 #20）
+    if (this.type !== "bird" && !this.pasture && !habitatOk(this, Math.floor(this.x), Math.floor(this.y))) {
       this.strandT = (this.strandT || 0) + dt;
       if (this.strandT > SIM.ANIMAL_STRAND_DEATH) {
         this.dead = true;
@@ -83,30 +102,41 @@ class Creature {
     }
     this.strandT = 0;
     if (this.pasture) { this.updatePasture(dt); return; }
-    if (this.type === "dog") { this.updateDog(dt); return; }
-    if (this.type === "bird") { this.updateBird(dt); return; }
+    // 行为分发泛化（v0.5.0）：tamable 走驯化/跟随路径（狗/独角兽），flier 走飞行路径（鸟/凤凰/仙龙）
+    if (CREATURE_META[this.type].tamable) { this.updateDog(dt); return; }
+    if (CREATURE_META[this.type].flier) { this.updateBird(dt); return; }
     if (this.type === "wolf") { this.updateWolf(dt); return; }
+    if (this.type === "dolphin") { this.updateDolphin(dt); return; }
     this.updateWild(dt);
   }
 
   // 野生：游荡（栖息地内）；可猎物种会被猎人逼近而逃离（附近有狗则被围堵减速）
   updateWild(dt) {
     const meta = CREATURE_META[this.type];
-    // 逃跑判定：只对可猎物种生效
+    // 逃跑判定：只对可猎物种生效（0.3s 节流 v0.5.0——45 小人 × 每只可猎兽逐帧扫描是热点；
+    // 威胁与狗缓存 0.3s，逃跑移动仍逐帧进行）
     if (meta.hunt) {
-      let threat = null, threatD = 2.8;
-      for (const a of agents) {
-        const d = Math.hypot(a.x - this.x, a.y - this.y);
-        if (d < threatD) { threatD = d; threat = a; }
+      this.threatCd = (this.threatCd || 0) - dt;
+      if (this.threatCd <= 0) {
+        this.threatCd = 0.3;
+        let threat = null, threatD = 2.8;
+        for (const a of agents) {
+          const d = Math.hypot(a.x - this.x, a.y - this.y);
+          if (d < threatD) { threatD = d; threat = a; }
+        }
+        let dogNear = false;
+        for (const c of creatures) {
+          if (c.type === "dog" && !c.dead && Math.hypot(c.x - this.x, c.y - this.y) < 4) { dogNear = true; break; }
+        }
+        this.threat = threat;
+        this.dogNear = dogNear;
       }
-      let dogNear = false;
-      for (const c of creatures) {
-        if (c.type === "dog" && !c.dead && Math.hypot(c.x - this.x, c.y - this.y) < 4) { dogNear = true; break; }
-      }
+      const threat = (this.threat && !this.threat.dead && Math.hypot(this.threat.x - this.x, this.threat.y - this.y) < 3.5)
+        ? this.threat : null;
       if (threat) {
         this.fleeT = (this.fleeT || 0) + dt;
         const tired = this.fleeT > 8 ? 0.4 : 1;
-        const sp = (dogNear ? 0.55 : meta.flee) * tired * dt;
+        const sp = ((this.dogNear ? 0.55 : meta.flee) * tired) * dt;
         const dx = this.x - threat.x, dy = this.y - threat.y;
         const d = Math.hypot(dx, dy) || 1;
         const fox = this.x, foy = this.y;
@@ -131,7 +161,7 @@ class Creature {
       const sp = meta.speed * dt;
       const ox = this.x, oy = this.y;
       const nx = this.x + (dx / d) * sp, ny = this.y + (dy / d) * sp;
-      if (habitatOk(this, Math.round(nx), Math.round(ny))) { this.x = nx; this.y = ny; }
+      if (habitatOk(this, Math.floor(nx), Math.floor(ny))) { this.x = nx; this.y = ny; }
       if (this.x !== ox || this.y !== oy) this.updateFace(dx, dy);   // 实际位移才更新（被栖息地挡住则保持）——与 stepToward 同口径
       if (d <= sp) this.target = null;
     }
@@ -164,7 +194,7 @@ class Creature {
       const sp = CREATURE_META[this.type].speed * dt;
       const ox = this.x, oy = this.y;
       const nx = this.x + (dx / d) * sp, ny = this.y + (dy / d) * sp;
-      if (habitatOk(this, Math.round(nx), Math.round(ny))) { this.x = nx; this.y = ny; }
+      if (habitatOk(this, Math.floor(nx), Math.floor(ny))) { this.x = nx; this.y = ny; }
       if (this.x !== ox || this.y !== oy) this.updateFace(dx, dy);   // 同 updateWild：实际位移才更新朝向
       if (d <= sp) this.target = null;
     }
@@ -182,7 +212,8 @@ class Creature {
   }
 
   // 狗：认定了固定主人就一生跟随（主人去世后才重新认主）
-  // 狗：野生幼犬需要被驯化——有人靠近停留累计驯化进度，成功后一生认定固定主人
+  // 驯化（v0.5.0 泛化）：野生个体需要被靠近驯化——有人停留累计驯化进度，成功后认定固定主人；
+  // tamable 物种共用本路径（狗 / 独角兽），驯化成功的喜悦按 meta.tameJoy 回馈驯服者
   updateDog(dt) {
     if (!this.tamed || !this.owner || this.owner.dead) {
       // 未驯化（或主人去世重新待驯）：游荡 + 驯化检测
@@ -207,13 +238,27 @@ class Creature {
         if (this.tameness >= 3) {
           this.tamed = true;
           this.owner = tamer;
-          logThrottled(`${tamer.name} 驯服了一条狗，狗认定他为主人。`, 15);
+          // 驯化的喜悦（v0.5.0）：驯服者心情大涨（独角兽 25 / 狗 15，meta.tameJoy 定义）
+          tamer.mood = Math.min(100, (tamer.mood || 0) + (CREATURE_META[this.type].tameJoy || SIM.MOOD_TAME_BONUS || 15));
+          logThrottled(`${tamer.name} 驯服了一条${CREATURE_META[this.type].name}，它认定他为主人。`, 15);
         }
       }
       return;
     }
     const d = Math.hypot(this.owner.x - this.x, this.owner.y - this.y);
     if (d > 4) this.stepToward(this.owner, this.speed * dt);
+  }
+
+  // 海豚（v0.5.0）：追随航行的船嬉戏（追随 26 格内最近的海上船只；无船则普通游荡）
+  updateDolphin(dt) {
+    let best = null, bd = 26;
+    for (const s of world.ships) {
+      if (s.state !== "sailing" && s.state !== "fishing" && s.state !== "return") continue;
+      const d = Math.hypot(s.x - this.x, s.y - this.y);
+      if (d < bd) { bd = d; best = s; }
+    }
+    if (best) { this.stepToward(best, this.speed * dt); return; }
+    this.updateWild(dt);
   }
 
   // 圈养：在栏内小范围活动，定期产粮 + 繁殖（水生物种圈养于水域渔场，游荡判定走栖息地）
@@ -269,7 +314,7 @@ class Creature {
 
   moveBy(mx, my) {
     const nx = this.x + mx, ny = this.y + my;
-    if (habitatOk(this, Math.round(nx), Math.round(ny))) { this.x = nx; this.y = ny; }
+    if (habitatOk(this, Math.floor(nx), Math.floor(ny))) { this.x = nx; this.y = ny; }
     else this.target = null;
   }
 }
@@ -282,14 +327,15 @@ function spawnCreature(x, y, type, captured) {
   return c;
 }
 
-// 在一座岛上散布生物：牲畜兽群 + 野生鹿/野猪/狼 + 海龟（按栖息地落位）
+// 在一座岛上散布生物：牲畜兽群 + 野生鹿/野猪/狼 + 海龟（按栖息地落位）+ 新物种散布（v0.5.0）
 function populateIslandCreatures(bx, by, r) {
-  let grass = 0, forestEdge = 0, water = 0;
+  let grass = 0, forestEdge = 0, water = 0, sand = 0;
   for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
     const t = tileAt(bx + dx, by + dy);
     if (t === T.GRASS) grass++;
     if (t === T.TREE) forestEdge++;
     if (t === T.WATER) water++;
+    if (t === T.SAND) sand++;
   }
   let n = 0;
   if (grass < 12) return 0;
@@ -328,6 +374,44 @@ function populateIslandCreatures(bx, by, r) {
       if (tileAt(cx, cy) === T.WATER) { spawnCreature(cx, cy, "turtle"); n++; break; }
     }
   }
+  // ---- 新物种散布（v0.5.0）----
+  // 上限守卫：每岛散布不受繁衍上限约束会让种群随岛屿数无界增长（性能与生态双重问题）——
+  // 生成前查全局计数，已达 SIM.SPECIES_CAP 的物种跳过
+  const underCap = type => creatures.filter(c => c.type === type && !c.dead).length < (SIM.SPECIES_CAP[type] || 1e9);
+  // 沙滩：企鹅与螃蟹混居（沿岸栖息带）
+  if (sand > 5 && (underCap("penguin") || underCap("crab"))) {
+    for (let i = 0; i < 1 + randInt(0, 2); i++) {
+      const kind = rand() < 0.5 ? "penguin" : "crab";
+      if (!underCap(kind)) continue;
+      const s = findSpot(bx, by, 1, r, T.SAND);
+      if (s) { spawnCreature(s.x, s.y, kind); n++; }
+    }
+  }
+  // 草地加种：兔群（快繁衍）+ 零星野马
+  for (let i = 0; i < 1 + randInt(0, 3) && underCap("rabbit"); i++) {
+    const s = findSpot(bx, by, 2, r, T.GRASS);
+    if (s) { spawnCreature(s.x, s.y, "rabbit"); n++; }
+  }
+  if (rand() < 0.4 && underCap("horse")) {
+    const s = findSpot(bx, by, 3, r, T.GRASS);
+    if (s) { spawnCreature(s.x, s.y, "horse"); n++; }
+  }
+  // 林地加种：狐；大森林偶见熊（猎物丰厚但危险）
+  if (forestEdge > 6) {
+    for (let i = 0; i < 1 + randInt(0, 2) && underCap("fox"); i++) {
+      const s = findSpot(bx, by, 2, r, T.GRASS, [T.BERRY, T.FRUIT]);
+      if (s) { spawnCreature(s.x, s.y, "fox"); n++; }
+    }
+    if (rand() < 0.3 && underCap("bear")) {
+      const s = findSpot(bx, by, 2, r, T.TREE);
+      if (s) { spawnCreature(s.x, s.y, "bear"); n++; }
+    }
+  }
+  // 珍稀：独角兽（约 1/8 的岛有一只，雪白草地幻兽，可驯化）
+  if (rand() < 0.12 && underCap("unicorn")) {
+    const s = findSpot(bx, by, 3, r, T.GRASS);
+    if (s) { spawnCreature(s.x, s.y, "unicorn"); n++; logThrottled("传闻这座岛上有独角兽出没。", 60); }
+  }
   return n;
 }
 
@@ -355,6 +439,18 @@ function wildBreedTick() {
     const w0 = whales[randInt(0, whales.length - 1)];
     const pw = findSpot(Math.round(w0.x), Math.round(w0.y), 0, 8, T.DEEP);
     if (pw) spawnCreature(pw.x, pw.y, "whale");
+  }
+  // 新物种按上限表繁衍（v0.5.0）：SIM.SPECIES_CAP 驱动，栖息地→tile 映射选址；flier 不在此繁衍
+  const habTile = { grass: T.GRASS, forest: T.TREE, sand: T.SAND, water: T.WATER, deep: T.DEEP };
+  for (const type of Object.keys(SIM.SPECIES_CAP || {})) {
+    const cap = SIM.SPECIES_CAP[type];
+    const meta = CREATURE_META[type];
+    if (!meta || meta.flier) continue;
+    const pool = creatures.filter(c => c.isWild() && !c.dead && c.type === type);
+    if (pool.length === 0 || pool.length >= cap) continue;
+    const p0 = pool[randInt(0, pool.length - 1)];
+    const ps = findSpot(Math.round(p0.x), Math.round(p0.y), 0, 6, habTile[meta.habitat] || T.GRASS);
+    if (ps) spawnCreature(ps.x, ps.y, type);
   }
 }
 // 鲸：深海罕见生物（航海氛围），随深海探索偶现

@@ -1,6 +1,6 @@
 "use strict";
 // ============ 全局配置 ============
-const BUILD_ID = "v0.1.0";
+const BUILD_ID = "v0.5.0";
 
 // tile 类型
 const T = {
@@ -9,6 +9,9 @@ const T = {
   BERRY: 12, FRUIT: 13, PASTURE: 14, CAVE: 15, CLIFF: 16, FENCE: 17,
   QUARRY: 18, SANDPIT: 19, DOCK: 20,
   WELL: 21, BREWERY: 22, PRESS: 23, ROASTERY: 24,
+  BAMBOO: 25, MUSHROOM: 26, MOONBLOOM: 27,   // v0.5.0 新植物：竹林（快木材）/蘑菇（林地小粮）/月光花（夜光环）
+  PAVILION: 28, THEATER: 29, ARENA: 30,      // v0.5.0 娱乐链：凉亭（era1）/戏台（era2）/斗兽场（era2）
+  PARK_GATE: 31, FERRIS: 32, CAROUSEL: 33, COASTER: 34, PIER: 35,   // 游乐园：门楼/摩天轮/旋转木马/过山车/水上浮台
 };
 
 const TILE_META = {
@@ -37,6 +40,17 @@ const TILE_META = {
   [T.BREWERY]:  { name: "酒坊",   color: "#7a4a3a", walk: false, h: 0 },
   [T.PRESS]:    { name: "压榨坊", color: "#6a7a4a", walk: false, h: 0 },
   [T.ROASTERY]: { name: "烘焙坊", color: "#5a4a3a", walk: false, h: 0 },
+  [T.BAMBOO]:   { name: "竹林",   color: "#3f7a3f", walk: false, diggable: true, digTo: T.GRASS, hp: 3 },
+  [T.MUSHROOM]: { name: "蘑菇",   color: "#c9a37a", walk: true, h: 0 },
+  [T.MOONBLOOM]:{ name: "月光花", color: "#aebfe4", walk: true, h: 0 },
+  [T.PAVILION]: { name: "凉亭",   color: "#b0554a", walk: false, h: 0 },
+  [T.THEATER]:  { name: "戏台",   color: "#a06048", walk: false, h: 0 },
+  [T.ARENA]:    { name: "斗兽场", color: "#b0a088", walk: false, h: 0 },
+  [T.PARK_GATE]:{ name: "游乐园门楼", color: "#d0885a", walk: false, h: 0 },
+  [T.FERRIS]:   { name: "摩天轮", color: "#6a9ad0", walk: false, h: 0 },
+  [T.CAROUSEL]: { name: "旋转木马", color: "#d08aa0", walk: false, h: 0 },
+  [T.COASTER]:  { name: "过山车", color: "#c07840", walk: false, h: 0 },
+  [T.PIER]:     { name: "水上浮台", color: "#9a8468", walk: true, h: 0 },
 };
 
 const WORLD_W = 240, WORLD_H = 180;   // 仅作语义参考：无限地图时代初始生成以主岛原点为中心（genWorld），无固定区域
@@ -73,6 +87,9 @@ const SIM = {
   WILD_BREED_CAP: 60,   // 野生可猎动物总量上限
   TURTLE_CAP: 12,       // 海龟总量上限
   WHALE_CAP: 5,         // 鲸总量上限
+  // ---- 物种扩充（v0.5.0）：新物种繁衍上限（珍稀物种种群小而延续；flier 飞行类不在此繁衍）----
+  SPECIES_CAP: { fish: 60, rabbit: 30, fox: 16, bear: 8, horse: 14, penguin: 20, crab: 26,
+    dolphin: 14, shark: 8, unicorn: 6, moonfish: 10, koi: 12, mermaid: 6 },
   ANIMAL_STRAND_DEATH: 180, // 动物被困（脚下不再是栖息地）坚持时长（秒），超时死亡——给救援留足窗口
   // ---- 航海 ----
   SHIP_COST: 10,        // 造一艘远航船耗木材（联合库存）
@@ -108,6 +125,36 @@ const SIM = {
   PACK_RESTOCK: { food: 3, water: 2, juice: 1, beer: 1, coffee: 1 },          // 补给目标量（有城库货才拿并扣城库 stock；工具不补）
   PACK_RESTORE: { food: 50, water: 65, juice: 75, beer: 60, coffee: 50 },     // 路上自用恢复量（果汁/麦酒/咖啡另有精力/醉/咖啡因效果）
   PACK_JUICE_ENERGY: 10,      // 果汁自用额外恢复的精力
+  // ---- 心情与抑郁（v0.5.0）----
+  MOOD_DECAY: 0.35,           // 心情基准衰减/秒（idle；工作最磨人，低落会找乐子）
+  STATE_MOOD: { idle: 1.0, walk: 0.9, run: 1.1, work: 1.9, sleep: 0 },   // 心情衰减状态倍率（睡觉不衰减，另行回复）
+  MOOD_SLEEP_REGEN: 1.0,      // 睡觉心情回复/秒（一夜约 +30：不用花钱的慢通道自愈）
+  MOOD_BEER: 30,              // 喝麦酒的开心（附赠微醺）
+  MOOD_JUICE: 12,             // 喝果汁的开心
+  MOOD_COFFEE: 8,             // 喝咖啡的开心
+  MOOD_WATER: 3,              // 喝清水的开心（解渴不等于开心）
+  MOOD_DRUNK_JOY: 0.4,        // 醉醺醺期间持续微醺快乐/秒
+  MOOD_LIKED_JOY: 1.0,        // 做喜好匹配的事/秒（覆盖工作衰减：干自己爱干的活不叫上班）
+  MOOD_FEAST: 25,             // 丰收宴席全体+
+  MOOD_TAME_BONUS: 15,        // 驯服狗的喜悦（奇幻物种另有 tameJoy）
+  MOOD_SEEK: 35,              // 低于此 → 决策找乐子（城库有酒先喝一杯）
+  MOOD_DEPRESS: 12,           // 心情低于此持续 DEPRESS_TIME → 抑郁
+  DEPRESS_TIME: 60,           // 抑郁判定持续时长（秒）
+  MOOD_RECOVER: 45,           // 心情回到此线持续 MOOD_RECOVER_TIME → 走出抑郁
+  MOOD_RECOVER_TIME: 20,
+  MOOD_SICK_TIME: 300,        // 抑郁累计此时长 → 郁结成疾病倒（sickSource="mood"，走不出则不治）
+  JOY_CD: 60,                 // 找乐子失败冷却（城库无酒时防连帧重试）
+  // ---- 娱乐链与游乐园（v0.5.0）----
+  ENT_POP_MIN: 6,             // 凉亭人口门槛（era≥1，每城一座）
+  THEATER_POP_MIN: 10,        // 戏台/斗兽场人口门槛（era≥2，每城各一座）
+  PARK_POP_MIN: 16,           // 游乐园人口门槛（era≥3，全域唯一）
+  PARK_SIZE: 3,               // 游乐园边长（3×3）
+  PLAY_MOOD: { gazebo: 12, theater: 18, arena: 20, park: 35 },   // 各设施游玩心情回复
+  PLAY_TIME: { gazebo: 3, theater: 5, arena: 6, park: 8 },        // 游玩驻留秒数
+  PLAY_SEEK: 70,              // 心情低于此会想去玩（<45 必去；45~70 看心情掷骰）
+  PLAY_CD: 120,               // 玩过一次的冷却（防一直赖在游乐设施里）
+  CHEER_TIME: 300,            // 尽兴而归：游乐园余韵时长（期间心情衰减 ×CHEER）
+  MOOD_CHEER_FACTOR: 0.35,    // 余韵期间心情衰减倍率（「开心值很持久」的机制落点）
   // ---- 咖啡田 ----
   COFFEE_MATURITY: 90,        // 咖啡田成熟秒数（粮食田用 FARM_MATURITY）
   COFFEE_YIELD: 2,            // 咖啡田每次成熟产豆量
@@ -131,6 +178,21 @@ const SPECIES_AGE = {
   turtle:{ name: "海龟", lifespan: 30, stages: [5, 15, 22] },
   whale: { name: "鲸",   lifespan: 50, stages: [10, 25, 38] },
   bird:  { name: "鸟",   lifespan: 6,  stages: [1, 3, 4] },
+  // ---- 物种扩充（v0.5.0）----
+  rabbit:  { name: "兔",     lifespan: 7,   stages: [0.5, 2, 4] },
+  fox:     { name: "狐",     lifespan: 10,  stages: [1, 4, 7] },
+  bear:    { name: "熊",     lifespan: 20,  stages: [2, 8, 14] },
+  horse:   { name: "马",     lifespan: 22,  stages: [2, 8, 15] },
+  penguin: { name: "企鹅",   lifespan: 12,  stages: [1, 4, 8] },
+  crab:    { name: "蟹",     lifespan: 5,   stages: [0.5, 2, 3] },
+  dolphin: { name: "海豚",   lifespan: 30,  stages: [3, 10, 20] },
+  shark:   { name: "鲨",     lifespan: 25,  stages: [3, 10, 18] },
+  unicorn: { name: "独角兽", lifespan: 120, stages: [10, 40, 80] },
+  moonfish:{ name: "月光鱼", lifespan: 8,   stages: [1, 3, 5] },
+  koi:     { name: "锦鲤",   lifespan: 15,  stages: [1, 5, 10] },
+  phoenix: { name: "凤凰",   lifespan: 200, stages: [20, 80, 150] },
+  fairy:   { name: "小仙龙", lifespan: 150, stages: [10, 50, 100] },
+  mermaid: { name: "人鱼",   lifespan: 100, stages: [10, 40, 70] },
 };
 
 // 时代划分：按已达到的最高聚落等级 / 人口里程碑
