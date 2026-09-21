@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+._*
+
+# 编辑器
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Node
+node_modules/
