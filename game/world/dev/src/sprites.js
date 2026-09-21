@@ -493,10 +493,12 @@ function agentLook(id) {
   };
 }
 
-// ---- body 层：20 姿态 × 2 性别（top=最终衣色；f=连衣裙锥形下摆，m=直身摆）----
+// ---- body 层：20+5 姿态 × 2 性别 × 三视图（top=最终衣色；f=连衣裙锥形下摆，m=直身摆）----
 // 手部用通用肤色常量（不随个体肤色，保缓存键精简）；工具柄 #7a5a30
-function agentBodySprite(top, pose, sex) {
-  return sprGet(`b${top}_${pose}_${sex}`, () => {
+// view：front/back 归一为 "vert"（正/背面身体同形，脸部特征由 head 层区分）；sleep/row/stumble 仅 side
+function agentBodySprite(top, pose, sex, view) {
+  const vw = view === "front" || view === "back" ? "vert" : "side";
+  return sprGet(`b${top}_${pose}_${sex}_${vw}`, () => {
     const { cv, g } = sprCtx(SPR, SPR);
     const f = sex === "f";
     const dark = shadeHex(top, 0.78);
@@ -520,7 +522,8 @@ function agentBodySprite(top, pose, sex) {
       rectF(g, 5, 12, 6, 1, dark);
     };
     const fArms = () => { pxF(g, 4, 9, top); pxF(g, 4, 10, hand); pxF(g, 11, 9, top); pxF(g, 11, 10, hand); };
-    switch (pose) {
+    const drawSide = () => {
+      switch (pose) {
       case "stand":
         if (f) { dress(4, 8); fArms(); }
         else { torso(false); armSide(4, 9, 12); armSide(11, 9, 12); }
@@ -624,15 +627,108 @@ function agentBodySprite(top, pose, sex) {
         }
         break;
       }
-    }
+      case "drink1": case "drink2": {   // 饮用：举杯到嘴 / 放下（杯 #c9a86a）
+        if (f) dress(4, 8); else torso(false);
+        armSide(4, 9, 12);
+        if (pose === "drink1") {
+          pxF(g, 11, 9, top); pxF(g, 11, 8, top); pxF(g, 10, 7, top);
+          rectF(g, 8, 6, 2, 2, "#c9a86a");
+        } else {
+          pxF(g, 11, 9, top); pxF(g, 11, 10, top);
+          rectF(g, 11, 11, 2, 2, "#c9a86a");
+        }
+        break;
+      }
+      case "brew1": case "brew2": {   // 酿造搅拌：持棒搅身前桶，两帧棒位摆动
+        if (f) dress(4, 8); else torso(false);
+        armSide(4, 9, 12);
+        rectF(g, 10, 11, 4, 3, "#8a6236");   // 身前桶
+        rectF(g, 10, 11, 4, 1, "#a87c4a");
+        if (pose === "brew1") { rectF(g, 8, 8, 1, 4, H); pxF(g, 8, 7, "#9aa0a8"); }
+        else { rectF(g, 9, 9, 1, 4, H); pxF(g, 9, 13, "#9aa0a8"); }
+        break;
+      }
+      case "stumble": {   // 跌倒：侧倾倒地（醉酒踉跄帧）
+        if (f) {
+          rectF(g, 4, 10, 8, 2, top);
+          rectF(g, 3, 12, 9, 2, top);
+        } else {
+          rectF(g, 3, 10, 9, 4, top);
+        }
+        pxF(g, 12, 12, hand); pxF(g, 2, 11, top); pxF(g, 2, 12, hand);
+        break;
+      }
+      }
+    };
+    const drawVert = () => {   // 正/背视：左右对称 + 中缝细节（与侧面像区分；脸/后脑由 head 层区分）
+      const seam = () => { pxF(g, 8, 9, dark); pxF(g, 8, 10, dark); };
+      switch (pose) {
+      case "stand": case "walk1": case "walk2":
+        if (f) { dress(4, 8); fArms(); seam(); } else { torso(false); armSide(4, 9, 12); armSide(11, 9, 12); seam(); }
+        break;
+      case "run1": case "run2":   // 跑：双臂前后错位 1px
+        if (f) { dress(4, 8); pxF(g, 4, 9, top); pxF(g, 4, 10, hand); pxF(g, 11, 9, top); pxF(g, 11, 10, hand); seam(); }
+        else { torso(true); pxF(g, 3, 10, top); pxF(g, 3, 11, hand); pxF(g, 12, 9, top); pxF(g, 12, 10, hand); seam(); }
+        break;
+      case "hammer1": case "hammer2": case "axe1": case "axe2":
+      case "hoe1": case "hoe2": case "shovel1": case "shovel2": {
+        const up = pose.endsWith("1");
+        if (f) dress(4, 8); else torso(false);
+        if (up) {   // 双臂高举过顶，工具居中上举
+          pxF(g, 4, 8, top); pxF(g, 5, 7, top); pxF(g, 6, 6, top);
+          pxF(g, 11, 8, top); pxF(g, 10, 7, top); pxF(g, 9, 6, top);
+          rectF(g, 8, 0, 1, 6, H);
+          if (pose === "hammer1") rectF(g, 7, 0, 3, 1, "#9aa0a8");
+          else if (pose === "axe1") rectF(g, 9, 0, 2, 1, "#c9cdd4");
+          else if (pose === "hoe1") rectF(g, 7, 0, 3, 1, "#8a8a92");
+          else rectF(g, 7, 0, 3, 2, "#b8a266");
+        } else {    // 工具落在身前地面
+          armSide(4, 9, 12); armSide(11, 9, 12);
+          rectF(g, 8, 10, 1, 3, H);
+          if (pose === "hammer2") rectF(g, 7, 13, 3, 1, "#9aa0a8");
+          else if (pose === "axe2") rectF(g, 9, 13, 2, 1, "#c9cdd4");
+          else if (pose === "hoe2") rectF(g, 7, 13, 3, 1, "#8a8a92");
+          else rectF(g, 7, 12, 3, 2, "#b8a266");
+        }
+        break;
+      }
+      case "eat1": case "eat2":   // 进食：双手捧碗于胸前/放下
+        if (f) dress(4, 8); else torso(false);
+        armSide(4, 9, 12); armSide(11, 9, 12);
+        if (pose === "eat1") { pxF(g, 6, 8, top); pxF(g, 9, 8, top); rectF(g, 7, 8, 2, 1, hand); }
+        break;
+      case "fish1": case "fish2":   // 持竿正/背视：双手并拢于身前中线（竿指镜头）
+        if (f) dress(4, 8); else torso(false);
+        pxF(g, 4, 9, top); pxF(g, 4, 10, hand); pxF(g, 11, 9, top); pxF(g, 11, 10, hand);
+        pxF(g, 4, 8, top); pxF(g, 11, 8, top); pxF(g, 3, 10, hand); pxF(g, 12, 10, hand);
+        break;
+      case "drink1": case "drink2": {   // 饮用正/背视：杯举面前中央（背面只见手臂）
+        if (f) dress(4, 8); else torso(false);
+        armSide(4, 9, 12); armSide(11, 9, 12);
+        if (pose === "drink1") { pxF(g, 6, 8, top); pxF(g, 9, 8, top); rectF(g, 7, 7, 2, 2, "#c9a86a"); }
+        else { rectF(g, 7, 10, 2, 2, "#c9a86a"); }
+        break;
+      }
+      case "brew1": case "brew2":   // 酿造正/背视：桶在身前中央（背面被身体遮挡只露棒头）
+        if (f) dress(4, 8); else torso(false);
+        armSide(4, 9, 12); armSide(11, 9, 12);
+        if (pose === "brew1") rectF(g, 7, 9, 1, 4, H);
+        else rectF(g, 8, 10, 1, 4, H);
+        break;
+      default: drawSide(); break;   // sleep/row/stumble 仅 side：回退
+      }
+    };
+    if (vw === "side") drawSide(); else drawVert();
     return outlineSprite(cv, "#1a1a26");
   });
 }
 
 // ---- pants 层：双腿 rows13-15 各 2px（x5-6 / x9-10）；sleep 无腿层 ----
 // f 传 skin：裙下露腿用肤色（pants 参数不用于 f）；缓存键对 f 追加 skin（缓存键=全部视觉输入）
-function agentPantsSprite(pants, poseKey, sex, skin) {
-  return sprGet(`p${pants}_${poseKey}_${sex}${sex === "f" ? "_" + skin : ""}`, () => {
+// view："side"（侧面行走）|"vert"（正/背面共用：双腿并立正对镜头）
+function agentPantsSprite(pants, poseKey, sex, skin, view) {
+  const vw = view === "vert" ? "vert" : "side";
+  return sprGet(`p${pants}_${poseKey}_${sex}_${vw}${sex === "f" ? "_" + skin : ""}`, () => {
     const { cv, g } = sprCtx(SPR, SPR);
     const base = sex === "f" ? skin : pants;
     const leg = (x, y0, y1) => {
@@ -640,43 +736,68 @@ function agentPantsSprite(pants, poseKey, sex, skin) {
       rectF(g, x, y1 - 1, 3, 2, shadeHex(base, 0.75));           // 鞋 3×2（脚底锚定 row15）
       pxF(g, x + 2, y1, shadeHex(base, 0.6));                    // 鞋尖暗
     };
-    switch (poseKey) {
-      case "stand": leg(5, 13, 15); leg(9, 13, 15); break;
-      case "walk1": leg(4, 13, 15); leg(9, 13, 15); break;
-      case "walk2": leg(5, 13, 15); leg(10, 13, 15); break;
-      case "run1":  leg(3, 13, 15); leg(10, 13, 15); break;   // 大步幅前后错位
-      case "run2":  leg(5, 13, 14); leg(9, 13, 15); break;
-      case "fish":  leg(4, 13, 15); leg(10, 13, 15); break;   // 站立微开
-      case "row":   leg(4, 12, 14); leg(10, 12, 14); break;   // 坐姿腿前收 rows12-14
+    if (vw === "side") {
+      switch (poseKey) {
+        case "stand": leg(5, 13, 15); leg(9, 13, 15); break;
+        case "walk1": leg(4, 13, 15); leg(9, 13, 15); break;
+        case "walk2": leg(5, 13, 15); leg(10, 13, 15); break;
+        case "run1":  leg(3, 13, 15); leg(10, 13, 15); break;   // 大步幅前后错位
+        case "run2":  leg(5, 13, 14); leg(9, 13, 15); break;
+        case "fish":  leg(4, 13, 15); leg(10, 13, 15); break;   // 站立微开
+        case "row":   leg(4, 12, 14); leg(10, 12, 14); break;   // 坐姿腿前收 rows12-14
+      }
+    } else {
+      switch (poseKey) {
+        case "stand": case "fish": leg(4, 13, 15); leg(10, 13, 15); break;
+        case "walk1": leg(4, 12, 15); leg(10, 13, 15); break;   // 迈步：一腿微抬
+        case "walk2": leg(4, 13, 15); leg(10, 12, 15); break;
+        case "run1":  leg(3, 13, 15); leg(11, 13, 15); break;   // 跑：双腿外敞
+        case "run2":  leg(4, 12, 15); leg(10, 12, 15); break;
+        case "row":   leg(5, 13, 15); leg(9, 13, 15); break;    // 坐姿腿前收并拢
+      }
     }
     return outlineSprite(cv, "#1a1a26");
   });
 }
 
 // ---- head 层：大头 6×6 圆角 rows2-7（x5-10）+ 发型/帽饰；native=头顶白羽 1×3 ----
-function agentHeadSprite(skin, style, hairC, sex, native) {
-  return sprGet(`h${skin}_${style}_${hairC}_${sex}_${native ? 1 : 0}`, () => {
+// view："front"（双眼+嘴，现有画法）/"side"（侧脸单眼+耳）/ "back"（后脑纯发无五官）
+function agentHeadSprite(skin, style, hairC, sex, native, view) {
+  const vw = view === "front" || view === "back" || view === "side" ? view : "front";
+  return sprGet(`h${skin}_${style}_${hairC}_${sex}_${vw}_${native ? 1 : 0}`, () => {
     const { cv, g } = sprCtx(SPR, SPR);
     rectF(g, 6, 2, 4, 1, skin);       // 圆角头顶
     rectF(g, 5, 3, 6, 5, skin);       // 脸 rows3-7
-    pxF(g, 4, 5, skin); pxF(g, 11, 5, skin);   // 耳
     rectF(g, 7, 8, 2, 1, skin);       // 脖子
-    pxF(g, 7, 5, "#1a1a26"); pxF(g, 9, 5, "#1a1a26");   // 双眼
+    if (vw === "front") {
+      pxF(g, 4, 5, skin); pxF(g, 11, 5, skin);   // 耳
+      pxF(g, 7, 5, "#1a1a26"); pxF(g, 9, 5, "#1a1a26");   // 双眼
+      pxF(g, 8, 7, shadeHex(skin, 0.8));                  // 嘴
+    } else if (vw === "side") {
+      pxF(g, 4, 5, skin);                            // 耳（近侧）
+      pxF(g, 11, 5, skin); pxF(g, 11, 4, skin);      // 鼻尖
+      pxF(g, 9, 5, "#1a1a26");                       // 单眼
+    } else {                                          // back：后脑无五官
+      pxF(g, 4, 5, skin); pxF(g, 11, 5, skin);       // 双耳
+    }
     switch (style) {
       case "long":   // 头顶发 + 两侧垂发到 rows8-9
         rectF(g, 6, 1, 4, 1, hairC);
         rectF(g, 5, 2, 6, 1, hairC);
         pxF(g, 4, 3, hairC); pxF(g, 5, 3, hairC); pxF(g, 10, 3, hairC); pxF(g, 11, 3, hairC);
-        rectF(g, 4, 4, 1, 6, hairC); rectF(g, 11, 4, 1, 6, hairC);
+        if (vw === "back") rectF(g, 5, 3, 6, 5, hairC);   // 背面：长发铺满后脑
+        else { rectF(g, 4, 4, 1, 6, hairC); rectF(g, 11, 4, 1, 6, hairC); }
         break;
       case "bun":    // 发髻 2×2 + 头花
         rectF(g, 7, 0, 2, 2, hairC);
         rectF(g, 5, 2, 6, 1, hairC);
-        pxF(g, 9, 1, "#d9708a");
+        if (vw === "back") rectF(g, 5, 3, 6, 3, hairC);
+        else if (vw === "front") pxF(g, 9, 1, "#d9708a");
         break;
       case "short":  // 头顶 2px 发
         rectF(g, 5, 2, 6, 1, hairC);
         rectF(g, 6, 3, 4, 1, hairC);
+        if (vw === "back") rectF(g, 5, 3, 6, 2, hairC);
         break;
       case "hat":    // 草帽：宽檐 8px + 帽顶
         rectF(g, 4, 2, 8, 1, "#d9b84a");
@@ -687,7 +808,7 @@ function agentHeadSprite(skin, style, hairC, sex, native) {
         rectF(g, 6, 1, 4, 1, "#a88a5a");
         rectF(g, 5, 2, 6, 1, "#a88a5a");
         break;
-      // bald：无发
+      // bald：无发（背面同 front，仅光头）
     }
     if (native) rectF(g, 8, 0, 1, 3, "#f5f0e0");   // 原住民羽饰
     return outlineSprite(cv, "#1a1a26");
@@ -722,6 +843,29 @@ function agentPackSprite(res) {
       rectF(g, 1, 4, 6, 3, "#9a9a92");
       pxF(g, 2, 4, "#c2c2ba");
       rectF(g, 2, 6, 4, 1, "#7e7e78");
+    } else if (res === "water") {
+      rectF(g, 1, 2, 6, 5, "#8a6236");       // 木水桶
+      rectF(g, 1, 3, 6, 1, "#6e5232"); rectF(g, 1, 5, 6, 1, "#6e5232");   // 桶箍
+      rectF(g, 2, 0, 4, 1, "#5c4426");       // 提手
+      rectF(g, 2, 2, 4, 1, "#7ab8cc");       // 桶内水面
+    } else if (res === "juice") {
+      rectF(g, 1, 3, 6, 4, "#b89040");       // 果篮
+      rectF(g, 2, 4, 1, 3, "#8a6a30"); rectF(g, 5, 4, 1, 3, "#8a6a30");
+      rectF(g, 2, 1, 2, 2, "#e06060"); rectF(g, 4, 0, 2, 2, "#e8a13b");   // 果实冒头
+    } else if (res === "beer") {
+      rectF(g, 2, 2, 4, 5, "#b98a4a");       // 酒坛
+      rectF(g, 3, 1, 2, 1, "#8a6236");       // 坛口
+      rectF(g, 2, 4, 4, 1, "#8a5a2a");       // 坛箍
+      pxF(g, 3, 3, "#d9a86a");
+    } else if (res === "coffee") {
+      rectF(g, 1, 2, 6, 5, "#6a4a34");       // 咖啡袋
+      rectF(g, 2, 1, 4, 1, "#4a3222");       // 袋口
+      rectF(g, 2, 4, 4, 2, "#5a3e2c");       // 袋身标块
+      pxF(g, 3, 5, "#c9a86a"); pxF(g, 5, 5, "#c9a86a");
+    } else if (res === "beans") {
+      rectF(g, 1, 2, 6, 5, "#c9b08a");       // 豆袋
+      rectF(g, 2, 1, 4, 1, "#a8906a");
+      pxF(g, 2, 3, "#8a5a3a"); pxF(g, 4, 4, "#8a5a3a"); pxF(g, 6, 3, "#8a5a3a");   // 豆粒
     } else {
       rectF(g, 1, 2, 6, 5, "#d8c890");
       rectF(g, 2, 1, 4, 1, "#b8a860");
@@ -846,7 +990,13 @@ function bakeFish() {
   pxF(g, 1, 1, "#0a2438");                           // 眼
   return cv;
 }
-function bakeBird(frame) {
+function bakeBird(frame, view) {
+  if (view === "front" || view === "back") {   // 正/背视：双翅对称上/下扑
+    const rows = frame
+      ? ["..........", "...b..b...", "....bb....", ".w......w.", "..w....w.."]
+      : ["..........", "..w....w..", ".w......w.", "....bb....", "...b..b..."];
+    return bakeArt(10, 5, rows, { w: "#3a3a44", b: "#4a4a56" }, 1);
+  }
   const rows = frame
     ? ["..........", "....bb....", "...wbbw...", "..w....w..", ".w......w."]
     : ["..........", ".w......w.", "..w....w..", "...wbbw...", "....bb...."];
@@ -857,10 +1007,167 @@ const BAKE_CREATURES = {
   cow: bakeCow, goat: bakeGoat, deer: bakeDeer, boar: bakeBoar, wolf: bakeWolf,
   dog: bakeDog, turtle: bakeTurtle, whale: bakeWhale, fish: bakeFish,
 };
-function creatureSprite(type, frame) {
-  return sprGet(`c${type}_${frame || 0}`, () => {
-    if (type === "bird") return bakeBird(frame || 0);
+function creatureSprite(type, frame, view) {
+  const vw = view === "front" || view === "back" ? view : "side";
+  return sprGet(`c${type}_${frame || 0}_${vw}`, () => {
+    if (type === "bird") return bakeBird(frame || 0, vw);
+    if (vw !== "side") return bakeCreatureVert(type, vw);
     return BAKE_CREATURES[type] ? BAKE_CREATURES[type]() : bakeCow();
+  });
+}
+
+// ---- 动物正/背视图：四足兽通用点阵 + 水生/飞行特例（view 已归一为 front|back）----
+const QUAD_VIEW = {   // 四足兽配色与体型（正/背视通用）
+  cow:  { body: "#8a5a3a", patch: "#e8e0d0", dk: "#241812", w: 14, hh: 4, head: 7 },
+  goat: { body: "#e8e4da", patch: null,      dk: "#4a4640", w: 12, hh: 4, head: 6 },
+  deer: { body: "#a5713d", patch: null,      dk: "#3d2812", w: 12, hh: 4, head: 6 },
+  boar: { body: "#5c4632", patch: null,      dk: "#241a10", w: 13, hh: 5, head: 7 },
+  wolf: { body: "#787882", patch: null,      dk: "#2c2c34", w: 13, hh: 4, head: 6 },
+  dog:  { body: "#8a8a92", patch: null,      dk: "#33333c", w: 11, hh: 3, head: 5 },
+};
+function bakeCreatureVert(type, view) {
+  const front = view === "front";
+  if (QUAD_VIEW[type]) {
+    const q = QUAD_VIEW[type];
+    const { cv, g } = sprCtx(24, 16);
+    const cx = 12;
+    if (front) {   // 正面：圆头居中（双眼+耳）+ 躯干在后 + 四腿外敞
+      fillEllipseF(g, cx, 9, q.w / 2, q.hh, q.body);
+      if (q.patch) fillEllipseF(g, cx, 9, 3, 2, q.patch);
+      fillEllipseF(g, cx, 4, q.head / 2, 3.2, q.body);            // 头
+      pxF(g, cx - 2, 3, "#1a1a1a"); pxF(g, cx + 1, 3, "#1a1a1a"); // 双眼
+      pxF(g, cx - q.head / 2 - 1, 2, q.body); pxF(g, cx + q.head / 2, 2, q.body);  // 耳
+      rectF(g, cx - 1, 7, 2, 1, shadeHex(q.body, 0.8));           // 吻
+      for (const lx of [cx - 5, cx - 2, cx + 1, cx + 4]) {        // 四腿
+        rectF(g, lx, 12, 2, 3, shadeHex(q.body, 0.85));
+        pxF(g, lx, 15, q.dk); pxF(g, lx + 1, 15, q.dk);
+      }
+    } else {       // 背面：臀背 + 尾 + 四腿，不见头
+      fillEllipseF(g, cx, 8, q.w / 2, q.hh + 1, q.body);
+      fillEllipseF(g, cx, 3, 2, 2, q.body);                       // 尾根
+      for (const lx of [cx - 5, cx - 2, cx + 1, cx + 4]) {
+        rectF(g, lx, 11, 2, 4, shadeHex(q.body, 0.85));
+        pxF(g, lx, 15, q.dk); pxF(g, lx + 1, 15, q.dk);
+      }
+      pxF(g, cx - 6, 4, q.body); pxF(g, cx + 5, 4, q.body);       // 背面露耳尖
+    }
+    return outlineSprite(cv, q.dk);
+  }
+  if (type === "turtle") {
+    const { cv, g } = sprCtx(14, 11);
+    if (front) {
+      fillEllipseF(g, 6, 6, 5, 3.6, "#4a7a55");
+      pxF(g, 4, 5, "#33604a"); pxF(g, 8, 5, "#33604a");
+      rectF(g, 5, 8, 4, 1, "#3a6a48");
+      rectF(g, 5, 1, 4, 3, "#6a9a75");                            // 头前伸
+      pxF(g, 5, 2, "#111111"); pxF(g, 8, 2, "#111111");
+    } else {
+      fillEllipseF(g, 6, 5, 5, 4, "#4a7a55");
+      rectF(g, 4, 1, 6, 2, "#33604a");
+      rectF(g, 5, 9, 3, 2, "#6a9a75");                            // 尾
+    }
+    return outlineSprite(cv, "#1e3a28");
+  }
+  if (type === "whale") {
+    const { cv, g } = sprCtx(36, 18);
+    if (front) {   // 头视图：圆头 + 双眼 + 胸鳍两侧
+      fillEllipseF(g, 18, 9, 12, 7, "#2c4a66");
+      fillEllipseF(g, 18, 13, 9, 3, "#3d6284");
+      pxF(g, 13, 7, "#cfe4f2"); pxF(g, 23, 7, "#cfe4f2");
+      fillEllipseF(g, 5, 12, 3, 1.6, "#24405a"); fillEllipseF(g, 31, 12, 3, 1.6, "#24405a");
+    } else {       // 尾视图：双叶尾鳍
+      fillEllipseF(g, 18, 9, 5, 4, "#2c4a66");
+      fillEllipseF(g, 10, 6, 6, 4, "#2c4a66"); fillEllipseF(g, 26, 6, 6, 4, "#2c4a66");
+      fillEllipseF(g, 10, 12, 6, 4, "#2c4a66"); fillEllipseF(g, 26, 12, 6, 4, "#2c4a66");
+    }
+    return outlineSprite(cv, "#122234");
+  }
+  // fish（鱼群）：正/背视小圆身 + 对称尾
+  const { cv, g } = sprCtx(6, 6);
+  if (front) {
+    fillEllipseF(g, 3, 3, 2, 2, "#78b4dc");
+    pxF(g, 2, 2, "#0a2438"); pxF(g, 4, 2, "#0a2438");
+    rectF(g, 2, 5, 2, 1, "#5a94bc");
+  } else {
+    fillEllipseF(g, 3, 2, 2, 1.5, "#78b4dc");
+    rectF(g, 1, 4, 4, 2, "#5a94bc");                              // 尾鳍视图
+  }
+  return cv;
+}
+
+// ============================================================
+// 河流 / 新工坊建筑 / 咖啡田（v0.3.0 契约 API，S7 渲染消费）
+// ============================================================
+const RIVER_VARIANTS = ["#2f7a8a", "#33808f", "#378795", "#3b8e9b"];   // 比海亮、偏青绿
+function riverSprite(v, frame) {
+  return sprGet(`r${v}_${frame}`, () =>
+    bakeWater(v, frame, RIVER_VARIANTS[v], shade(RIVER_VARIANTS[v], 1.25), "#dff2fc", 3));
+}
+
+// 工坊建筑：16×24 画布，底部 16 行锚定 tile、上 8 行向上探出；v=hash 变体（0-3）
+function buildingSprite(tile, v) {
+  return sprGet(`bd${tile}_${v}`, () => {
+    const bright = V_BRIGHT[v] || 1;
+    const H = 24;
+    const { cv, g } = sprCtx(SPR, H);
+    const y0 = 8;   // tile 顶对应画布 y=8
+    if (tile === T.WELL) {   // 石砌圆井 + 辘轳架 + 吊桶
+      fillEllipseF(g, 8, y0 + 11, 6, 4, "#8f9aa3");
+      fillEllipseF(g, 8, y0 + 11, 4, 2.5, "#5a636e");
+      fillEllipseF(g, 8, y0 + 11, 3, 2, "#1a2530");
+      rectF(g, 3, y0 - 1, 1, 12, "#7a5a30"); rectF(g, 12, y0 - 1, 1, 12, "#7a5a30");
+      rectF(g, 3, y0 - 2, 10, 1, "#8a6236"); rectF(g, 3, y0 - 3, 10, 1, "#6e5232");
+      rectF(g, 8, y0 - 2, 1, 6, "#d9c9a8");                        // 井绳
+      rectF(g, 6, y0 + 4, 4, 3, "#8a6236"); rectF(g, 6, y0 + 4, 4, 1, "#5c4426");   // 吊桶
+    } else if (tile === T.BREWERY) {   // 酒坊：木屋 + 红幌子 + 酒坛
+      rectF(g, 2, y0 + 8, 12, 8, "#a0785a");
+      rectF(g, 2, y0 + 15, 12, 1, shadeHex("#a0785a", 0.72));
+      for (let y = y0 + 2; y < y0 + 8; y++) {
+        const k = (y - y0 - 2) / 6;
+        rectF(g, 8 - Math.round(2 + k * 6), y, Math.round(4 + k * 12), 1, "#8a4a3a");
+      }
+      rectF(g, 6, y0 + 11, 4, 5, "#4a2e18");                       // 门
+      rectF(g, 12, y0 - 4, 1, 6, "#4a3520"); rectF(g, 13, y0 - 4, 2, 3, "#d9483b");   // 幌子
+      rectF(g, 1, y0 + 12, 3, 4, "#b98a4a"); pxF(g, 2, y0 + 12, "#8a6236");           // 酒坛
+    } else if (tile === T.PRESS) {   // 压榨坊：敞棚 + 木榨槽 + 果堆 + 压杆
+      rectF(g, 2, y0 + 4, 1, 12, "#7a5a30"); rectF(g, 13, y0 + 4, 1, 12, "#7a5a30");
+      rectF(g, 1, y0 + 2, 14, 2, "#8a6236"); rectF(g, 1, y0 + 3, 14, 1, "#6e5232");
+      rectF(g, 3, y0 + 11, 10, 4, "#8a6236"); rectF(g, 3, y0 + 11, 10, 1, "#a87c4a"); // 榨槽
+      rectF(g, 4, y0 + 8, 8, 2, "#c23b3b"); pxF(g, 5, y0 + 7, "#e8a13b"); pxF(g, 9, y0 + 7, "#e06060");   // 果堆
+      rectF(g, 7, y0 + 5, 1, 7, "#5c4426");                        // 压杆
+    } else {   // ROASTERY 烘焙坊：矮房 + 烟囱 + 炉火 + 咖啡麻袋
+      rectF(g, 2, y0 + 7, 12, 9, "#7a6248");
+      rectF(g, 2, y0 + 15, 12, 1, shadeHex("#7a6248", 0.72));
+      for (let y = y0 + 2; y < y0 + 7; y++) {
+        const k = (y - y0 - 2) / 5;
+        rectF(g, 8 - Math.round(2 + k * 6), y, Math.round(4 + k * 12), 1, "#4a3a2e");
+      }
+      rectF(g, 11, y0 - 3, 2, 6, "#6a6a72");                       // 烟囱
+      pxF(g, 11, y0 - 4, "#9a9aa2"); pxF(g, 12, y0 - 5, "#b8b8c0");   // 炊烟
+      rectF(g, 5, y0 + 11, 4, 5, "#4a3520");                       // 炉口
+      rectF(g, 6, y0 + 13, 2, 2, "#ff9f43"); pxF(g, 6, y0 + 12, "#ffd166");   // 炉火
+      rectF(g, 1, y0 + 12, 3, 4, "#6a4a34"); rectF(g, 12, y0 + 12, 3, 4, "#6a4a34");  // 咖啡袋
+    }
+    return cv;
+  });
+}
+
+// 咖啡田：深土垄 + 两行咖啡矮株 + 红果（eTier 海拔档 × v hash 变体）
+function coffeeFarmSprite(eTier, v) {
+  const bright = ELEV_TIERS[eTier] * (V_BRIGHT[v] || 1);
+  return sprGet(`cf${eTier}_${v}`, () => {
+    const { cv, g } = sprCtx(SPR, SPR);
+    rectF(g, 0, 0, 16, 16, shade("#6a5238", bright));
+    for (let r = 0; r < 2; r++) {
+      const y = 3 + r * 7;
+      rectF(g, 0, y + 4, 16, 1, shade("#57432c", bright));         // 垄沟
+      for (const px2 of [3, 8, 13]) {                              // 三株一行
+        fillEllipseF(g, px2, y + 2, 2, 2, shade("#2a5a2e", bright));
+        pxF(g, px2 - 1, y + 1, shade("#c23b3b", bright));
+        pxF(g, px2 + 1, y + 2, shade("#e06060", bright));
+      }
+    }
+    return cv;
   });
 }
 

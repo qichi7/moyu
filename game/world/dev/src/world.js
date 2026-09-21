@@ -40,6 +40,7 @@ const world = {
 };
 
 function logMsg(text) {
+  world.logSeq = (world.logSeq || 0) + 1; // 单调计数，供 HUD 判刷新——截断使 length 恒定，length 判据会永久停更
   world.logs.unshift({ t: world.time, text });
   if (world.logs.length > 200) world.logs.pop();
 }
@@ -457,6 +458,7 @@ function quarryTick() {
 function carveRiver(isl) {
   if (isl.riverDone) return;
   isl.riverDone = true;
+  world.rivers = world.rivers || new Set();   // 惰性初始化：河流水格登记表（主岛与发现岛都经此函数，天然全覆盖）
   let x = Math.round(isl.x + randRange(-isl.r / 2, isl.r / 2));
   let y = Math.round(isl.y + randRange(-isl.r / 2, isl.r / 2));
   let ang = rand() * Math.PI * 2;
@@ -467,6 +469,7 @@ function carveRiver(isl) {
     if (t === T.DEEP || t === T.WATER || t === T.BRIDGE) break;   // 入海
     if (t !== T.VOID) {
       setTile(x, y, T.WATER);
+      world.rivers.add(x + "," + y);   // 登记被刻蚀为水的格（河流查询/灌溉判定用）
       if (hash2(x + 31, y + 97) < 0.08) world.fishStock.set(x + "," + y, 3);
       // 河岸冲积沙滩
       for (const p of neighborsOf(x, y)) {
@@ -699,7 +702,7 @@ function expand() {
       (Math.abs(a.x - acx) + Math.abs(a.y - acy)) - (Math.abs(b.x - acx) + Math.abs(b.y - acy)));
     const target = unclaimed[0];
     target.claimed = true;
-    nx = target.x | 0; ny = target.y | 0; d = { name: pickIslandName(target) };
+    nx = Math.floor(target.x); ny = Math.floor(target.y); d = { name: pickIslandName(target) };
     generateAndReveal(nx - target.r - 10, ny - target.r - 10, nx + target.r + 10, ny + target.r + 10, true);
   } else {
     // 在岛群外缘随机方向造新岛，与既有岛保持距离
@@ -851,10 +854,13 @@ function nearestSettlement(x, y) {
   return best;
 }
 
-// 聚落资源库存（wood/stone/sand/food——粮食城市内共享，不是全图共享池）
+// 聚落资源库存（wood/stone/sand/food + 饮品链 water/juice/beer/coffee/beans——粮食城市内共享，不是全图共享池）
 function ensureStock(s) {
-  if (!s.stock) s.stock = { wood: 0, stone: 0, sand: 0, food: 0 };
-  if (s.stock.food === undefined) s.stock.food = 0;   // 旧聚落兼容
+  if (!s.stock) s.stock = { wood: 0, stone: 0, sand: 0, food: 0, water: 0, juice: 0, beer: 0, coffee: 0, beans: 0 };
+  // 旧聚落/字面量库存兼容：缺失字段统一补 0（含原有 food 兜底语义）
+  for (const k of ["wood", "stone", "sand", "food", "water", "juice", "beer", "coffee", "beans"]) {
+    if (s.stock[k] === undefined) s.stock[k] = 0;
+  }
   return s.stock;
 }
 // 无半径最近的归属聚落（田/牧场/粮食产出的归属方；nearestSettlement 有 SETTLEMENT_RADIUS 上限不适用）

@@ -35,7 +35,10 @@ function nearestFoodTo(x, y, exclude) {
     const d = Math.abs(px - x) + Math.abs(py - y);
     if (d < bestD) { bestD = d; best = { x: px, y: py }; }
   };
-  for (const f of world.farms) consider(f.x, f.y);
+  for (const f of world.farms) {
+    if (f.crop === "coffee") continue;   // 咖啡田不产粮：不算进食点
+    consider(f.x, f.y);
+  }
   for (const h of world.houses) {
     if (!h.granary) continue;
     consider(h.x, h.y);
@@ -107,9 +110,43 @@ function localFacilities(list, settle) {
   if (!settle) return list;
   return list.filter(o => ownerSettle(o.x, o.y) === settle);
 }
+
+// 新式设施（水井/酒坊/压榨坊/烘焙坊）立项时一律立在各城粮仓周边（半径 ≤8 格），
+// 因此检索不必扫全图：遍历粮仓、扫其 9 格邻域即可覆盖全域（世界对象不设 wells/breweries 平行数组，tile 即真相）
+function facilityNear(cx, cy, type) {
+  for (let dy = -9; dy <= 9; dy++)
+    for (let dx = -9; dx <= 9; dx++)
+      if (tileAt(cx + dx, cy + dy) === type) return { x: cx + dx, y: cy + dy };
+  return null;
+}
+// 全域第一座指定设施（逐粮仓扫描，找到即早退）
+function findFacility(type) {
+  for (const h of world.houses) {
+    if (!h.granary) continue;
+    const p = facilityNear(h.x, h.y, type);
+    if (p) return p;
+  }
+  return null;
+}
+// 指定聚落辖区内的设施（按粮仓归属聚落过滤）
+function settlementFacility(s, type) {
+  for (const h of world.houses) {
+    if (!h.granary || ownerSettle(h.x, h.y) !== s) continue;
+    const p = facilityNear(h.x, h.y, type);
+    if (p) return p;
+  }
+  return null;
+}
+// 饮品链库存全域汇总（water/juice/beer/coffee/beans：逐城 ensureStock 兜底后求和，世界不设全局池）
+function totalStockOf(res) {
+  return world.settlements.reduce((sum, s) => sum + (ensureStock(s)[res] || 0), 0);
+}
+
 function plannerTick() {
   const pop = agents.length;
   const homeless = agents.filter(a => !a.home).length;
+  // 产粮田数：咖啡田（crop==="coffee"）不产粮，排除出粮食产能口径；边界与阈值系数保持原样
+  const foodFarms = world.farms.filter(f => !f.crop).length;
 
   // 1. 住房前瞻：容量余量不足（或已有人无家）→ 建房；选址失败说明本区
   //    已无立足之地 → 直接开辟新区。房屋富余（够住且多 3 间以上）则不新建
@@ -135,7 +172,7 @@ function plannerTick() {
       const anchor = c || pickAnchor();
       const ref = nearestOf(localFacilities(world.houses, nearestSettlement(anchor.x, anchor.y)), anchor);
       s = (ref && expandSpot(ref, 2, 6, T.GRASS)) ||
-          (c && findSpot(c.x | 0, c.y | 0, 2, 14, T.GRASS)) ||
+          (c && findSpot(Math.floor(c.x), Math.floor(c.y), 2, 14, T.GRASS)) ||
           findSpot(anchor.x, anchor.y, 3, 18, T.GRASS);
     }
     if (s) {
@@ -150,7 +187,7 @@ function plannerTick() {
 
   // 2. 粮食压力 → 多渠道补粮：农田 / 浆果采集 / 狩猎 / 畜牧（城邦解锁）
   //    选址偏好：同聚落内农田连片（新田挨着已有农田 3 格内，田可紧贴成片），跨聚落不要求
-  if (world.farms.length * 6 < pop + 8 && tasksPending("FARM", true).length < 2) {
+  if (foodFarms * 6 < pop + 8 && tasksPending("FARM", true).length < 2) {
     let s = null;
     for (const st of world.settlements) {
       if (!st.zones) continue;
@@ -358,6 +395,126 @@ function plannerTick() {
       }
     }
   }
+  // 2f. 饮品链（时代解锁）：水井/打水 era≥1，酒坊/压榨坊 era≥2，烘焙坊/咖啡田 era≥3。
+  //     新式建筑各城限 1 座（先建人口最多的城），立项前查全域 tile + pending 防重；
+  //     触发阈值全部是库存/数量的确定性条件，不引入新的概率门（随机流保持原样）
+  if (world.era >= 1 && pop >= 8) {
+    // 人口最多的聚落（平局取先出现者，确定性）及其粮仓锚点：新式建筑一律立粮仓周边草地
+    let metro = null, metroPop = -1;
+    for (const s of world.settlements) {
+      const n = agents.filter(a => !a.dead && ownerSettle(a.x, a.y) === s).length;
+      if (n > metroPop) { metroPop = n; metro = s; }
+    }
+    if (metro) {
+      const g = world.houses.find(h => h.granary && ownerSettle(h.x, h.y) === metro) || metro;
+      // 水井：全域唯一，打水解渴的源头（pop≥8 才立项，小聚落就近吃塘水/雨水）
+      if (!findFacility(T.WELL) && tasksPending("WELL", true).length < 1) {
+        const spot = expandSpot(g, 1, 6, T.GRASS) || findSpot(g.x, g.y, 1, 8, T.GRASS);
+        if (spot) {
+          tasksAdd({ type: "WELL", x: spot.x, y: spot.y });
+          logThrottled(`规划署在「${metro.name}」的粮仓旁打了一口水井。`, 20);
+        }
+      }
+      // 酒坊（城邦解锁）
+      if (world.era >= 2 && !findFacility(T.BREWERY) && tasksPending("BREWERY", true).length < 1) {
+        const spot = expandSpot(g, 1, 6, T.GRASS) || findSpot(g.x, g.y, 1, 8, T.GRASS);
+        if (spot) {
+          tasksAdd({ type: "BREWERY", x: spot.x, y: spot.y });
+          logThrottled(`规划署在「${metro.name}」的粮仓旁筹建酒坊。`, 20);
+        }
+      }
+      // 压榨坊（城邦解锁）
+      if (world.era >= 2 && !findFacility(T.PRESS) && tasksPending("PRESS", true).length < 1) {
+        const spot = expandSpot(g, 1, 6, T.GRASS) || findSpot(g.x, g.y, 1, 8, T.GRASS);
+        if (spot) {
+          tasksAdd({ type: "PRESS", x: spot.x, y: spot.y });
+          logThrottled(`规划署在「${metro.name}」的粮仓旁筹建压榨坊。`, 20);
+        }
+      }
+      // 烘焙坊（文明解锁）
+      if (world.era >= 3 && !findFacility(T.ROASTERY) && tasksPending("ROASTERY", true).length < 1) {
+        const spot = expandSpot(g, 1, 6, T.GRASS) || findSpot(g.x, g.y, 1, 8, T.GRASS);
+        if (spot) {
+          tasksAdd({ type: "ROASTERY", x: spot.x, y: spot.y });
+          logThrottled(`规划署在「${metro.name}」的粮仓旁筹建烘焙坊。`, 20);
+        }
+      }
+    }
+  }
+  // 打水：全域存水低于人口底线（pop×0.4）→ 在存水最少的有井之城立项（无井则跳过，靠上面先建井）
+  if (world.era >= 1 && totalStockOf("water") < pop * 0.4 && tasksPending("FETCH_WATER", true).length < 2) {
+    let city = null, well = null, least = 1e9;
+    for (const s of world.settlements) {
+      const w = settlementFacility(s, T.WELL);
+      if (!w) continue;
+      const sw = ensureStock(s).water || 0;
+      if (sw < least) { least = sw; city = s; well = w; }
+    }
+    if (well) {
+      const shore = neighborsOf(well.x, well.y).find(p => walkable(p.x, p.y));
+      if (shore) {
+        tasksAdd({ type: "FETCH_WATER", x: shore.x, y: shore.y });
+        logThrottled(`「${city.name}」的水缸见底了，居民挑起水桶去井边打水。`, 20);
+      }
+    }
+  }
+  // 酿酒：粮食富余（与丰收宴席同一条富余线，先吃饱再酿酒）且有酒坊 → 酿一桶麦酒
+  if (world.era >= 2 && totalFood() > 60 + pop * 5 && totalStockOf("beer") < pop / 12 &&
+      tasksPending("BREW_BEER", true).length < 1) {
+    const br = findFacility(T.BREWERY);
+    const spot = br && neighborsOf(br.x, br.y).find(p => walkable(p.x, p.y));
+    if (spot) {
+      tasksAdd({ type: "BREW_BEER", x: spot.x, y: spot.y });
+      logThrottled("酒坊飘出麦香，一桶新酒正在酝酿。", 20);
+    }
+  }
+  // 榨汁：有压榨坊且果汁不足（原料成本检查在 tasksTake，规划只看结果库存）
+  if (world.era >= 2 && totalStockOf("juice") < pop / 12 && tasksPending("PRESS_JUICE", true).length < 1) {
+    const pr = findFacility(T.PRESS);
+    const spot = pr && neighborsOf(pr.x, pr.y).find(p => walkable(p.x, p.y));
+    if (spot) {
+      tasksAdd({ type: "PRESS_JUICE", x: spot.x, y: spot.y });
+      logThrottled("压榨坊开工，鲜果正在榨汁入桶。", 20);
+    }
+  }
+  // 烘咖啡：烘焙坊在、咖啡豆够烘一炉（全域 ≥2）且咖啡存量不足
+  if (world.era >= 3 && totalStockOf("beans") >= 2 && totalStockOf("coffee") < pop / 15 &&
+      tasksPending("BREW_COFFEE", true).length < 1) {
+    const ro = findFacility(T.ROASTERY);
+    const spot = ro && neighborsOf(ro.x, ro.y).find(p => walkable(p.x, p.y));
+    if (spot) {
+      tasksAdd({ type: "BREW_COFFEE", x: spot.x, y: spot.y });
+      logThrottled("烘焙坊里咖啡豆噼啪作响，浓香飘满了小世界。", 20);
+    }
+  }
+  // 咖啡田扩种：文明时代咖啡田不足（人口/20）→ 近水草地新垦（选址同开荒：农业分区聚簇 → 锚点兜底）
+  if (world.era >= 3) {
+    const coffeeFarms = world.farms.filter(f => f.crop === "coffee").length;
+    if (coffeeFarms < pop / 20 && !tasksPending("FARM", true).some(t => t.crop === "coffee")) {
+      let s = null;
+      for (const st of world.settlements) {
+        if (!st.zones) continue;
+        const z = st.zones.find(z => z.type === "farm");
+        if (z) {
+          const ref = nearestOf(localFacilities(world.farms, st), z);
+          s = (ref && expandSpot(ref, 1, 6, T.GRASS)) ||
+              findSpot(z.x, z.y, 0, z.r, T.GRASS, [T.HOUSE, T.SITE]);
+          if (s) break;
+        }
+      }
+      if (!s) {
+        const a = pickAnchor();
+        const ref = nearestOf(localFacilities(world.farms, nearestSettlement(a.x, a.y)), a);
+        s = (ref && expandSpot(ref, 1, 6, T.GRASS)) ||
+            findSpot(a.x, a.y, 4, 18, T.GRASS, [T.HOUSE, T.SITE]);
+      }
+      // 咖啡田同样要灌溉：选址 5 格内无水则本轮放弃（不为咖啡挖塘，水源优先保粮食田）
+      if (s && nearAny(s.x, s.y, [T.WATER, T.DEEP], 5)) {
+        tasksAdd({ type: "FARM", x: s.x, y: s.y, need: 9, crop: "coffee" });
+        logThrottled("规划署批准开垦一片咖啡田，异域的香气将在这里生根。", 20);
+      }
+    }
+  }
   // 2g. 浆果可持续：丛数低于人口需求（且有丛可采种）→ 培育新丛
   const berryTotal = world.berryStock.size;
   const berryHealthy = [...world.berryStock.values()].filter(v => v >= 1).length;
@@ -411,7 +568,7 @@ function plannerTick() {
   if (world.time - (_frontierCd || -999) > 30) {
     _frontierCd = world.time;
     for (const e of agents.filter(a => !a.dead && a.job === "explorer" && a.home && !a.voyaging)) {
-      const front = findFrontier(e.home.x | 0, e.home.y | 0, 60);
+      const front = findFrontier(Math.floor(e.home.x), Math.floor(e.home.y), 60);
       if (!front) continue;
       const dHome = Math.abs(front.x - e.home.x) + Math.abs(front.y - e.home.y);
       if (dHome <= 50) continue;   // 家离前沿足够近
@@ -441,7 +598,8 @@ function plannerTick() {
   //    出生安全垫随人口放大（food > 100 + 人口×4），防止出生率超过承载力引发饿死潮
   //    BIRTH_CHECK 是每秒概率，规划器每 PLANNER_INTERVAL 秒才判一次，需换算成窗口概率
   const hasRoom = world.houses.length * 3 > pop;
-  if (pop > 0 && totalFood() > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
+  // 出生线（死锁 #4/#10 的含等号边界）：产粮田×5 >= 人口+4；coffee 田不产粮不计入，只做排除、边界语义不变
+  if (pop > 0 && totalFood() > 40 && foodFarms * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
     // 亲子：出生序号确定性选亲（hash2 不消耗 rand 流，保证固定种子回归与旧版逐位一致）
     const seq = (world.birthSeq = (world.birthSeq || 0) + 1);
     const mothers = agents.filter(a => !a.dead && a.sex === "f" && a.age >= 16 && a.age <= 45);   // 育龄母池（0 岁新生儿天然不在内）
@@ -488,7 +646,9 @@ function plannerTick() {
     if ((t.blockedCount || 0) < 3) continue;
     t.freezeAge = (t.freezeAge || 0) + SIM.PLANNER_INTERVAL;
 
-    if (t.freezeAge >= 180 && (t.type === "BUILD" || t.type === "FARM" || t.type === "FILL")) {
+    // 新式饮品建筑与建房同款：累计冻结 180s 仍无法施工 → 放弃恢复草地，释放名额（防堵死饮品链）
+    if (t.freezeAge >= 180 && (t.type === "BUILD" || t.type === "FARM" || t.type === "FILL" ||
+        t.type === "WELL" || t.type === "BREWERY" || t.type === "PRESS" || t.type === "ROASTERY")) {
       setTile(t.x, t.y, t.type === "FILL" ? T.WATER : T.GRASS);   // 填海放弃恢复为水
       tasks.list.splice(i, 1);
       logThrottled("规划署放弃了一处无法施工的地块。", 60);
@@ -647,10 +807,14 @@ function farmTick(dt) {
     }
     if (!f.irrigated) continue;   // 缺水：停止生长（不倒退，等水来了继续）
     f.grow += dt;
-    if (f.grow >= SIM.FARM_MATURITY) {
+    // 咖啡田走独立成熟周期与产出：产咖啡豆（不产粮，不进粮食产能口径）
+    if (f.grow >= (f.crop === "coffee" ? SIM.COFFEE_MATURITY : SIM.FARM_MATURITY)) {
       f.grow = 0;
       const st = ownerSettle(f.x, f.y);
-      if (st) ensureStock(st).food += SIM.FARM_YIELD;   // 粮食进所属城市库存
+      if (st) {
+        if (f.crop === "coffee") ensureStock(st).beans += SIM.COFFEE_YIELD;   // 咖啡豆进所属城市库存
+        else ensureStock(st).food += SIM.FARM_YIELD;   // 粮食进所属城市库存
+      }
       f.flash = 0.6; // 成熟闪光（渲染用）
     }
     if (f.flash > 0) f.flash -= dt;
@@ -712,7 +876,9 @@ function jobMarketTick(pop) {
     builder:     tasksPending("BUILD", true).length + tasksPending("PASTURE", true).length +
                  tasksPending("DOCK", true).length + tasksPending("QUARRY", true).length +
                  tasksPending("SANDPIT", true).length + tasksPending("PLANT", true).length +
-                 tasksPending("PLANT_BERRY", true).length,
+                 tasksPending("PLANT_BERRY", true).length +
+                 tasksPending("WELL", true).length + tasksPending("BREWERY", true).length +
+                 tasksPending("PRESS", true).length + tasksPending("ROASTERY", true).length,
     explorer:    1,   // 探索自有行为，恒有需求
   };
   const workers = {};

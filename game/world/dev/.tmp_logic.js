@@ -24,6 +24,7 @@ const T = {
   MOUNTAIN: 6, FARM: 7, HOUSE: 8, PATH: 9, SITE: 10, BRIDGE: 11,
   BERRY: 12, FRUIT: 13, PASTURE: 14, CAVE: 15, CLIFF: 16, FENCE: 17,
   QUARRY: 18, SANDPIT: 19, DOCK: 20,
+  WELL: 21, BREWERY: 22, PRESS: 23, ROASTERY: 24,
 };
 
 const TILE_META = {
@@ -48,6 +49,10 @@ const TILE_META = {
   [T.QUARRY]:   { name: "采石场", color: "#8d8478", walk: true, h: 0 },
   [T.SANDPIT]:  { name: "沙场", color: "#d8c890", walk: true, h: 0 },
   [T.DOCK]:     { name: "码头", color: "#8a6a42", walk: true, h: 0 },
+  [T.WELL]:     { name: "水井",   color: "#8f9aa3", walk: false, h: 0 },
+  [T.BREWERY]:  { name: "酒坊",   color: "#7a4a3a", walk: false, h: 0 },
+  [T.PRESS]:    { name: "压榨坊", color: "#6a7a4a", walk: false, h: 0 },
+  [T.ROASTERY]: { name: "烘焙坊", color: "#5a4a3a", walk: false, h: 0 },
 };
 
 const WORLD_W = 240, WORLD_H = 180;
@@ -98,6 +103,23 @@ const SIM = {
   BOAT_HOLD_CAP: 20,          // 渔船满舱载鱼量（粮）
   BOAT_FISH_YIELD: 2,         // 渔船每次起网渔获
   FISHING_INTERVAL: 10,       // 渔船起网周期（秒）
+  // ---- 口渴与饮品 ----
+  THIRST_DECAY: 1.4,          // 口渴每秒下降（walk 实际 ≈1.32/s：直饮 +70 约撑 50s，避免全民 24s 一渴的循环）
+  STATE_HUNGER: { idle: 1.0, walk: 1.15, run: 1.5, work: 1.45, sleep: 0.5 },  // 饥饿衰减按状态倍率（睡觉减半）
+  STATE_ENERGY: { idle: 0.85, walk: 1.1, run: 1.6, work: 1.35 },              // 体力衰减按状态倍率（睡觉不衰减，走 ENERGY_REGEN 恢复）
+  STATE_THIRST: { idle: 1.0, walk: 1.2, run: 1.5, work: 1.3, sleep: 0.55 },   // 口渴衰减按状态倍率
+  DRINK_RESTORE: { water: 55, juice: 75, beer: 60, coffee: 50 },              // 各饮品一次饮用的解渴量（清水 75：约抵 57s walk 消耗）
+  DRUNK_TIME: 40,             // 醉酒状态持续时间（秒）
+  COFFEE_TIME: 120,           // 咖啡因提神持续时间（秒）
+  COFFEE_ENERGY_FACTOR: 0.55, // 咖啡因期间体力衰减倍率
+  BEER_HUNGER_FACTOR: 0.85,   // 醉酒期间饥饿衰减倍率（酒能顶饿）
+  DRUNK_SPEED_FACTOR: 0.65,   // 醉酒移动速度倍率
+  DEHYDRY_TIME: 40,           // 口渴归零后的脱水耐受时长（秒），超时进入脱水伤害
+  SAFE_THIRST: 12,            // 行程预算：按当前路径走完时渴值预计低于此 → 中途弃程先喝水（防隧道视野渴死）
+  SAFE_HUNGER: 8,             // 行程预算：按当前路径走完时饥饿预计低于此 → 中途弃程先吃饭
+  // ---- 咖啡田 ----
+  COFFEE_MATURITY: 90,        // 咖啡田成熟秒数（粮食田用 FARM_MATURITY）
+  COFFEE_YIELD: 2,            // 咖啡田每次成熟产豆量
   // ---- 历法与年龄 ----
   YEAR_DAYS: 12,        // 1 昼夜 = 1 个月，12 昼夜 = 1 年（1 岁）
 };
@@ -312,6 +334,7 @@ const world = {
 };
 
 function logMsg(text) {
+  world.logSeq = (world.logSeq || 0) + 1; // 单调计数，供 HUD 判刷新——截断使 length 恒定，length 判据会永久停更
   world.logs.unshift({ t: world.time, text });
   if (world.logs.length > 200) world.logs.pop();
 }
@@ -729,6 +752,7 @@ function quarryTick() {
 function carveRiver(isl) {
   if (isl.riverDone) return;
   isl.riverDone = true;
+  world.rivers = world.rivers || new Set();   // 惰性初始化：河流水格登记表（主岛与发现岛都经此函数，天然全覆盖）
   let x = Math.round(isl.x + randRange(-isl.r / 2, isl.r / 2));
   let y = Math.round(isl.y + randRange(-isl.r / 2, isl.r / 2));
   let ang = rand() * Math.PI * 2;
@@ -739,6 +763,7 @@ function carveRiver(isl) {
     if (t === T.DEEP || t === T.WATER || t === T.BRIDGE) break;   // 入海
     if (t !== T.VOID) {
       setTile(x, y, T.WATER);
+      world.rivers.add(x + "," + y);   // 登记被刻蚀为水的格（河流查询/灌溉判定用）
       if (hash2(x + 31, y + 97) < 0.08) world.fishStock.set(x + "," + y, 3);
       // 河岸冲积沙滩
       for (const p of neighborsOf(x, y)) {
@@ -971,7 +996,7 @@ function expand() {
       (Math.abs(a.x - acx) + Math.abs(a.y - acy)) - (Math.abs(b.x - acx) + Math.abs(b.y - acy)));
     const target = unclaimed[0];
     target.claimed = true;
-    nx = target.x | 0; ny = target.y | 0; d = { name: pickIslandName(target) };
+    nx = Math.floor(target.x); ny = Math.floor(target.y); d = { name: pickIslandName(target) };
     generateAndReveal(nx - target.r - 10, ny - target.r - 10, nx + target.r + 10, ny + target.r + 10, true);
   } else {
     // 在岛群外缘随机方向造新岛，与既有岛保持距离
@@ -1123,10 +1148,13 @@ function nearestSettlement(x, y) {
   return best;
 }
 
-// 聚落资源库存（wood/stone/sand/food——粮食城市内共享，不是全图共享池）
+// 聚落资源库存（wood/stone/sand/food + 饮品链 water/juice/beer/coffee/beans——粮食城市内共享，不是全图共享池）
 function ensureStock(s) {
-  if (!s.stock) s.stock = { wood: 0, stone: 0, sand: 0, food: 0 };
-  if (s.stock.food === undefined) s.stock.food = 0;   // 旧聚落兼容
+  if (!s.stock) s.stock = { wood: 0, stone: 0, sand: 0, food: 0, water: 0, juice: 0, beer: 0, coffee: 0, beans: 0 };
+  // 旧聚落/字面量库存兼容：缺失字段统一补 0（含原有 food 兜底语义）
+  for (const k of ["wood", "stone", "sand", "food", "water", "juice", "beer", "coffee", "beans"]) {
+    if (s.stock[k] === undefined) s.stock[k] = 0;
+  }
   return s.stock;
 }
 // 无半径最近的归属聚落（田/牧场/粮食产出的归属方；nearestSettlement 有 SETTLEMENT_RADIUS 上限不适用）
@@ -1229,9 +1257,12 @@ const tasks = {
   list: [],
 };
 
-const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 4, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3, FILL: 10, EXCAV: 8 };
-// 工程资源消耗：架桥耗木材、造陆耗沙土（完工时从最近聚落库存扣除）
-const TASK_RESOURCE_COST = { BRIDGE: { wood: 1 }, FILL: { sand: 1 } };
+const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 4, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3, FILL: 10, EXCAV: 8,
+  WELL: 12, BREWERY: 18, PRESS: 14, ROASTERY: 16, FETCH_WATER: 4, PRESS_JUICE: 6, BREW_BEER: 8, BREW_COFFEE: 7 };
+// 工程资源消耗：架桥耗木材、造陆耗沙土（联合库存结算，doWork 挂起 + tasksTake 跳过双处生效）；
+// 制作型任务耗水/粮/豆（非联合库存：完工时从所属城市库存扣除，tasksTake 领取时同步过滤——不足跳过省工）
+const TASK_RESOURCE_COST = { BRIDGE: { wood: 1 }, FILL: { sand: 1 },
+  PRESS_JUICE: { water: 1, food: 2 }, BREW_BEER: { water: 1, food: 3 }, BREW_COFFEE: { water: 1, beans: 2 } };
 
 function tasksAdd(t) {
   t.id = _taskId++;
@@ -1239,7 +1270,8 @@ function tasksAdd(t) {
   t.need = t.need !== undefined ? t.need : (TASK_DEFAULT_NEED[t.type] || 0); // 兜底：漏设 need 的任务永不完工、占死名额
   t.born = world.time;   // 立项时间：任务老化防饥饿（越久越优先被领取）
   t.workers = new Set();
-  if (t.type === "BUILD" || t.type === "FARM" || t.type === "PASTURE") setTile(t.x, t.y, T.SITE); // 立项即圈地
+  if (t.type === "BUILD" || t.type === "FARM" || t.type === "PASTURE" ||
+      t.type === "WELL" || t.type === "BREWERY" || t.type === "PRESS" || t.type === "ROASTERY") setTile(t.x, t.y, T.SITE); // 立项即圈地（建筑类沿用 PASTURE 先例）
   tasks.list.push(t);
   return t;
 }
@@ -1252,7 +1284,8 @@ function tasksPending(type, excludeFrozen) {
 function taskJobPref(t) {
   switch (t.type) {
     case "FARM": return "FARM";
-    case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT": case "EXCAV": return "BUILD";
+    case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT": case "EXCAV":
+    case "WELL": case "BREWERY": case "PRESS": case "ROASTERY": return "BUILD";
     case "CAPTURE": return t.creature && t.creature.type === "fish" ? "FISH" : "HUNT";
     case "HUNT": return "HUNT";
     case "FISH": return "FISH";
@@ -1265,7 +1298,7 @@ function taskJobPref(t) {
 // 工程任务资源不足时跳过（小人转去做资源采集，不空转）；
 // 先做"够得着"的（blockedCount 低者优先），再按距离取最近
 function tasksTake(agent) {
-  const ax = agent.x | 0, ay = agent.y | 0;
+  const ax = Math.floor(agent.x), ay = Math.floor(agent.y);   // floor：负坐标段 |0 向零截断会错一行
   const myJob = JOBS[agent.job] ? JOBS[agent.job].task : null;
   let best = null, bestScore = Infinity;
   for (const t of tasks.list) {
@@ -1275,6 +1308,12 @@ function tasksTake(agent) {
       const cost = TASK_RESOURCE_COST[t.type];
       const lack = Object.keys(cost).some(k => jointStock(k) < cost[k]);
       if (lack) continue;   // 库存不够一格的 → 不领
+    } else if (t.type === "PRESS_JUICE" || t.type === "BREW_BEER" || t.type === "BREW_COFFEE") {
+      // 制作型任务：原料在所属城市库存（非联合库存），不足则跳过领取（领了也得挂起，提前跳过省工）
+      const s = ownerSettle(t.x, t.y) || nearestSettlement(t.x, t.y);
+      const cost = TASK_RESOURCE_COST[t.type];
+      const lack = !s || Object.keys(cost).some(k => (ensureStock(s)[k] || 0) < cost[k]);
+      if (lack) continue;
     }
     const cap = t.type === "BUILD" || t.type === "FARM" ? 2 : 4;
     if (t.workers.size >= cap) continue;
@@ -1285,7 +1324,10 @@ function tasksTake(agent) {
     const crisis = (t.type === "DIG" && t.res === "wood") ? Math.max(0, 8 - jointStock("wood")) * 200 : 0;
     // 走廊桥是国家工程（两岛间唯一通路），优先级高于日常任务
     const natl = t.type === "BRIDGE" && t.corridor ? 1500 : 0;
-    const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000 - age * 3 - crisis - natl;
+    // 渴者优先派打水：打水终点就是水井边（顺路自饮），否则渴着的人与打水任务互相错过——
+    // 行程门拦着渴人不接活、接活的人又不渴，城库水永远攒不起来（30 格内才导流，远途先喝）
+    const thirstFetch = agent.thirst < 35 && t.type === "FETCH_WATER" && d <= 30 ? -800 : 0;
+    const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000 - age * 3 - crisis - natl + thirstFetch;
     if (score < bestScore) { bestScore = score; best = t; }
   }
   return best;
@@ -1324,7 +1366,8 @@ function tasksFinish(t, agent, was) {
     }
     case "FARM": {
       setTile(t.x, t.y, T.FARM);
-      world.farms.push({ x: t.x, y: t.y, grow: randRange(0, SIM.FARM_MATURITY * 0.5) });
+      // crop 透传（"coffee"|undefined，undefined=普通粮田——消费方须容错缺省）
+      world.farms.push({ x: t.x, y: t.y, grow: randRange(0, SIM.FARM_MATURITY * 0.5), crop: t.crop });
       logMsg(`开垦新农田（共 ${world.farms.length} 块）。`);
       emit("farm-done");
       break;
@@ -1436,6 +1479,47 @@ function tasksFinish(t, agent, was) {
       logMsg(`码头建成，航海家们开始筹划远航。`);
       break;
     }
+    case "WELL": {
+      // 水井落成（tile 常量由 config 契约提供，falsy 容错防集成期半成品崩溃）
+      if (T.WELL !== undefined) setTile(t.x, t.y, T.WELL);
+      logMsg(`水井落成，清冽的井水近在眼前。`);
+      break;
+    }
+    case "BREWERY": {
+      if (T.BREWERY !== undefined) setTile(t.x, t.y, T.BREWERY);
+      logMsg(`酒坊落成，粮谷将在这里酿成醉人的麦酒。`);
+      break;
+    }
+    case "PRESS": {
+      if (T.PRESS !== undefined) setTile(t.x, t.y, T.PRESS);
+      logMsg(`压榨坊落成，鲜果将在这里榨成清甜的果汁。`);
+      break;
+    }
+    case "ROASTERY": {
+      if (T.ROASTERY !== undefined) setTile(t.x, t.y, T.ROASTERY);
+      logMsg(`烘焙坊落成，咖啡豆的焦香将唤醒小镇的清晨。`);
+      break;
+    }
+    case "FETCH_WATER": {
+      // 打水：完成者背包驮水回仓（走既有搬运回仓语义，deposit 入所属城市 water 字段）；
+      // 一趟 5 桶（低衰减口径下一次直饮约抵 5 桶，库存才攒得起来，酿造链才有原料）
+      return { res: "water", amount: 2 };
+    }
+    case "PRESS_JUICE": case "BREW_BEER": case "BREW_COFFEE": {
+      // 制作：原料从所属城市库存扣除（与 tasksTake 领取过滤双处生效；不足时钳到 0 防负库存），
+      // 产出直接入库不走搬运（ownerSettle 无主则最近聚落兜底，参照 FILL 就地结算写法）
+      const s = ownerSettle(t.x, t.y) || nearestSettlement(t.x, t.y);
+      const cost = TASK_RESOURCE_COST[t.type];
+      if (s && cost) {
+        const st = ensureStock(s);
+        for (const k of Object.keys(cost)) st[k] = Math.max(0, (st[k] || 0) - cost[k]);
+        const out = t.type === "PRESS_JUICE" ? "juice" : t.type === "BREW_BEER" ? "beer" : "coffee";
+        st[out] = (st[out] || 0) + 1;
+        logThrottled(t.type === "PRESS_JUICE" ? "压榨坊榨出了新鲜的果汁。"
+          : t.type === "BREW_BEER" ? "酒坊酿出了一桶麦酒。" : "烘焙坊烘出了新一批咖啡。", 30);
+      }
+      break;
+    }
     case "EXCAV": {
       // 挖塘：陆格挖成水（灌溉/养鱼的人工水域，显示为池塘）
       setTile(t.x, t.y, T.WATER);
@@ -1507,6 +1591,8 @@ class Creature {
     this.dead = false;
     this.age = spAge ? randRange(spAge.stages[1], spAge.stages[2]) : 1;   // 初始青年~中年（无寿命表物种兜底）
     this.pasture = null;      // {x,y} 圈养位置（null = 野生）
+    this.face = "down";       // 朝向：up/down/left/right（stepToward 实际位移后更新）
+    this.faceHoldT = 1;       // 朝向持锁计时：1 = 不持锁（首次设向不受锁），切换后归 0 重新计锁（与 agent 同口径）
     this.moveCd = randRange(0, 2);
     this.breedCd = 120;
     this.outputCd = SIM.PASTURE_INTERVAL;
@@ -1516,6 +1602,8 @@ class Creature {
 
   update(dt) {
     if (this.dead) return;
+    // 朝向持锁计时累计（+dt 封顶 1；undefined 视为 1 首次不受锁）——faceTurn 的非反向变向闸门
+    this.faceHoldT = Math.min(1, (this.faceHoldT === undefined ? 1 : this.faceHoldT) + dt);
     // 被人搬运：坐标跟随搬运者，跳过一切自主行为（搬运者死亡则掉落原地）
     if (this.carriedBy) {
       if (this.carriedBy.dead) { this.carriedBy = null; return; }
@@ -1572,7 +1660,9 @@ class Creature {
         const sp = (dogNear ? 0.55 : meta.flee) * tired * dt;
         const dx = this.x - threat.x, dy = this.y - threat.y;
         const d = Math.hypot(dx, dy) || 1;
+        const fox = this.x, foy = this.y;
         this.moveBy((dx / d) * sp, (dy / d) * sp);
+        if (this.x !== fox || this.y !== foy) this.updateFace(dx, dy);   // 朝向=逃跑方向（dx/dy 本就是背离威胁的背向向量）；实际位移才更新——与 stepToward 同口径
         return;
       }
       this.fleeT = 0;
@@ -1590,8 +1680,10 @@ class Creature {
       const dx = this.target.x - this.x, dy = this.target.y - this.y;
       const d = Math.hypot(dx, dy) || 1;
       const sp = meta.speed * dt;
+      const ox = this.x, oy = this.y;
       const nx = this.x + (dx / d) * sp, ny = this.y + (dy / d) * sp;
       if (habitatOk(this, Math.round(nx), Math.round(ny))) { this.x = nx; this.y = ny; }
+      if (this.x !== ox || this.y !== oy) this.updateFace(dx, dy);   // 实际位移才更新（被栖息地挡住则保持）——与 stepToward 同口径
       if (d <= sp) this.target = null;
     }
   }
@@ -1621,8 +1713,10 @@ class Creature {
       const dx = this.target.x - this.x, dy = this.target.y - this.y;
       const d = Math.hypot(dx, dy) || 1;
       const sp = CREATURE_META[this.type].speed * dt;
+      const ox = this.x, oy = this.y;
       const nx = this.x + (dx / d) * sp, ny = this.y + (dy / d) * sp;
       if (habitatOk(this, Math.round(nx), Math.round(ny))) { this.x = nx; this.y = ny; }
+      if (this.x !== ox || this.y !== oy) this.updateFace(dx, dy);   // 同 updateWild：实际位移才更新朝向
       if (d <= sp) this.target = null;
     }
   }
@@ -1708,8 +1802,20 @@ class Creature {
   stepToward(t, step) {
     const dx = t.x - this.x, dy = t.y - this.y;
     const d = Math.hypot(dx, dy);
-    if (d <= step) { this.x = t.x; this.y = t.y; this.target = null; return; }
+    if (d <= step) {
+      this.x = t.x; this.y = t.y; this.target = null;
+      if (d > 1e-6) this.updateFace(dx, dy);
+      return;
+    }
+    const ox = this.x, oy = this.y;
     this.moveBy((dx / d) * step, (dy / d) * step);
+    if (this.x !== ox || this.y !== oy) this.updateFace(dx, dy);   // 实际位移了才更新朝向（被栖息地挡住不动则保持）
+  }
+
+  // 朝向：按实际位移主轴更新——走 faceTurn 持锁迟滞（与小人 stepAlong 同口径；
+  // stepToward 的「实际位移才更新」判定保留在外层不动）
+  updateFace(dx, dy) {
+    faceTurn(this, dx, dy);
   }
 
   moveBy(mx, my) {
@@ -1884,12 +1990,40 @@ const JOBS = {
 };
 const _JOB_POOL = ["farmer", "farmer", "lumberjack", "miner", "hunter", "fisher", "builder"];
 
+// ---- 口渴与饮品（冻结契约 v0.3.0）----
+// 全部数值常量（THIRST_DECAY/STATE_*/DRINK_RESTORE/DRUNK_*/COFFEE_*/DEHYDRY_TIME 等）统一定义在
+// config.js 的 SIM 里（调数值去那里）；此处只留取用顺序表（纯逻辑，非数值）
+const DRINK_ORDER = ["coffee", "juice", "beer", "water"];   // 城库取用顺序：有货者优先喝高阶
+
 // 喜好（私人生活倾向，驱动空闲时的自发行为）：
 // explore 向往远方 / homebody 恋家 / animal 喜爱牲畜（陪伴加成牧场） / fishing 垂钓 / none 随遇而安
 const _HOBBY_ROLL = () => {
   const r = rand();
   return r < 0.22 ? "explore" : r < 0.44 ? "homebody" : r < 0.64 ? "animal" : r < 0.84 ? "fishing" : "none";
 };
+
+// ---- 四方向朝向（冻结契约）：主轴判定 + 持锁迟滞（agent 与 creature 统一口径）----
+// faceOf：位移方向 → 朝向主轴（|dx|>|dy| 取水平，否则取垂直）
+function faceOf(dx, dy) {
+  return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up");
+}
+
+// faceTurn：带「持锁迟滞」的朝向变更判定——
+// - 与当前朝向相同：不动；
+// - 反向（left↔right / up↔down）：掉头立即切（玩家预期即时响应）；
+// - 非反向（90° 转向）：需持锁计时 faceHoldT >= 0.8 才切（undefined 视为 1 = 首次设向不受锁）。
+// faceHoldT 由各实体 update(dt) 累计（+dt 封顶 1），切换后归 0 重新计锁。
+// 效果：BFS 阶梯步（斜向行进时水平/垂直步交替，变向间隔 ~0.5s < 0.8s 锁）期间朝向稳定不抖动；
+// 持续直行 0.8s 后自然转向。显式朝向（faceTo 开工面向任务格）绕过本锁直接设。
+function faceTurn(e, dx, dy) {
+  const want = faceOf(dx, dy);
+  if (want === e.face) return;
+  const reverse = (want === "left" && e.face === "right") || (want === "right" && e.face === "left") ||
+                  (want === "up" && e.face === "down") || (want === "down" && e.face === "up");
+  if (!reverse && (e.faceHoldT === undefined ? 1 : e.faceHoldT) < 0.8) return;   // 持锁中：保持原朝向
+  e.face = want;
+  e.faceHoldT = 0;
+}
 
 class Agent {
   constructor(x, y, native, opts) {
@@ -1915,13 +2049,19 @@ class Agent {
     this.hobby = this.adventure > 0.7 ? "explore"
                : this.adventure < 0.22 ? "homebody"
                : _HOBBY_ROLL();
-    this.hunger = randRange(60, 100);      // 100 = 吃饱
+    this.hunger = randRange(85, 100);      // 100 = 吃饱（85 起步：开局到首批口粮落地约 45s，
+                                           // 60 起步的居民会在头粮前饿穿进入必死病程——开局崩盘的种子）
     this.energy = randRange(55, 100);
+    this.thirst = 100;                     // 水分：0~100，100 = 不渴（<30 找水喝，<8 持续脱水病倒）
+    this.drunkT = 0;                       // 醉酒剩余秒数（喝麦酒：移速放缓、饥饿衰减放缓）
+    this.coffeeT = 0;                      // 咖啡因剩余秒数（喝咖啡：精力衰减放缓）
+    this.face = "down";                    // 朝向：up/down/left/right（移动按实际位移更新，开工面向任务格）
+    this.faceHoldT = 1;                    // 朝向持锁计时：1 = 不持锁（首次设向不受锁），切换后归 0 重新计锁
     this.home = null;                      // {x,y} 房屋
     this.task = null;
     this.path = null;
     this.pi = 0;
-    this.state = "idle";                   // idle/walk/eat/sleep/work
+    this.state = "idle";                   // idle/walk/eat/sleep/work/drink/voyage
     this.thinkCd = randRange(0, 0.5);      // 决策冷却，防抖
     this.speed = SIM.AGENT_SPEED * randRange(0.85, 1.2);
     this.phase = rand() * 10;              // 动画相位
@@ -1931,6 +2071,8 @@ class Agent {
   update(dt) {
     this.phase += dt;
     this.thinkCd -= dt;
+    // 朝向持锁计时累计（+dt 封顶 1；undefined 视为 1 首次不受锁）——faceTurn 的非反向变向闸门
+    this.faceHoldT = Math.min(1, (this.faceHoldT === undefined ? 1 : this.faceHoldT) + dt);
     // 年龄：1 游戏年（12 昼夜）长 1 岁，寿命封顶
     this.age = Math.min(SPECIES_AGE.human.lifespan, this.age + dt / (SIM.DAY_LEN * SIM.YEAR_DAYS));
 
@@ -2005,10 +2147,21 @@ class Agent {
         if (rand() < 0.01 + over * 0.003) { this.die("寿终正寝"); return; }
       }
     }
-    // 生病：饥饿或精力归零持续 30 秒 → 病倒；再持续 60 秒无救治 → 死亡
-    //      痊愈条件：饱食与精力都恢复到 40 以上
-    const ailment = this.hunger <= 0 ? "hunger" : (this.energy <= 0 ? "energy" : null);
-    if (ailment) {
+    // 脱水：thirst<8 持续 DEHYDRY_TIME 秒 → 复用病倒机制（sickSource="thirst"，痊愈需水分恢复）
+    if (this.thirst < 8) {
+      this.dehydrT = (this.dehydrT || 0) + dt;
+      if (!this.sick && this.dehydrT >= SIM.DEHYDRY_TIME) {
+        this.sick = true;
+        this.sickSource = "thirst";
+        this.sickTime = 0;
+        logThrottled(`${this.name} 脱水病倒了……`, 10);
+      }
+    } else this.dehydrT = 0;
+
+    // 生病：饥饿或精力归零持续 30 秒 → 病倒；脱水（thirst<8）持续 40 秒 → 病倒；再持续 60 秒无救治 → 死亡
+    //      痊愈条件：饱食与精力都恢复到 40 以上（脱水病倒还需水分恢复）
+    const ailment = this.hunger <= 0 ? "hunger" : (this.energy <= 0 ? "energy" : (this.thirst < 8 ? "thirst" : null));
+    if (ailment === "hunger" || ailment === "energy") {
       this.ailmentCd = (this.ailmentCd || 0) + dt;
       if (!this.sick && this.ailmentCd > 30) {
         this.sick = true;
@@ -2016,24 +2169,38 @@ class Agent {
         this.sickTime = 0;
         logThrottled(`${this.name} 病倒了……`, 10);
       }
-      if (this.sick) {
-        this.sickTime += dt;
-        if (this.sickTime > 60) {
-          this.die(ailment === "hunger" ? "因长期饥饿病倒，不治身亡" : "积劳成疾，撒手人寰");
-          return;
-        }
-      }
     } else {
       this.ailmentCd = 0;
-      if (this.sick && this.hunger > 40 && this.energy > 40) {
-        this.sick = false;
-        logThrottled(`${this.name} 痊愈了，重新投入生活。`, 20);
+    }
+    // 病倒后的恶化与痊愈（脱水与饥饿/力竭共用同一条 60 秒不治线）
+    if (this.sick && ailment) {
+      this.sickTime += dt;
+      if (this.sickTime > 60) {
+        this.die(ailment === "hunger" ? "因长期饥饿病倒，不治身亡"
+               : ailment === "thirst" ? "因脱水病倒，不治身亡"
+               : "积劳成疾，撒手人寰");
+        return;
       }
+    } else if (!ailment && this.sick && this.hunger > 40 && this.energy > 40 &&
+               (this.sickSource !== "thirst" || this.thirst > 30)) {
+      this.sick = false;
+      logThrottled(`${this.name} 痊愈了，重新投入生活。`, 20);
     }
 
-    // 需求演化
-    this.hunger -= SIM.HUNGER_DECAY * dt;
-    if (this.state !== "sleep") this.energy -= SIM.ENERGY_DECAY * dt;
+    // 需求演化：按状态系数衰减（"run" 判定与渲染同口径：探索冲刺/高速赶路/追猎 且 处于行走态）。
+    // 状态系数表在 config.js 的 SIM.STATE_*；eat/drink 等缺省态按 idle 口径兜底
+    const stKey = this.state === "walk" &&
+      (this.exploring || this.speed > 1.85 || (this.task && (this.task.type === "HUNT" || this.task.type === "CAPTURE")))
+      ? "run" : this.state;
+    const stMul = tbl => (tbl[stKey] !== undefined ? tbl[stKey] : tbl.idle);
+    // 饮品效果：醉酒时饥饿衰减放缓（酒液充饥）；咖啡因生效时精力衰减放缓（提神）
+    this.hunger -= SIM.HUNGER_DECAY * stMul(SIM.STATE_HUNGER) * (this.drunkT > 0 ? SIM.BEER_HUNGER_FACTOR : 1) * dt;
+    if (this.state !== "sleep") this.energy -= SIM.ENERGY_DECAY * stMul(SIM.STATE_ENERGY) * (this.coffeeT > 0 ? SIM.COFFEE_ENERGY_FACTOR : 1) * dt;
+    this.thirst = Math.max(0, this.thirst - SIM.THIRST_DECAY * stMul(SIM.STATE_THIRST) * dt);
+
+    // 饮品效果计时：醉酒/咖啡因随时间消退
+    if (this.drunkT > 0) this.drunkT = Math.max(0, this.drunkT - dt);
+    if (this.coffeeT > 0) this.coffeeT = Math.max(0, this.coffeeT - dt);
 
     if (this.hunger <= 0) {
       this.hunger = 0;
@@ -2065,6 +2232,29 @@ class Agent {
         } else { this.state = "idle"; } // 本城没粮，回去等规划器开荒/挖塘
         break;
       }
+      case "drink": {
+        // 原地饮用 2 秒后结算：城库饮品扣库存 1 + 给效果；水井/河湖直饮 +40 无副作用
+        this.drinkWait -= dt;
+        if (this.drinkWait > 0) break;
+        if (this.drinkRes && this.drinkCity) {
+          const st = ensureStock(this.drinkCity);
+          if ((st[this.drinkRes] || 0) > 0) {
+            st[this.drinkRes] -= 1;
+            this.thirst = Math.min(100, this.thirst + SIM.DRINK_RESTORE[this.drinkRes]);
+            if (this.drinkRes === "beer") { this.drunkT = SIM.DRUNK_TIME; logThrottled(`${this.name} 畅饮了麦酒，脚步都有点飘了。`, 20); }
+            else if (this.drinkRes === "coffee") { this.coffeeT = SIM.COFFEE_TIME; logThrottled(`${this.name} 畅饮了热咖啡，精神抖擞。`, 20); }
+            else if (this.drinkRes === "juice") { this.energy = Math.min(100, this.energy + 10); logThrottled(`${this.name} 畅饮了鲜果汁。`, 20); }
+            else logThrottled(`${this.name} 畅饮了清水。`, 20);
+          }
+          // 库存恰被喝光：白跑一趟，等下次决策另寻水源
+        } else {
+          this.thirst = Math.min(100, this.thirst + 40);   // 井水/河水直饮（与城库清水 75 同档，低衰减下约撑 50s）
+          logThrottled(`${this.name} 趴在水边畅饮了一通。`, 20);
+        }
+        this.drinkRes = null; this.drinkCity = null;
+        this.state = "idle";
+        break;
+      }
       case "sleep":
         this.energy += SIM.ENERGY_REGEN * dt;
         if (this.energy >= 100 || isDaytime()) this.state = "idle";
@@ -2074,27 +2264,60 @@ class Agent {
   }
 
   decide() {
-    if (this.state === "sleep") return;
-    // 有明确目的地的行走途中不做重新决策，防止反复重设路径
+    if (this.state === "sleep" || this.state === "drink") return;
+    // 有明确目的地的行走途中不做重新决策，防止反复重设路径；
+    // 例外（行程预算抢救）：按当前路径剩余距离推算到达时的渴/饿值，预计跌破生命线 →
+    // 放弃当前目的地先吃喝（任务不清空，复工由下方"手上有任务但走丢了"分支承接）。
+    // 正在赶去吃/喝的路上不抢救（目的地本身就是解药，弃了反而抖动活锁）。
+    if (this.state === "walk" && this.onArrive && this.path && this.pi < this.path.length) {
+      const remain = (this.path.length - this.pi) / Math.max(0.1, this.speed);
+      const thArr = this.thirst - remain * SIM.THIRST_DECAY * 1.5;   // 1.5 = 冲刺(run)系数包络，宁早勿晚
+      const huArr = this.hunger - remain * SIM.HUNGER_DECAY * 1.5;
+      if (thArr < SIM.SAFE_THIRST || huArr < SIM.SAFE_HUNGER) {
+        const dest = this.path[this.path.length - 1];
+        const w = this.thirst < 30 ? this.nearestWaterSpot() : null;
+        const f = this.hunger < 30 ? this.nearestFoodSpot() : null;
+        // 救援途中（送搁浅动物回栖息地）豁免：路程短且使命必达，弃程反而把认领锁变成幽灵锁
+        const headingToCure = this.rescuing ||
+          (w && w.x === dest.x && w.y === dest.y) || (f && f.x === dest.x && f.y === dest.y);
+        if (!headingToCure) {
+          this.path = null; this.onArrive = null; this.state = "idle";
+          // 真弃程时解开身上的认领锁：否则搁浅动物被不再赶路的「幽灵救援者」锁死到 timeout
+          if (this.rescuing) {
+            if (this.rescuing.rescuer === this) this.rescuing.rescuer = null;
+            this.rescuing = null;
+          }
+        }
+      }
+    }
     if (this.state === "walk" && this.onArrive) return;
     const night = !isDaytime();
 
     // 1. 累了或天黑 → 回家睡（工作可以被打断，活着比干活重要）
-    if (this.energy < 18 || (night && this.energy < 92)) {
+    //    白天低体力会 sleep↔idle 抖动（isDaytime 即醒）：抖动期间不吃不喝会渴死/饿死——生命需求优先于休息
+    if ((this.energy < 18 || (night && this.energy < 92)) && this.hunger >= 30 && this.thirst >= 30) {
       this.goSleep();
       return;
     }
-    // 2. 饿了 → 就近取食（最近的农田或粮仓）
+    // 2. 饿了 → 就近取食（最近的农田或粮仓）。城库确有粮才动身：空库白跑会把人锁进
+    //    「走→eat 失败→再走」死循环——本分支恒先于 2.5 喝水与 3 领任务，开局粮尽时
+    //    居民会被掐断饮水与劳作，又渴又饿死在粮仓门口（探针实测 9/12 人死于这条隧道，
+    //    死锁 #18 残留的真正根源；有粮时行为与旧版完全一致）
     if (this.hunger < 30) {
       const dest = this.nearestFoodSpot();
-      if (dest && this.goTo(dest.x, dest.y)) {
+      const fcity = dest && ownerSettle(dest.x, dest.y);
+      if (dest && (!fcity || ensureStock(fcity).food > 0) && this.goTo(dest.x, dest.y)) {
         this.state = "walk";
         this.onArrive = () => { this.state = "eat"; };
         return;
       }
     }
+    // 2.5 渴了 → 喝水（确定性触发，无概率门；必须先于领任务——防工蜂化渴死）
+    if (this.thirst < 30 && this.seekDrink()) return;
     // 2.8 救助被困动物：施工改变地形后，搁浅的动物需要有人送回栖息地（紧急事项，优先于领任务；喜爱牲畜者更积极）
-    if (!this.task && !this.voyaging) {
+    //     任务在身者同样响应：救援是短途使命，任务引用保留，放归后经「手上有任务」分支自动复工——
+    //     否则全员在岗时救援无人可派（旧版只轮空手者，谁有空全看运气）。受困者（trapUntil，见 goTo）不参与
+    if (!this.voyaging && world.time >= (this.trapUntil || 0)) {
       const victim = creatures.find(c => !c.dead && !c.carriedBy && !c.rescuer &&
         (c.strandT || 0) > 3 && c.type !== "bird" && c.type !== "fish" &&
         (!c.noRescueT || world.time > c.noRescueT));   // 曾接近失败：冷却 60s 后可重试（地形可能已改变）
@@ -2110,8 +2333,8 @@ class Agent {
       }
     }
 
-    // 3. 领任务干活
-    if (!this.task) {
+    // 3. 领任务干活（受困者跳过：寻路必败只会把远处任务的 blockedCount 刷到冻结）
+    if (!this.task && world.time >= (this.trapUntil || 0)) {
       // 保险：手上有产出先就地登记入库（否则领新任务 → 旧产出被下次完工覆盖而蒸发）
       if (this.carrying) this.deposit();
       const t = tasksTake(this);
@@ -2119,11 +2342,21 @@ class Agent {
         // 劳动保护：路程耗能（ENERGY_DECAY 0.9/s ÷ 船速 1.7 格/s 往返）预估不足 → 先睡觉，防止远途过劳死
         const d = Math.abs(t.x - this.x) + Math.abs(t.y - this.y);
         if (this.energy < Math.min(95, 18 + d * (this.job === "explorer" ? 0.4 : 0.75))) { this.goSleep(); return; }   // 探索者耐走（系数减半）
+        // 生命需求先行：渴跌破临界平线不接新任务（thirst<35 与分支 2.5 喝水线同档——
+        // 旧版 min(65,22+d×1.7) 行程门曾把渴值常驻 30~65 区间的居民全数拦成「渴而不工」，
+        // 打水任务因此恒 0 工人；现直饮/城库水恢复量已匹配低衰减，平线即可，且 seekDrink
+        // 是自带出口的（喝完回来必过线）。任务老化因子保证远任务最终仍会被领走，不会死任务）。
+        // 例外：近处的打水任务豁免——终点就是水井边，渴人打水顺路自饮（打水若也被拦，
+        // 半数劳力沦为纯喝水人口，城库水永远攒不起来）；远水不救近渴，远的仍先喝。
+        // hunger 门保持距离线：探针实测它不是过度拦截源（开局 famine 中 0 次拦截；
+        // 全程 ~19% 拦截在吃完一顿 hunger=100 后自愈），压平徒增随机流漂移无收益
+        if (this.thirst < 35 && !(t.type === "FETCH_WATER" && d <= 30)) { this.seekDrink(); return; }
+        if (this.hunger < Math.min(55, 18 + d * 1.3)) return;
         this.task = t;
         t.workers.add(this);
         if (this.goTo(t.x, t.y)) {
           this.state = "walk";
-          this.onArrive = () => { this.state = "work"; };
+          this.onArrive = () => { this.state = "work"; this.faceTo(t.x + 0.5, t.y + 0.5); };   // 开工面向任务格
           return;
         }
         // 去不了工地 → 记一次"路不通"，累计 3 次该任务冻结（等周边改造后解锁）
@@ -2131,9 +2364,10 @@ class Agent {
         this.abandonTask();
         return;
       }
-    } else if (this.state !== "work" && this.state !== "walk") {
+    } else if (this.task && this.state !== "work" && this.state !== "walk") {
       // 手上有任务但走丢了（被打断）→ 继续去工地
-      if (this.goTo(this.task.x, this.task.y)) { this.state = "walk"; this.onArrive = () => { this.state = "work"; }; return; }
+      const tk = this.task;   // 闭包捕获：onArrive 触发时任务可能已被协同完工释放
+      if (this.goTo(tk.x, tk.y)) { this.state = "walk"; this.onArrive = () => { this.state = "work"; this.faceTo(tk.x + 0.5, tk.y + 0.5); }; return; }
     }
     // 3.5 搬运：身上有产出先送回仓库入库（名称即语义：仓库里的才算资源）
     if (this.carrying && this.state === "idle") {
@@ -2235,8 +2469,8 @@ class Agent {
     // 5. 闲逛（恋家的人活动半径更小）
     if (this.state === "idle") {
       const homebody = this.adventure < 0.3;
-      const tx = (this.x | 0) + randInt(homebody ? -2 : -5, homebody ? 2 : 5);
-      const ty = (this.y | 0) + randInt(homebody ? -2 : -5, homebody ? 2 : 5);
+      const tx = Math.floor(this.x) + randInt(homebody ? -2 : -5, homebody ? 2 : 5);
+      const ty = Math.floor(this.y) + randInt(homebody ? -2 : -5, homebody ? 2 : 5);
       if (this.goTo(tx, ty)) this.state = "walk";
     }
   }
@@ -2410,16 +2644,92 @@ class Agent {
     return nearestFoodTo(this.x, this.y).spot;
   }
 
+  // 最近可直饮水源：水井（T.WELL，世界未定义该 tile 前容错跳过）或河湖浅水格（须有可站立格）。
+  // 口渴是高频决策，结果缓存 2 秒防重复全图扫描（找不到也缓存，避免连帧重扫）
+  nearestWaterSpot() {
+    if (this.waterCache && world.time - (this.waterScanT || 0) < 2) return this.waterCache;
+    this.waterScanT = world.time;
+    const well = typeof T.WELL === "number" ? T.WELL : null;   // 水井 tile（并行改造落地前缺省）
+    const cx = Math.round(this.x), cy = Math.round(this.y);
+    for (let r = 1; r <= 40; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;   // 只扫当前圈
+          const x = cx + dx, y = cy + dy;
+          const t = tileAt(x, y);
+          if (t !== T.WATER && t !== well) continue;
+          // 井/水格本身可站就直接站，否则站到可站立邻格喝
+          const stand = walkable(x, y) ? { x, y } : neighborsOf(x, y).find(p => walkable(p.x, p.y));
+          if (stand) { this.waterCache = stand; return stand; }
+        }
+      }
+    }
+    this.waterCache = null;
+    return null;
+  }
+
+  // 寻水解渴（decide 2.5 与领任务行程门共用）：成功派出取水行程 → true，找不到水源 → false
+  // ① 城库存有饮品：去最近聚落粮仓饮用（coffee > juice > beer > water，有货者优先喝高阶）
+  // ② 城库无饮品（或无城可归）：找最近水井/河湖水格直饮
+  seekDrink() {
+    const sc = nearestSettlement(Math.round(this.x), Math.round(this.y));
+    const stk = sc && ensureStock(sc);
+    let pick = null;
+    if (stk) for (const r of DRINK_ORDER) if ((stk[r] || 0) > 0) { pick = r; break; }
+    if (pick && sc && this.goTo(sc.x, sc.y)) {
+      this.state = "walk";
+      this.onArrive = () => { this.state = "drink"; this.drinkWait = 2; this.drinkRes = pick; this.drinkCity = sc; };
+      return true;
+    }
+    const w = this.nearestWaterSpot();
+    if (w && this.goTo(w.x, w.y)) {
+      this.state = "walk";
+      this.onArrive = () => { this.state = "drink"; this.drinkWait = 2; this.drinkRes = null; this.drinkCity = null; };
+      return true;
+    }
+    return false;   // ③ 找不到任何水源：调用方回退后续分支
+  }
+
+  // 面向某点（world 坐标）：开工面向任务格是显式朝向——绕过持锁迟滞直接设（并重置计锁）；
+  // 移动朝向由 stepAlong 按实际位移实时更新
+  faceTo(px, py) {
+    const dx = px - this.x, dy = py - this.y;
+    if (dx === 0 && dy === 0) return;   // 原地：保持最后朝向
+    this.face = faceOf(dx, dy);
+    this.faceHoldT = 0;
+  }
+
   // 设置去 (tx,ty) 的路径；顺带处理"路被堵"→ 触发移山填海
+  // 浮点坐标取整必须用 Math.floor：负坐标段（出生区跨 y<0）用 |0 会向零截断错一行——
+  // 站在 y=-3 行草地上的居民被当成 y=-2 行的山体，寻路起点落在不可通行格上必败，
+  // 表现为「在粮仓门口活活渴死饿死」（开局连环死亡的真正根源，探针实锤）
   goTo(tx, ty) {
-    const r = findPath(this.x | 0, this.y | 0, tx, ty);
+    const sx = Math.floor(this.x), sy = Math.floor(this.y);
+    const r = findPath(sx, sy, tx, ty);
     if (r && r.path) {
       this.path = r.path; this.pi = 0;
       return true;
     }
+    // 起点受困检测：脚下连通块又小又不含目标（房/树/围栏/水面完工把人围进死角）→
+    // 挤到 2 格内最近的圈外开放格（施工缝隙）后重试寻路；找不到出口才标记受困 60s。
+    // 否则围困是连环死亡陷阱：受困者喝不到水吃不到粮必然病死，还会垄断救援掷骰、
+    // 把远处任务的 blockedCount 刷到冻结
+    let res = r;
+    if (r && !walkComponentHas(sx, sy, tx | 0, ty | 0)) {
+      const out = findEscapeSpot(sx, sy);
+      if (out) {
+        this.x = out.x + 0.5; this.y = out.y + 0.5;
+        logThrottled(`${this.name} 被施工围在了死角，从缝隙里挤了出来。`, 60);
+        res = findPath(Math.floor(this.x), Math.floor(this.y), tx, ty);
+        if (res && res.path) { this.path = res.path; this.pi = 0; return true; }
+      } else {
+        if (world.time >= (this.trapUntil || 0)) logThrottled(`${this.name} 被施工围在了死角，暂时动弹不得。`, 60);
+        this.trapUntil = world.time + 60;
+      }
+    }
     // 不可达：如果挡路的是山/水/树，有概率立项改造（协作修路的来源之一）
-    if (r && r.blocked && rand() < 0.6) {
-      const b = r.blocked;
+    if (res && res.blocked && rand() < 0.6) {
+      const b = res.blocked;
       const t = tileAt(b.x, b.y);
       const meta = TILE_META[t];
       if (meta.diggable) {
@@ -2481,13 +2791,17 @@ class Agent {
     const gx = target.x + 0.5, gy = target.y + 0.5;
     const dx = gx - this.x, dy = gy - this.y;
     const dist = Math.hypot(dx, dy);
-    const step = this.speed * dt;
+    const step = this.speed * dt * (this.drunkT > 0 ? SIM.DRUNK_SPEED_FACTOR : 1);   // 醉酒移速放缓
     if (dist <= step) {
       this.x = gx; this.y = gy;
       this.pi++;
     } else {
       this.x += (dx / dist) * step;
       this.y += (dy / dist) * step;
+    }
+    // 朝向：按本帧实际位移主轴更新——走 faceTurn 持锁迟滞（斜向阶梯步不抖动，反向即时掉头）
+    if (dist > 1e-6) {
+      faceTurn(this, dx, dy);
     }
   }
 
@@ -2507,7 +2821,7 @@ class Agent {
         chaseR = 5;
         const d = Math.hypot(gx + 0.5 - this.x, gy + 0.5 - this.y);
         if (d > 6) {
-          if (this.goTo(Math.round(gx), Math.round(gy))) { this.state = "walk"; this.onArrive = () => { this.state = "work"; }; }
+          if (this.goTo(Math.round(gx), Math.round(gy))) { this.state = "walk"; this.onArrive = () => { this.state = "work"; this.faceTo(gx + 0.5, gy + 0.5); }; }
           else this.abandonTask();
           return;
         }
@@ -2515,7 +2829,7 @@ class Agent {
     }
     const d = Math.abs((gx + 0.5) - this.x) + Math.abs((gy + 0.5) - this.y);
     if (d > chaseR) {
-      if (this.goTo(gx, gy)) { this.state = "walk"; this.onArrive = () => { this.state = "work"; }; }
+      if (this.goTo(gx, gy)) { this.state = "walk"; this.onArrive = () => { this.state = "work"; this.faceTo(gx + 0.5, gy + 0.5); }; }
       else this.abandonTask();
       return;
     }
@@ -2576,6 +2890,54 @@ class Agent {
     }
     this.energy -= SIM.ENERGY_DECAY * dt * 0.5;
   }
+}
+
+// 起点连通块是否覆盖目标（容量 41 的局部 flood fill）：块小且不含目标 = 起点被施工围死；
+// 块达到 41 上限即视为健康（大组件必有出路，远处/窗外目标不可达属正常失败，不判受困）
+function walkComponentHas(sx, sy, tx, ty, cap) {
+  cap = cap || 41;
+  const seen = new Set([sx + "," + sy]);
+  const q = [[sx, sy]];
+  while (q.length) {
+    const [cx, cy] = q.pop();
+    if (cx === tx && cy === ty) return true;
+    for (const p of neighborsOf(cx, cy)) {
+      const k = p.x + "," + p.y;
+      if (seen.has(k) || !walkable(p.x, p.y)) continue;
+      if (seen.size >= cap) return true;   // 上限封顶：组件足够大，不判受困
+      seen.add(k); q.push([p.x, p.y]);
+    }
+  }
+  return false;
+}
+
+// 受困脱身：从 (sx,sy) 螺旋 2 格内找第一个「不在脚下小连通块里」的可站立格（刚围拢的施工缝隙）。
+// 确定性扫描（环序、dy 主序），无出口返回 null（调用方转受困标记等待周边改造）
+function findEscapeSpot(sx, sy) {
+  const seen = new Set();
+  {
+    const q = [[sx, sy]];
+    seen.add(sx + "," + sy);
+    while (q.length && seen.size < 41) {
+      const [cx, cy] = q.pop();
+      for (const p of neighborsOf(cx, cy)) {
+        const k = p.x + "," + p.y;
+        if (seen.has(k) || !walkable(p.x, p.y)) continue;
+        seen.add(k); q.push([p.x, p.y]);
+      }
+    }
+  }
+  for (let rr = 1; rr <= 2; rr++) {
+    for (let dy = -rr; dy <= rr; dy++) {
+      for (let dx = -rr; dx <= rr; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== rr) continue;   // 只扫当前圈
+        const x = sx + dx, y = sy + dy;
+        if (seen.has(x + "," + y) || !walkable(x, y)) continue;
+        return { x, y };
+      }
+    }
+  }
+  return null;
 }
 
 // 螺旋向外找最近的前沿格：可站立陆地且 4 邻含 VOID（探索者的目标点；只扫局部，成本受 maxR 约束）
@@ -2664,7 +3026,10 @@ function nearestFoodTo(x, y, exclude) {
     const d = Math.abs(px - x) + Math.abs(py - y);
     if (d < bestD) { bestD = d; best = { x: px, y: py }; }
   };
-  for (const f of world.farms) consider(f.x, f.y);
+  for (const f of world.farms) {
+    if (f.crop === "coffee") continue;   // 咖啡田不产粮：不算进食点
+    consider(f.x, f.y);
+  }
   for (const h of world.houses) {
     if (!h.granary) continue;
     consider(h.x, h.y);
@@ -2736,9 +3101,43 @@ function localFacilities(list, settle) {
   if (!settle) return list;
   return list.filter(o => ownerSettle(o.x, o.y) === settle);
 }
+
+// 新式设施（水井/酒坊/压榨坊/烘焙坊）立项时一律立在各城粮仓周边（半径 ≤8 格），
+// 因此检索不必扫全图：遍历粮仓、扫其 9 格邻域即可覆盖全域（世界对象不设 wells/breweries 平行数组，tile 即真相）
+function facilityNear(cx, cy, type) {
+  for (let dy = -9; dy <= 9; dy++)
+    for (let dx = -9; dx <= 9; dx++)
+      if (tileAt(cx + dx, cy + dy) === type) return { x: cx + dx, y: cy + dy };
+  return null;
+}
+// 全域第一座指定设施（逐粮仓扫描，找到即早退）
+function findFacility(type) {
+  for (const h of world.houses) {
+    if (!h.granary) continue;
+    const p = facilityNear(h.x, h.y, type);
+    if (p) return p;
+  }
+  return null;
+}
+// 指定聚落辖区内的设施（按粮仓归属聚落过滤）
+function settlementFacility(s, type) {
+  for (const h of world.houses) {
+    if (!h.granary || ownerSettle(h.x, h.y) !== s) continue;
+    const p = facilityNear(h.x, h.y, type);
+    if (p) return p;
+  }
+  return null;
+}
+// 饮品链库存全域汇总（water/juice/beer/coffee/beans：逐城 ensureStock 兜底后求和，世界不设全局池）
+function totalStockOf(res) {
+  return world.settlements.reduce((sum, s) => sum + (ensureStock(s)[res] || 0), 0);
+}
+
 function plannerTick() {
   const pop = agents.length;
   const homeless = agents.filter(a => !a.home).length;
+  // 产粮田数：咖啡田（crop==="coffee"）不产粮，排除出粮食产能口径；边界与阈值系数保持原样
+  const foodFarms = world.farms.filter(f => !f.crop).length;
 
   // 1. 住房前瞻：容量余量不足（或已有人无家）→ 建房；选址失败说明本区
   //    已无立足之地 → 直接开辟新区。房屋富余（够住且多 3 间以上）则不新建
@@ -2764,7 +3163,7 @@ function plannerTick() {
       const anchor = c || pickAnchor();
       const ref = nearestOf(localFacilities(world.houses, nearestSettlement(anchor.x, anchor.y)), anchor);
       s = (ref && expandSpot(ref, 2, 6, T.GRASS)) ||
-          (c && findSpot(c.x | 0, c.y | 0, 2, 14, T.GRASS)) ||
+          (c && findSpot(Math.floor(c.x), Math.floor(c.y), 2, 14, T.GRASS)) ||
           findSpot(anchor.x, anchor.y, 3, 18, T.GRASS);
     }
     if (s) {
@@ -2779,7 +3178,7 @@ function plannerTick() {
 
   // 2. 粮食压力 → 多渠道补粮：农田 / 浆果采集 / 狩猎 / 畜牧（城邦解锁）
   //    选址偏好：同聚落内农田连片（新田挨着已有农田 3 格内，田可紧贴成片），跨聚落不要求
-  if (world.farms.length * 6 < pop + 8 && tasksPending("FARM", true).length < 2) {
+  if (foodFarms * 6 < pop + 8 && tasksPending("FARM", true).length < 2) {
     let s = null;
     for (const st of world.settlements) {
       if (!st.zones) continue;
@@ -2987,6 +3386,126 @@ function plannerTick() {
       }
     }
   }
+  // 2f. 饮品链（时代解锁）：水井/打水 era≥1，酒坊/压榨坊 era≥2，烘焙坊/咖啡田 era≥3。
+  //     新式建筑各城限 1 座（先建人口最多的城），立项前查全域 tile + pending 防重；
+  //     触发阈值全部是库存/数量的确定性条件，不引入新的概率门（随机流保持原样）
+  if (world.era >= 1 && pop >= 8) {
+    // 人口最多的聚落（平局取先出现者，确定性）及其粮仓锚点：新式建筑一律立粮仓周边草地
+    let metro = null, metroPop = -1;
+    for (const s of world.settlements) {
+      const n = agents.filter(a => !a.dead && ownerSettle(a.x, a.y) === s).length;
+      if (n > metroPop) { metroPop = n; metro = s; }
+    }
+    if (metro) {
+      const g = world.houses.find(h => h.granary && ownerSettle(h.x, h.y) === metro) || metro;
+      // 水井：全域唯一，打水解渴的源头（pop≥8 才立项，小聚落就近吃塘水/雨水）
+      if (!findFacility(T.WELL) && tasksPending("WELL", true).length < 1) {
+        const spot = expandSpot(g, 1, 6, T.GRASS) || findSpot(g.x, g.y, 1, 8, T.GRASS);
+        if (spot) {
+          tasksAdd({ type: "WELL", x: spot.x, y: spot.y });
+          logThrottled(`规划署在「${metro.name}」的粮仓旁打了一口水井。`, 20);
+        }
+      }
+      // 酒坊（城邦解锁）
+      if (world.era >= 2 && !findFacility(T.BREWERY) && tasksPending("BREWERY", true).length < 1) {
+        const spot = expandSpot(g, 1, 6, T.GRASS) || findSpot(g.x, g.y, 1, 8, T.GRASS);
+        if (spot) {
+          tasksAdd({ type: "BREWERY", x: spot.x, y: spot.y });
+          logThrottled(`规划署在「${metro.name}」的粮仓旁筹建酒坊。`, 20);
+        }
+      }
+      // 压榨坊（城邦解锁）
+      if (world.era >= 2 && !findFacility(T.PRESS) && tasksPending("PRESS", true).length < 1) {
+        const spot = expandSpot(g, 1, 6, T.GRASS) || findSpot(g.x, g.y, 1, 8, T.GRASS);
+        if (spot) {
+          tasksAdd({ type: "PRESS", x: spot.x, y: spot.y });
+          logThrottled(`规划署在「${metro.name}」的粮仓旁筹建压榨坊。`, 20);
+        }
+      }
+      // 烘焙坊（文明解锁）
+      if (world.era >= 3 && !findFacility(T.ROASTERY) && tasksPending("ROASTERY", true).length < 1) {
+        const spot = expandSpot(g, 1, 6, T.GRASS) || findSpot(g.x, g.y, 1, 8, T.GRASS);
+        if (spot) {
+          tasksAdd({ type: "ROASTERY", x: spot.x, y: spot.y });
+          logThrottled(`规划署在「${metro.name}」的粮仓旁筹建烘焙坊。`, 20);
+        }
+      }
+    }
+  }
+  // 打水：全域存水低于人口底线（pop×0.4）→ 在存水最少的有井之城立项（无井则跳过，靠上面先建井）
+  if (world.era >= 1 && totalStockOf("water") < pop * 0.4 && tasksPending("FETCH_WATER", true).length < 2) {
+    let city = null, well = null, least = 1e9;
+    for (const s of world.settlements) {
+      const w = settlementFacility(s, T.WELL);
+      if (!w) continue;
+      const sw = ensureStock(s).water || 0;
+      if (sw < least) { least = sw; city = s; well = w; }
+    }
+    if (well) {
+      const shore = neighborsOf(well.x, well.y).find(p => walkable(p.x, p.y));
+      if (shore) {
+        tasksAdd({ type: "FETCH_WATER", x: shore.x, y: shore.y });
+        logThrottled(`「${city.name}」的水缸见底了，居民挑起水桶去井边打水。`, 20);
+      }
+    }
+  }
+  // 酿酒：粮食富余（与丰收宴席同一条富余线，先吃饱再酿酒）且有酒坊 → 酿一桶麦酒
+  if (world.era >= 2 && totalFood() > 60 + pop * 5 && totalStockOf("beer") < pop / 12 &&
+      tasksPending("BREW_BEER", true).length < 1) {
+    const br = findFacility(T.BREWERY);
+    const spot = br && neighborsOf(br.x, br.y).find(p => walkable(p.x, p.y));
+    if (spot) {
+      tasksAdd({ type: "BREW_BEER", x: spot.x, y: spot.y });
+      logThrottled("酒坊飘出麦香，一桶新酒正在酝酿。", 20);
+    }
+  }
+  // 榨汁：有压榨坊且果汁不足（原料成本检查在 tasksTake，规划只看结果库存）
+  if (world.era >= 2 && totalStockOf("juice") < pop / 12 && tasksPending("PRESS_JUICE", true).length < 1) {
+    const pr = findFacility(T.PRESS);
+    const spot = pr && neighborsOf(pr.x, pr.y).find(p => walkable(p.x, p.y));
+    if (spot) {
+      tasksAdd({ type: "PRESS_JUICE", x: spot.x, y: spot.y });
+      logThrottled("压榨坊开工，鲜果正在榨汁入桶。", 20);
+    }
+  }
+  // 烘咖啡：烘焙坊在、咖啡豆够烘一炉（全域 ≥2）且咖啡存量不足
+  if (world.era >= 3 && totalStockOf("beans") >= 2 && totalStockOf("coffee") < pop / 15 &&
+      tasksPending("BREW_COFFEE", true).length < 1) {
+    const ro = findFacility(T.ROASTERY);
+    const spot = ro && neighborsOf(ro.x, ro.y).find(p => walkable(p.x, p.y));
+    if (spot) {
+      tasksAdd({ type: "BREW_COFFEE", x: spot.x, y: spot.y });
+      logThrottled("烘焙坊里咖啡豆噼啪作响，浓香飘满了小世界。", 20);
+    }
+  }
+  // 咖啡田扩种：文明时代咖啡田不足（人口/20）→ 近水草地新垦（选址同开荒：农业分区聚簇 → 锚点兜底）
+  if (world.era >= 3) {
+    const coffeeFarms = world.farms.filter(f => f.crop === "coffee").length;
+    if (coffeeFarms < pop / 20 && !tasksPending("FARM", true).some(t => t.crop === "coffee")) {
+      let s = null;
+      for (const st of world.settlements) {
+        if (!st.zones) continue;
+        const z = st.zones.find(z => z.type === "farm");
+        if (z) {
+          const ref = nearestOf(localFacilities(world.farms, st), z);
+          s = (ref && expandSpot(ref, 1, 6, T.GRASS)) ||
+              findSpot(z.x, z.y, 0, z.r, T.GRASS, [T.HOUSE, T.SITE]);
+          if (s) break;
+        }
+      }
+      if (!s) {
+        const a = pickAnchor();
+        const ref = nearestOf(localFacilities(world.farms, nearestSettlement(a.x, a.y)), a);
+        s = (ref && expandSpot(ref, 1, 6, T.GRASS)) ||
+            findSpot(a.x, a.y, 4, 18, T.GRASS, [T.HOUSE, T.SITE]);
+      }
+      // 咖啡田同样要灌溉：选址 5 格内无水则本轮放弃（不为咖啡挖塘，水源优先保粮食田）
+      if (s && nearAny(s.x, s.y, [T.WATER, T.DEEP], 5)) {
+        tasksAdd({ type: "FARM", x: s.x, y: s.y, need: 9, crop: "coffee" });
+        logThrottled("规划署批准开垦一片咖啡田，异域的香气将在这里生根。", 20);
+      }
+    }
+  }
   // 2g. 浆果可持续：丛数低于人口需求（且有丛可采种）→ 培育新丛
   const berryTotal = world.berryStock.size;
   const berryHealthy = [...world.berryStock.values()].filter(v => v >= 1).length;
@@ -3040,7 +3559,7 @@ function plannerTick() {
   if (world.time - (_frontierCd || -999) > 30) {
     _frontierCd = world.time;
     for (const e of agents.filter(a => !a.dead && a.job === "explorer" && a.home && !a.voyaging)) {
-      const front = findFrontier(e.home.x | 0, e.home.y | 0, 60);
+      const front = findFrontier(Math.floor(e.home.x), Math.floor(e.home.y), 60);
       if (!front) continue;
       const dHome = Math.abs(front.x - e.home.x) + Math.abs(front.y - e.home.y);
       if (dHome <= 50) continue;   // 家离前沿足够近
@@ -3070,7 +3589,8 @@ function plannerTick() {
   //    出生安全垫随人口放大（food > 100 + 人口×4），防止出生率超过承载力引发饿死潮
   //    BIRTH_CHECK 是每秒概率，规划器每 PLANNER_INTERVAL 秒才判一次，需换算成窗口概率
   const hasRoom = world.houses.length * 3 > pop;
-  if (pop > 0 && totalFood() > 40 && world.farms.length * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
+  // 出生线（死锁 #4/#10 的含等号边界）：产粮田×5 >= 人口+4；coffee 田不产粮不计入，只做排除、边界语义不变
+  if (pop > 0 && totalFood() > 40 && foodFarms * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
     // 亲子：出生序号确定性选亲（hash2 不消耗 rand 流，保证固定种子回归与旧版逐位一致）
     const seq = (world.birthSeq = (world.birthSeq || 0) + 1);
     const mothers = agents.filter(a => !a.dead && a.sex === "f" && a.age >= 16 && a.age <= 45);   // 育龄母池（0 岁新生儿天然不在内）
@@ -3117,7 +3637,9 @@ function plannerTick() {
     if ((t.blockedCount || 0) < 3) continue;
     t.freezeAge = (t.freezeAge || 0) + SIM.PLANNER_INTERVAL;
 
-    if (t.freezeAge >= 180 && (t.type === "BUILD" || t.type === "FARM" || t.type === "FILL")) {
+    // 新式饮品建筑与建房同款：累计冻结 180s 仍无法施工 → 放弃恢复草地，释放名额（防堵死饮品链）
+    if (t.freezeAge >= 180 && (t.type === "BUILD" || t.type === "FARM" || t.type === "FILL" ||
+        t.type === "WELL" || t.type === "BREWERY" || t.type === "PRESS" || t.type === "ROASTERY")) {
       setTile(t.x, t.y, t.type === "FILL" ? T.WATER : T.GRASS);   // 填海放弃恢复为水
       tasks.list.splice(i, 1);
       logThrottled("规划署放弃了一处无法施工的地块。", 60);
@@ -3276,10 +3798,14 @@ function farmTick(dt) {
     }
     if (!f.irrigated) continue;   // 缺水：停止生长（不倒退，等水来了继续）
     f.grow += dt;
-    if (f.grow >= SIM.FARM_MATURITY) {
+    // 咖啡田走独立成熟周期与产出：产咖啡豆（不产粮，不进粮食产能口径）
+    if (f.grow >= (f.crop === "coffee" ? SIM.COFFEE_MATURITY : SIM.FARM_MATURITY)) {
       f.grow = 0;
       const st = ownerSettle(f.x, f.y);
-      if (st) ensureStock(st).food += SIM.FARM_YIELD;   // 粮食进所属城市库存
+      if (st) {
+        if (f.crop === "coffee") ensureStock(st).beans += SIM.COFFEE_YIELD;   // 咖啡豆进所属城市库存
+        else ensureStock(st).food += SIM.FARM_YIELD;   // 粮食进所属城市库存
+      }
       f.flash = 0.6; // 成熟闪光（渲染用）
     }
     if (f.flash > 0) f.flash -= dt;
@@ -3341,7 +3867,9 @@ function jobMarketTick(pop) {
     builder:     tasksPending("BUILD", true).length + tasksPending("PASTURE", true).length +
                  tasksPending("DOCK", true).length + tasksPending("QUARRY", true).length +
                  tasksPending("SANDPIT", true).length + tasksPending("PLANT", true).length +
-                 tasksPending("PLANT_BERRY", true).length,
+                 tasksPending("PLANT_BERRY", true).length +
+                 tasksPending("WELL", true).length + tasksPending("BREWERY", true).length +
+                 tasksPending("PRESS", true).length + tasksPending("ROASTERY", true).length,
     explorer:    1,   // 探索自有行为，恒有需求
   };
   const workers = {};

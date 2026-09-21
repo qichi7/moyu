@@ -8,6 +8,7 @@ const T = {
   MOUNTAIN: 6, FARM: 7, HOUSE: 8, PATH: 9, SITE: 10, BRIDGE: 11,
   BERRY: 12, FRUIT: 13, PASTURE: 14, CAVE: 15, CLIFF: 16, FENCE: 17,
   QUARRY: 18, SANDPIT: 19, DOCK: 20,
+  WELL: 21, BREWERY: 22, PRESS: 23, ROASTERY: 24,
 };
 
 const TILE_META = {
@@ -32,6 +33,10 @@ const TILE_META = {
   [T.QUARRY]:   { name: "采石场", color: "#8d8478", walk: true, h: 0 },
   [T.SANDPIT]:  { name: "沙场", color: "#d8c890", walk: true, h: 0 },
   [T.DOCK]:     { name: "码头", color: "#8a6a42", walk: true, h: 0 },
+  [T.WELL]:     { name: "水井",   color: "#8f9aa3", walk: false, h: 0 },
+  [T.BREWERY]:  { name: "酒坊",   color: "#7a4a3a", walk: false, h: 0 },
+  [T.PRESS]:    { name: "压榨坊", color: "#6a7a4a", walk: false, h: 0 },
+  [T.ROASTERY]: { name: "烘焙坊", color: "#5a4a3a", walk: false, h: 0 },
 };
 
 const WORLD_W = 240, WORLD_H = 180;
@@ -82,6 +87,23 @@ const SIM = {
   BOAT_HOLD_CAP: 20,          // 渔船满舱载鱼量（粮）
   BOAT_FISH_YIELD: 2,         // 渔船每次起网渔获
   FISHING_INTERVAL: 10,       // 渔船起网周期（秒）
+  // ---- 口渴与饮品 ----
+  THIRST_DECAY: 1.4,          // 口渴每秒下降（walk 实际 ≈1.32/s：直饮 +70 约撑 50s，避免全民 24s 一渴的循环）
+  STATE_HUNGER: { idle: 1.0, walk: 1.15, run: 1.5, work: 1.45, sleep: 0.5 },  // 饥饿衰减按状态倍率（睡觉减半）
+  STATE_ENERGY: { idle: 0.85, walk: 1.1, run: 1.6, work: 1.35 },              // 体力衰减按状态倍率（睡觉不衰减，走 ENERGY_REGEN 恢复）
+  STATE_THIRST: { idle: 1.0, walk: 1.2, run: 1.5, work: 1.3, sleep: 0.55 },   // 口渴衰减按状态倍率
+  DRINK_RESTORE: { water: 55, juice: 75, beer: 60, coffee: 50 },              // 各饮品一次饮用的解渴量（清水 75：约抵 57s walk 消耗）
+  DRUNK_TIME: 40,             // 醉酒状态持续时间（秒）
+  COFFEE_TIME: 120,           // 咖啡因提神持续时间（秒）
+  COFFEE_ENERGY_FACTOR: 0.55, // 咖啡因期间体力衰减倍率
+  BEER_HUNGER_FACTOR: 0.85,   // 醉酒期间饥饿衰减倍率（酒能顶饿）
+  DRUNK_SPEED_FACTOR: 0.65,   // 醉酒移动速度倍率
+  DEHYDRY_TIME: 40,           // 口渴归零后的脱水耐受时长（秒），超时进入脱水伤害
+  SAFE_THIRST: 12,            // 行程预算：按当前路径走完时渴值预计低于此 → 中途弃程先喝水（防隧道视野渴死）
+  SAFE_HUNGER: 8,             // 行程预算：按当前路径走完时饥饿预计低于此 → 中途弃程先吃饭
+  // ---- 咖啡田 ----
+  COFFEE_MATURITY: 90,        // 咖啡田成熟秒数（粮食田用 FARM_MATURITY）
+  COFFEE_YIELD: 2,            // 咖啡田每次成熟产豆量
   // ---- 历法与年龄 ----
   YEAR_DAYS: 12,        // 1 昼夜 = 1 个月，12 昼夜 = 1 年（1 岁）
 };

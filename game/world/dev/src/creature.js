@@ -40,6 +40,8 @@ class Creature {
     this.dead = false;
     this.age = spAge ? randRange(spAge.stages[1], spAge.stages[2]) : 1;   // 初始青年~中年（无寿命表物种兜底）
     this.pasture = null;      // {x,y} 圈养位置（null = 野生）
+    this.face = "down";       // 朝向：up/down/left/right（stepToward 实际位移后更新）
+    this.faceHoldT = 1;       // 朝向持锁计时：1 = 不持锁（首次设向不受锁），切换后归 0 重新计锁（与 agent 同口径）
     this.moveCd = randRange(0, 2);
     this.breedCd = 120;
     this.outputCd = SIM.PASTURE_INTERVAL;
@@ -49,6 +51,8 @@ class Creature {
 
   update(dt) {
     if (this.dead) return;
+    // 朝向持锁计时累计（+dt 封顶 1；undefined 视为 1 首次不受锁）——faceTurn 的非反向变向闸门
+    this.faceHoldT = Math.min(1, (this.faceHoldT === undefined ? 1 : this.faceHoldT) + dt);
     // 被人搬运：坐标跟随搬运者，跳过一切自主行为（搬运者死亡则掉落原地）
     if (this.carriedBy) {
       if (this.carriedBy.dead) { this.carriedBy = null; return; }
@@ -105,7 +109,9 @@ class Creature {
         const sp = (dogNear ? 0.55 : meta.flee) * tired * dt;
         const dx = this.x - threat.x, dy = this.y - threat.y;
         const d = Math.hypot(dx, dy) || 1;
+        const fox = this.x, foy = this.y;
         this.moveBy((dx / d) * sp, (dy / d) * sp);
+        if (this.x !== fox || this.y !== foy) this.updateFace(dx, dy);   // 朝向=逃跑方向（dx/dy 本就是背离威胁的背向向量）；实际位移才更新——与 stepToward 同口径
         return;
       }
       this.fleeT = 0;
@@ -123,8 +129,10 @@ class Creature {
       const dx = this.target.x - this.x, dy = this.target.y - this.y;
       const d = Math.hypot(dx, dy) || 1;
       const sp = meta.speed * dt;
+      const ox = this.x, oy = this.y;
       const nx = this.x + (dx / d) * sp, ny = this.y + (dy / d) * sp;
       if (habitatOk(this, Math.round(nx), Math.round(ny))) { this.x = nx; this.y = ny; }
+      if (this.x !== ox || this.y !== oy) this.updateFace(dx, dy);   // 实际位移才更新（被栖息地挡住则保持）——与 stepToward 同口径
       if (d <= sp) this.target = null;
     }
   }
@@ -154,8 +162,10 @@ class Creature {
       const dx = this.target.x - this.x, dy = this.target.y - this.y;
       const d = Math.hypot(dx, dy) || 1;
       const sp = CREATURE_META[this.type].speed * dt;
+      const ox = this.x, oy = this.y;
       const nx = this.x + (dx / d) * sp, ny = this.y + (dy / d) * sp;
       if (habitatOk(this, Math.round(nx), Math.round(ny))) { this.x = nx; this.y = ny; }
+      if (this.x !== ox || this.y !== oy) this.updateFace(dx, dy);   // 同 updateWild：实际位移才更新朝向
       if (d <= sp) this.target = null;
     }
   }
@@ -241,8 +251,20 @@ class Creature {
   stepToward(t, step) {
     const dx = t.x - this.x, dy = t.y - this.y;
     const d = Math.hypot(dx, dy);
-    if (d <= step) { this.x = t.x; this.y = t.y; this.target = null; return; }
+    if (d <= step) {
+      this.x = t.x; this.y = t.y; this.target = null;
+      if (d > 1e-6) this.updateFace(dx, dy);
+      return;
+    }
+    const ox = this.x, oy = this.y;
     this.moveBy((dx / d) * step, (dy / d) * step);
+    if (this.x !== ox || this.y !== oy) this.updateFace(dx, dy);   // 实际位移了才更新朝向（被栖息地挡住不动则保持）
+  }
+
+  // 朝向：按实际位移主轴更新——走 faceTurn 持锁迟滞（与小人 stepAlong 同口径；
+  // stepToward 的「实际位移才更新」判定保留在外层不动）
+  updateFace(dx, dy) {
+    faceTurn(this, dx, dy);
   }
 
   moveBy(mx, my) {

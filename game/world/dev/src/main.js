@@ -236,6 +236,7 @@
     updateHud(realDt);
     updateInfoPanel(realDt);
     updateRoster(realDt);
+    updateActivity(realDt);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -247,7 +248,7 @@
     build: el("build-id"), era: el("stat-era"),
     rate: el("stat-rate"), rateBox: el("rate-box"),
   };
-  let lastLogLen = -1, hudCd = 0;
+  let lastLogSeq = -1, hudCd = 0;
 
   function updateHud(dt) {
     hudCd -= dt;
@@ -278,8 +279,11 @@
     const mm = String(Math.floor((tod * 24 % 1) * 60)).padStart(2, "0");
     hud.clock.textContent = `${isDaytime() ? "☀" : "☾"} ${hh}:${mm}`;
 
-    if (world.logs.length !== lastLogLen) {
-      lastLogLen = world.logs.length;
+    // 日志刷新判据用单调计数器 logSeq：logs 截断到 200 条后 length 恒定，
+    // 旧 length 判据会导致面板永久停更（logSeq 未接入时容错回退 length）
+    const logSeq = world.logSeq || world.logs.length;
+    if (logSeq !== lastLogSeq) {
+      lastLogSeq = logSeq;
       hud.logs.innerHTML = world.logs
         .map(l => `<div class="log-line"><span class="log-t">D${Math.floor(l.t / SIM.DAY_LEN) + 1}</span>${l.text}</div>`)
         .join("");
@@ -330,13 +334,15 @@
     };
   };
 
-  const TASK_CN = { BUILD: "建造房屋", FARM: "开垦农田", DIG: "开山伐林", FILL: "填海造陆", BRIDGE: "架桥", GATHER: "采集", FISH: "捕鱼", HUNT: "狩猎", CAPTURE: "捕获", PASTURE: "建造牧场", PLANT: "植树", EXCAV: "挖塘" };
-  const STATE_CN = { walk: "赶路中", eat: "进食", sleep: "酣睡", work: "干活", idle: "闲逛", voyage: "航海中" };
+  const TASK_CN = { BUILD: "建造房屋", FARM: "开垦农田", DIG: "开山伐林", FILL: "填海造陆", BRIDGE: "架桥", GATHER: "采集", FISH: "捕鱼", HUNT: "狩猎", CAPTURE: "捕获", PASTURE: "建造牧场", PLANT: "植树", EXCAV: "挖塘", WELL: "打水井", BREWERY: "建造酒坊", PRESS: "建造压榨坊", ROASTERY: "建造烘焙坊", FETCH_WATER: "打水", BREW_BEER: "酿酒", PRESS_JUICE: "榨汁", BREW_COFFEE: "烘焙咖啡" };
+  const STATE_CN = { walk: "赶路中", eat: "进食", sleep: "酣睡", work: "干活", idle: "闲逛", voyage: "航海中", drink: "喝水" };
   const SETTLE_CN = ["定居点", "村庄", "城镇", "城市"];
 
   // ---- 信息档位命名 ----
   const hungerTier = h => h > 75 ? "吃饱了" : h > 50 ? "不饿" : h > 25 ? "有点饿" : h > 10 ? "饥饿" : "危在旦夕";
   const energyTier = e => e > 65 ? "精力充沛" : e > 30 ? "有些疲惫" : "筋疲力尽";
+  // 渴值档位：thirst(0-100) 越高越水润，≤10 已是干渴难忍（与饥饿"危在旦夕"同级的最终档）
+  const thirstTier = th => th > 75 ? "水润" : th > 50 ? "不渴" : th > 25 ? "有点渴" : th > 10 ? "口渴" : "干渴难忍";
   const adventureTier = v => v > 0.75 ? "天生探险家" : v > 0.5 ? "向往外面" : v > 0.25 ? "安分守己" : "家里蹲";
   const diligenceTier = v => v > 0.8 ? "工作狂" : v > 0.55 ? "勤快" : v > 0.3 ? "随大流" : "偷奸耍滑";
   const healthTier = a => a.sick ? "生病了" : hungerTier(a.hunger) === "危在旦夕" || energyTier(a.energy) === "筋疲力尽" ? "状态很差" : "健康";
@@ -399,8 +405,12 @@
   function showTilePanel(tx, ty, cx, cy) {
     const t = tileAt(tx, ty);
     const meta = TILE_META[t];
-    // 人工水格：EXCAV 挖出来的显示为池塘（水源），天然水仍叫浅海
-    const name = (t === T.WATER && world.ponds.has(tx + "," + ty)) ? "池塘 · 水源" : meta.name;
+    // 人工水格：EXCAV 挖出来的显示为池塘（水源），天然水仍叫浅海——池塘优先于河流
+    // 河流：carveRiver 标记的水格（world.rivers 可能尚未接入，需容错）
+    let name;
+    if (t === T.WATER && world.ponds.has(tx + "," + ty)) name = "池塘 · 水源";
+    else if (t === T.WATER && world.rivers && world.rivers.has(tx + "," + ty)) name = "河流 · 水源";
+    else name = meta ? meta.name : "建筑";   // 新建筑 tile 的 TILE_META 未落地时兜底
     const lines = [];
     // 所属地区：岛屿归属 + 聚落辖区
     for (const o of world.islands) {
@@ -414,8 +424,8 @@
     } else if (t === T.FARM) {
       const f = world.farms.find(k => k.x === tx && k.y === ty);
       if (f) lines.push("成熟进度 " + Math.floor(f.grow / SIM.FARM_MATURITY * 100) + "%");
-    } else if (meta.diggable) lines.push("可开凿 · 工时 " + meta.hp);
-    else if (meta.fillable) lines.push("可" + (meta.bridgeable ? "架桥/填埋" : "填埋") + " · 工时 " + meta.hp);
+    } else if (meta && meta.diggable) lines.push("可开凿 · 工时 " + meta.hp);
+    else if (meta && meta.fillable) lines.push("可" + (meta.bridgeable ? "架桥/填埋" : "填埋") + " · 工时 " + meta.hp);
     const task = tasks.list.find(k => !k.done && k.x === tx && k.y === ty);
     if (task) {
       const p = task.need ? " " + Math.floor(Math.min(1, task.progress / task.need) * 100) + "%" : " 施工中";
@@ -431,6 +441,8 @@
   function agentPanelHtml(a) {
     const foodC = a.hunger > 40 ? "#6fae4e" : a.hunger > 15 ? "#e0b64a" : "#c23b3b";
     const enC = a.energy > 35 ? "#5a8fd0" : "#c2623b";
+    // 渴值条配色：青蓝系梯度——充足时明亮青蓝，干渴时转为灰蓝示警
+    const thirstC = a.thirst > 40 ? "#4aa0c2" : a.thirst > 15 ? "#7ab8cc" : "#8ba0ac";
     const home = a.home ? (() => {
       const s = settleOf(a.home.x, a.home.y);
       return s ? s.name : "自宅";
@@ -438,12 +450,17 @@
     const RES_CN = { food: "粮", wood: "木材", stone: "石材", sand: "沙土" };
     const carry = a.carrying ? `<br>背着：${RES_CN[a.carrying.res] || a.carrying.res} ×${a.carrying.amount}（回仓入库中）` : "";
     return `职业：${JOBS_CN[a.job] || a.job}<br>` +
-      `状态：${a.sick ? "生病了" : (STATE_CN[a.state] || a.state)}${a.task ? "（" + TASK_CN[a.task.type] + "）" : ""}<br>` +
+      `状态：${a.sick ? "生病了" : (STATE_CN[a.state] || a.state)}${a.task ? "（" + TASK_CN[a.task.type] + "）" : ""}${a.drunkT > 0 ? "（醉醺醺）" : ""}${a.coffeeT > 0 ? "（咖啡提神）" : ""}` +
+      // 搬运动物标注：rescuing 指向被困动物且 carriedBy 是自己时正在搬运（物种名查不到则兜底泛称）
+      (a.rescuing && a.rescuing.carriedBy === a ? (CREATURE_META[a.rescuing.type] ? "（搬运中：移动" + CREATURE_META[a.rescuing.type].name + "）" : "（搬运动物中）") : "") +
+      `<br>` +
       `年龄：${Math.floor(a.age)} 岁 · ${ageTier(a.age, "human")}<br>` +
       `性别：${a.sex === "f" ? "女" : "男"}<br>` +
       ((a.father || a.mother) ? `父母：${[a.father, a.mother].filter(Boolean).join(" · ")}<br>` : "") +
       `健康：${healthTier(a)}<br>` +
       `饱食：${hungerTier(a.hunger)}<div class="ip-bar"><div style="width:${a.hunger}%;background:${foodC}"></div></div>` +
+      // 渴值条：thirst 未接入（undefined/null）时整行不显示，避免出现 NaN
+      (a.thirst == null ? "" : `渴值：${thirstTier(a.thirst)}<div class="ip-bar"><div style="width:${a.thirst}%;background:${thirstC}"></div></div>`) +
       `精力：${energyTier(a.energy)}<div class="ip-bar"><div style="width:${a.energy}%;background:${enC}"></div></div>` +
       `探索欲：${adventureTier(a.adventure)}<br>` +
       `勤劳：${diligenceTier(a.diligence)}<br>` +
@@ -592,7 +609,7 @@
         const cows = livestock.filter(c => c.type === "cow").length;
         const goats = livestock.length - cows;
         html += `<div class="roster-names">` +
-          `<div class="roster-res">木<b>${stock.wood}</b> 石<b>${stock.stone}</b> 沙<b>${stock.sand}</b> 粮<b>${Math.floor(stock.food || 0)}</b></div>` +
+          `<div class="roster-res">木<b>${stock.wood}</b> 石<b>${stock.stone}</b> 沙<b>${stock.sand}</b> 粮<b>${Math.floor(stock.food || 0)}</b> 水<b>${stock.water || 0}</b> 饮<b>${stock.juice || 0}</b> 酒<b>${stock.beer || 0}</b> 咖<b>${stock.coffee || 0}</b></div>` +
           `<div class="roster-res">圈养牲畜<b>${livestock.length}</b>（牛 ${cows} · 羊 ${goats}）</div>` +
           (residents.length ? residents.map(nameLine).join("") : `<div class="roster-res">（尚无居民定居）</div>`) +
           `</div>`;
@@ -639,6 +656,71 @@
       ).join("") + `</div>`;
     }
     rosterBody.innerHTML = html;
+  }
+
+  // ---- 世界动态面板：活动目录纯派生（只读逻辑层状态，不改任何逻辑），0.6s 节流 ----
+  const activityBody = el("activity-body");
+  let actCd = 0;
+  const ACT_CN = { voyage: "航海", drunk: "喝酒", coffee: "喝咖啡", water: "喝水", fish: "垂钓", rescue: "搬运动物", shepherd: "牧羊", brew: "酿造", explore: "探索" };
+  // 活动判据汇总：一人可同属多项；只统计存活居民
+  function collectActivities() {
+    const map = {};
+    for (const k in ACT_CN) map[k] = [];
+    for (const a of agents) {
+      if (a.dead) continue;
+      if (a.state === "voyage") map.voyage.push(a);
+      if ((a.drunkT || 0) > 0) map.drunk.push(a);
+      if ((a.coffeeT || 0) > 0) map.coffee.push(a);
+      if (a.state === "drink") map.water.push(a);
+      if (a.state === "work" && a.task && a.task.type === "FISH") map.fish.push(a);
+      if (a.rescuing && a.rescuing.carriedBy === a) map.rescue.push(a);
+      if (a.hobby === "animal" && creatures.some(c => c.pasture && !c.dead && Math.hypot(c.x - a.x, c.y - a.y) < 4)) map.shepherd.push(a);
+      if (a.state === "work" && a.task && ["BREW_BEER", "PRESS_JUICE", "BREW_COFFEE"].includes(a.task.type)) map.brew.push(a);
+      if (a.exploring) map.explore.push(a);
+    }
+    return map;
+  }
+  function updateActivity(dt) {
+    if (!activityBody) return;
+    actCd -= dt;
+    if (actCd > 0) return;
+    actCd = 0.6;
+    const map = collectActivities();
+    let html = "";
+    for (const k in ACT_CN) {
+      const list = map[k];
+      const n = list.length;
+      // 行格式：名称 ×人数·最近参与者名；0 人灰显 ×0（点击无效）
+      html += `<div class="act-row${n ? "" : " zero"}" data-act="${k}">${ACT_CN[k]}<span class="cnt"> ×${n}</span>${n ? "·" + list[n - 1].name : ""}</div>`;
+    }
+    activityBody.innerHTML = html;
+  }
+  // 点击活动行：随机选一名该活动参与者 → focusAgent（相机飞行 + 跟随 + 信息框）；无人则无效
+  if (activityBody) {
+    activityBody.addEventListener("click", e => {
+      const row = e.target.closest(".act-row");
+      if (!row) return;
+      const list = collectActivities()[row.dataset.act];
+      if (!list || !list.length) return;
+      focusAgent(list[Math.floor(Math.random() * list.length)]);
+    });
+  }
+
+  // ---- 三面板折叠（居民名册 / 世界纪事 / 世界动态）：标题点击独立切换，收起状态仅存内存（刷新还原展开） ----
+  for (const d of [
+    { panel: "roster-panel", title: "roster-title", name: "居民名册" },
+    { panel: "log-panel", title: "log-title", name: "世界纪事" },
+    { panel: "activity-panel", title: "activity-title", name: "世界动态" },
+  ]) {
+    const panel = el(d.panel), tEl = el(d.title);
+    if (!panel || !tEl) continue;
+    let collapsed = false;
+    const syncTitle = () => {
+      panel.classList.toggle("collapsed", collapsed);
+      tEl.textContent = (collapsed ? "▸ " : "▾ ") + d.name;   // 标题前缀由 JS 统一同步
+    };
+    syncTitle();
+    tEl.addEventListener("click", () => { collapsed = !collapsed; syncTitle(); });
   }
 
   // ---- dev 热刷新：仅 http(s) 下生效，file:// 双击打开时静默跳过 ----

@@ -15,6 +15,15 @@ function houseInfo(x, y) {
   }
   return _hCache.get(x + "," + y);
 }
+// 农田信息缓存（crop 作物变体；farms 只增不减，仿 houseInfo 用长度做缓存标记）
+let _fCache = null, _fCacheLen = -1;
+function farmInfo(x, y) {
+  if (!_fCache || world.farms.length !== _fCacheLen) {
+    _fCache = new Map(world.farms.map(f => [f.x + "," + f.y, f]));
+    _fCacheLen = world.farms.length;
+  }
+  return _fCache.get(x + "," + y);
+}
 // 该格属于哪个聚落（粮仓即聚落中心）
 function settlementAt(x, y) {
   for (const s of world.settlements) if (s.x === x && s.y === y) return s;
@@ -83,11 +92,16 @@ function neighborTile(x, y, d) {
 function agentPoseOf(a) {
   if (a.state === "sleep") return { key: "sleep", legs: null };
   if (a.state === "eat") return { key: Math.floor(a.phase * 2) % 2 ? "eat2" : "eat1", legs: "stand" };
+  if (a.state === "drink") return { key: Math.floor(a.phase * 2) % 2 ? "drink2" : "drink1", legs: "stand" };
   if (a.state === "work") {
     const tt = a.task && a.task.type;
     if (tt === "FISH") {
       const f = Math.floor(a.phase * 1.5) % 2;
       return { key: f ? "fish2" : "fish1", legs: "fish", fishing: true };
+    }
+    if (tt === "BREW_BEER" || tt === "PRESS_JUICE" || tt === "BREW_COFFEE") {
+      // 酿酒/榨汁/烘焙咖啡：搅棒两帧
+      return { key: Math.floor(a.phase * 2) % 2 ? "brew2" : "brew1", legs: "stand" };
     }
     const f = Math.floor(a.phase * 3) % 2;
     let tool = "hammer";   // 兜底抡锤（BUILD/QUARRY/SANDPIT/GATHER/PASTURE/HUNT 站桩等）
@@ -100,6 +114,11 @@ function agentPoseOf(a) {
     const running = a.exploring || a.speed > 1.85 ||
       (a.task && (a.task.type === "HUNT" || a.task.type === "CAPTURE"));
     const n = Math.floor(a.phase * (running ? 4 : 3)) % 2 ? "2" : "1";
+    const wk = (running ? "run" : "walk") + n;
+    if ((a.drunkT || 0) > 0) {
+      // 醉酒：绘制层水平 wobble（sin(world.time*7)*1.5px，影子/光环不随动），偶发踉跄帧
+      return { key: Math.floor(a.phase) % 8 === 0 ? "stumble" : wk, legs: wk, wobble: Math.sin(world.time * 7) * 1.5 };
+    }
     return running ? { key: "run" + n, legs: "run" + n } : { key: "walk" + n, legs: "walk" + n };
   }
   return { key: "stand", legs: "stand" };
@@ -193,15 +212,35 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
           ctx.lineTo(px + s * 0.53, py - s * 0.28);
           ctx.closePath(); ctx.fill();
         }
+      } else if (tile === T.WELL || tile === T.BREWERY || tile === T.PRESS || tile === T.ROASTERY) {
+        // 新工坊建筑（井/酒坊/压榨坊/烘焙坊）：buildingSprite 画布可 16×24 向上探出，
+        // 参照 HOUSE 锚定 tile 底绘制；S6 未落地时回退旧 tile 底图路径
+        if (typeof buildingSprite === "function") {
+          const bspr = buildingSprite(tile, v);
+          const scale = s / SPR;
+          ctx.drawImage(bspr, px, py + s - bspr.height * scale, s + 0.5, bspr.height * scale);
+        } else {
+          ctx.drawImage(tileSprite(tile, eTier, v), px, py, s + 0.5, s + 0.5);
+        }
       } else {
         // 常规 tile：从图集取 sprite 整格贴图
         let spr;
         if (tile === T.WATER || tile === T.DEEP) {
           const wFrame = ((wFrameBase + h * 4) | 0) % 4;
-          spr = (tile === T.WATER && world.ponds.has(x + "," + y))
-            ? pondSprite(v, wFrame) : waterSprite(tile, eTier, v, wFrame);
+          // 水格三层判定：池塘 → 河流（world.rivers，契约 v0.3.0）→ 海
+          const wk = x + "," + y;
+          spr = (tile === T.WATER && world.ponds.has(wk))
+            ? pondSprite(v, wFrame)
+            : (tile === T.WATER && world.rivers && world.rivers.has(wk) && typeof riverSprite === "function")
+              ? riverSprite(v, wFrame)
+              : waterSprite(tile, eTier, v, wFrame);
         } else if (tile === T.BERRY || tile === T.FRUIT) {
           spr = propSprite(tile === T.BERRY ? "berry" : "fruit", eTier, v, world.berryStock.get(x + "," + y) || 0);
+        } else if (tile === T.FARM) {
+          // 咖啡田变体（farm.crop === "coffee"，S6 coffeeFarmSprite；未落地回退普通农田）
+          const fi = farmInfo(x, y);
+          spr = (fi && fi.crop === "coffee" && typeof coffeeFarmSprite === "function")
+            ? coffeeFarmSprite(eTier, v) : tileSprite(tile, eTier, v);
         } else {
           spr = tileSprite(tile, eTier, v);
         }
@@ -275,21 +314,42 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
       const px = ox + c.x * s, py = oy + c.y * s;
       const meta = CREATURE_META[c.type];
 
+      // 朝向→视图映射（契约 v0.3.0）：down=front 正面 / up=back 背面 / left=side+水平翻转 / right=side
+      const cface = c.face || "right";
+      const cview = cface === "down" ? "front" : cface === "up" ? "back" : "side";
+      const cflip = cface === "left";
+      const drawC = (spr, dx, dy, dw, dh) => {   // left 时以 px 为轴镜像内容
+        if (cflip) {
+          ctx.save(); ctx.translate(2 * px, 0); ctx.scale(-1, 1);
+          ctx.drawImage(spr, 2 * px - dx - dw, dy, dw, dh);
+          ctx.restore();
+        } else ctx.drawImage(spr, dx, dy, dw, dh);
+      };
+
       if (c.type === "fish") {
-        // 鱼群：3 尾小鱼绕群心游动
+        // 鱼群：3 尾小鱼绕群心游动（朝向=切线方向）
         for (let i = 0; i < 3; i++) {
           const ang = t * 0.8 + i * 2.1;
           const fx = px + Math.cos(ang) * s * 0.32, fy = py + Math.sin(ang) * s * 0.19;
           const fs = Math.max(3, s * 0.22);
-          ctx.drawImage(creatureSprite("fish"), fx - fs / 2, fy - fs / 3, fs, fs * 0.6);
+          const vx = Math.cos(ang), vy = Math.sin(ang);
+          const mface = Math.abs(vx) > Math.abs(vy) ? (vx > 0 ? "right" : "left") : (vy > 0 ? "down" : "up");
+          const mview = mface === "down" ? "front" : mface === "up" ? "back" : "side";
+          const mflip = mface === "left";
+          const mspr = creatureSprite("fish", 0, mview);
+          if (mflip) {
+            ctx.save(); ctx.translate(2 * fx, 0); ctx.scale(-1, 1);
+            ctx.drawImage(mspr, 2 * fx - (fx - fs / 2) - fs, fy - fs / 3, fs, fs * 0.6);
+            ctx.restore();
+          } else ctx.drawImage(mspr, fx - fs / 2, fy - fs / 3, fs, fs * 0.6);
         }
       } else if (c.type === "bird") {
         // 鸟：空中飞行，两帧扑翼
         const fw = Math.floor(t * 6 + c.phase) % 2;
         const bw = Math.max(5, s * 0.34);
-        ctx.drawImage(creatureSprite("bird", fw), px - bw / 2, py - s * 0.4 - bw * 0.25, bw, bw * 0.5);
+        drawC(creatureSprite("bird", fw, cview), px - bw / 2, py - s * 0.4 - bw * 0.25, bw, bw * 0.5);
       } else {
-        const spr = creatureSprite(c.type);
+        const spr = creatureSprite(c.type, 0, cview);
         const w = Math.max(6, s * 0.66 * meta.size);
         const hh = w * spr.height / spr.width;
         // 影子
@@ -301,7 +361,7 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
           ctx.textAlign = "center";
           ctx.fillText("!", px, py - hh * 0.9);
         }
-        ctx.drawImage(spr, px - w / 2, py - hh * 0.62, w, hh);
+        drawC(spr, px - w / 2, py - hh * 0.62, w, hh);
       }
       if (c.pasture) { // 圈养标记
         ctx.strokeStyle = "rgba(200,170,80,0.8)"; ctx.lineWidth = 0.8;
@@ -353,17 +413,18 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     ctx.translate(px, py);
     ctx.rotate(sh.ang);
     ctx.drawImage(spr, -L / 2, -W2 / 2, L, W2);
-    // 船内划手：同锚叠三层（船体之上、随船旋转）；靠岸后水手已下船（state 非 voyage）不重复画
+    // 船内划手：同锚叠三层（船体之上、随船旋转；保持 side 视图——船体旋转已带方向感）；
+    // 靠岸后水手已下船（state 非 voyage）不重复画
     if (sh.sailor && !sh.sailor.dead && sh.sailor.state === "voyage") {
       const k2 = (s / SPR) * 0.8;
       const look2 = agentLook(sh.sailor.id);
       const rf = Math.floor(world.time * 2) % 2;
       const ax2 = -8 * k2, ay2 = -0.7 * s * 0.8;
-      ctx.drawImage(agentPantsSprite(look2.pants, "row", sh.sailor.sex, look2.skin), ax2, ay2, 16 * k2, 16 * k2);
-      ctx.drawImage(agentBodySprite(look2.shirt, rf ? "row2" : "row1", sh.sailor.sex), ax2, ay2, 16 * k2, 16 * k2);
+      ctx.drawImage(agentPantsSprite(look2.pants, "row", sh.sailor.sex, look2.skin, "side"), ax2, ay2, 16 * k2, 16 * k2);
+      ctx.drawImage(agentBodySprite(look2.shirt, rf ? "row2" : "row1", sh.sailor.sex, "side"), ax2, ay2, 16 * k2, 16 * k2);
       ctx.drawImage(agentHeadSprite(look2.skin,
         (sh.sailor.sex === "f" ? HAIR_STYLES_F : HAIR_STYLES_M)[look2.hairStyle] || "short",
-        look2.hairC, sh.sailor.sex, sh.sailor.native), ax2, ay2, 16 * k2, 16 * k2);
+        look2.hairC, sh.sailor.sex, sh.sailor.native, "side"), ax2, ay2, 16 * k2, 16 * k2);
       // 双桨：两帧摆动的两条线段，桨尖超出船舷
       const oarY = rf ? 5 : -5;
       ctx.strokeStyle = "#7a5a30";
@@ -395,7 +456,12 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     const px = ox + a.x * s, py = oy + a.y * s;
     const r = Math.max(1.8, s * 0.15);
 
-    // 影子
+    // 朝向映射（契约 v0.3.0）：face→view；undefined 容错按 "right"；left 需水平镜像
+    const face = a.face || "right";
+    const view = face === "down" ? "front" : face === "up" ? "back" : "side";
+    const flip = face === "left";
+
+    // 影子（翻转外：贴地不随身体镜像/摆动）
     ctx.fillStyle = "rgba(0,0,0,0.35)";
     ctx.beginPath(); ctx.ellipse(px, py + s * 0.22, r * 1.05, r * 0.42, 0, 0, 7); ctx.fill();
 
@@ -419,29 +485,41 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     const k = s / SPR;
     const bob = (pose.key === "walk1" || pose.key === "walk2" || pose.key === "run1" || pose.key === "run2")
       ? Math.abs(Math.sin(a.phase * 9)) * r * 0.3 : 0;
-    const ax = px - 8 * k, ay = py - 0.7 * s - bob;   // 统一锚点：脚底 row15 对齐地面
+    const wob = pose.wobble || 0;   // 醉酒水平 wobble：仅叠加层偏移
+    const ax = px - 8 * k + wob, ay = py - 0.7 * s - bob;   // 统一锚点：脚底 row15 对齐地面
 
-    if (pose.legs)   // 腿层（sleep 无腿层）
-      ctx.drawImage(agentPantsSprite(look.pants, pose.legs, a.sex, look.skin), ax, ay, s + 0.5, s + 0.5);
+    // 翻转辅助：flip 时以竖轴 x=px 镜像——ctx 已做 translate(px,0)+scale(-1,1)，
+    // 本地坐标 = 原屏幕坐标 − px（screenX = 2px − X，位置与内容同时镜像：
+    // 身体原地翻面、背包从身后左侧转到右侧）；影子/光环/状态粒子均在翻转外
+    const putLayer = (spr, lx, ly, lw, lh) =>
+      ctx.drawImage(spr, flip ? lx - px : lx, ly, lw, lh);
+    if (flip) { ctx.save(); ctx.translate(px, 0); ctx.scale(-1, 1); }
+
+    if (pose.legs)   // 腿层（sleep 无腿层；正面/背面共用 "vert"，旧签名多传实参无害）
+      putLayer(agentPantsSprite(look.pants, pose.legs, a.sex, look.skin, view === "side" ? "side" : "vert"),
+        ax, ay, s + 0.5, s + 0.5);
     if (a.carrying) {   // 资源背包：身体左后、略上移露包顶
       const pk = agentPackSprite(a.carrying.res);
-      ctx.drawImage(pk, ax, ay + 3 * k, 8 * k, 8 * k);
+      putLayer(pk, ax, ay + 3 * k, 8 * k, 8 * k);
     }
-    ctx.drawImage(agentBodySprite(top, pose.key, a.sex), ax, ay, s + 0.5, s + 0.5);
+    putLayer(agentBodySprite(top, pose.key, a.sex, view), ax, ay, s + 0.5, s + 0.5);
     const headSpr = pose.key === "sleep"
       ? agentHeadLieSprite(look.skin, look.hairC)
       : agentHeadSprite(look.skin,
           (a.sex === "f" ? HAIR_STYLES_F : HAIR_STYLES_M)[look.hairStyle] || "short",
-          look.hairC, a.sex, a.native);
-    ctx.drawImage(headSpr, ax, ay, s + 0.5, s + 0.5);
+          look.hairC, a.sex, a.native, view);
+    putLayer(headSpr, ax, ay, s + 0.5, s + 0.5);
+    if (flip) ctx.restore();
 
     // 钓竿叠加：竿线从手到鱼点，浮标在鱼点上方随波浮动
+    // 线起点按视图（契约 v0.3.0）：正/背面从身体中心；侧面从伸竿手一侧（翻转时镜像）
     if (pose.fishing && s >= 8 && a.task && a.task.fishX !== undefined) {
+      const hx = view === "side" ? px + wob + (flip ? -4 : 4) * k : px + wob;
       const wx = ox + (a.task.fishX + 0.5) * s, wy = oy + (a.task.fishY + 0.5) * s;
       const by = wy - 2 + Math.sin(world.time * 2.5) * 1.5;
       ctx.strokeStyle = "#5c4426";
       ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(px, py - 0.3 * s); ctx.lineTo(wx, by); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(hx, py - 0.3 * s); ctx.lineTo(wx, by); ctx.stroke();
       ctx.fillStyle = "#d9483b"; ctx.fillRect(wx - 1, by - 2, 2, 2);   // 浮标红
       ctx.fillStyle = "#f0ead8"; ctx.fillRect(wx - 1, by, 2, 1);       // 浮标白
     }

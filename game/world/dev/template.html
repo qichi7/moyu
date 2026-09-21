@@ -61,6 +61,7 @@
     #speed-ctl button { padding: 3px 6px; font-size: 11px; }
     #right-ctl { gap: 8px; }
     #roster-panel { left: 6px; top: 92px; width: 46vw; max-height: 38vh; font-size: 11px; }
+    #activity-panel { right: 6px; top: 92px; width: 40vw; max-height: 34vh; font-size: 11px; }
     #log-panel { left: auto; right: 6px; bottom: 8px; width: 52vw; max-height: 18vh; }
     #logs { max-height: 12vh; }
     #info-panel { max-width: 46vw; font-size: 11px; }
@@ -102,6 +103,30 @@
     border: 1px solid #2a3448; font-size: 11px; user-select: none;
   }
   .fly-btn:hover { color: #fff; background: #2c3a58; border-color: #4a5f8a; }
+
+  /* 世界动态面板：与左侧居民名册对称的右侧活动目录（样式沿用名册深色系） */
+  #activity-panel {
+    position: fixed; right: 12px; top: 54px; width: 170px; max-height: calc(100vh - 180px);
+    background: rgba(10, 13, 20, 0.88); border: 1px solid #1c2333; border-radius: 6px;
+    padding: 8px 6px; z-index: 9; overflow-y: auto; font-size: 12px; color: #aeb7c9;
+  }
+  #activity-panel::-webkit-scrollbar { width: 4px; }
+  #activity-panel::-webkit-scrollbar-thumb { background: #2a3448; border-radius: 2px; }
+  #activity-panel .panel-title { color: #e8d9a0; letter-spacing: 1px; margin: 0 0 4px 6px; }
+  .act-row { padding: 2px 6px; border-radius: 3px; cursor: pointer; }
+  .act-row:hover { background: #1c2333; color: #fff; }
+  .act-row .cnt { color: #6b7688; font-variant-numeric: tabular-nums; }
+  .act-row.zero { color: #4a5366; cursor: default; }
+  .act-row.zero:hover { background: none; color: #4a5366; }
+
+  /* 三面板折叠：标题可点击，collapsed 时仅隐藏内容区（标题常驻，▾/▸ 由 JS 同步） */
+  #roster-panel .roster-title, #log-panel .log-title, #activity-panel .panel-title {
+    cursor: pointer; user-select: none;
+  }
+  #roster-panel.collapsed #roster-body,
+  #log-panel.collapsed #logs,
+  #activity-panel.collapsed #activity-body { display: none; }
+
   #info-panel .ip-title { color: #e8d9a0; font-weight: 600; margin-bottom: 2px; }
   #info-panel .ip-bar { height: 5px; background: #1c2333; border-radius: 3px; overflow: hidden; margin: 3px 0 7px; }
   #info-panel .ip-bar > div { height: 100%; border-radius: 3px; }
@@ -150,15 +175,20 @@
 </div>
 
 <div id="log-panel">
-  <div class="log-title">世界纪事</div>
+  <div class="log-title" id="log-title">▾ 世界纪事</div>
   <div id="logs"></div>
 </div>
 
 <div id="hint">拖拽平移 · 滚轮/滑轴缩放 · 空格暂停 · 1/2/3/4 变速 · 拖到虚空探索发现新大陆</div>
 
 <div id="roster-panel">
-  <div class="roster-title">居民名册</div>
+  <div class="roster-title" id="roster-title">▾ 居民名册</div>
   <div id="roster-body"></div>
+</div>
+
+<div id="activity-panel">
+  <div class="panel-title" id="activity-title">▾ 世界动态</div>
+  <div id="activity-body"></div>
 </div>
 
 <div id="info-panel" class="hidden">

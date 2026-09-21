@@ -225,6 +225,99 @@ assert(vm.runInContext(`
   [0,1,2,3].every(d => sprStats(foamSprite(d)).opaque > 0 && sprStats(ditherSprite(d)).opaque > 0)
 `, ctx), "浪花/抖动过渡 4 向叠加层全部非空");
 
+// ---- 2c. S7 姿态扩展（render 层，恒可用）：drink/brew/醉酒分支 ----
+assert(vm.runInContext(`
+  agentPoseOf({ state: "drink", phase: 0.3 }).key === "drink1" &&
+  agentPoseOf({ state: "drink", phase: 0.6 }).key === "drink2" &&
+  agentPoseOf({ state: "work", phase: 0.3, task: { type: "BREW_BEER" } }).key === "brew1" &&
+  agentPoseOf({ state: "work", phase: 0.6, task: { type: "PRESS_JUICE" } }).key === "brew2" &&
+  agentPoseOf({ state: "work", phase: 0.6, task: { type: "BREW_COFFEE" } }).key === "brew2" &&
+  agentPoseOf({ state: "walk", phase: 0.05, speed: 1.7, drunkT: 9 }).key === "stumble" &&
+  agentPoseOf({ state: "walk", phase: 2.5, speed: 1.7, drunkT: 9 }).key === "walk2" &&
+  Math.abs(agentPoseOf({ state: "walk", phase: 2.5, speed: 1.7, drunkT: 9 }).wobble) <= 1.5 &&
+  agentPoseOf({ state: "walk", phase: 0.5, speed: 1.7 }).wobble === undefined
+`, ctx), "agentPoseOf 新分支（drink/brew/醉酒 stumble+wobble）分发正确");
+
+// ---- 2d. S6 契约扩展断言：未落地自动 SKIP（不误报 FAIL）----
+// 探针原理：旧签名忽略新增 view 实参 → 同缓存键 → 像素缓冲逐字节一致；
+// S6 落地后不同视图内容不同。纯 typeof 探针用于全新函数。
+vm.runInContext(`
+  function __bufKey(cv) {
+    let s = ""; const b = cv._buf;
+    for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+    return s;
+  }
+`, ctx);
+let probes = {};
+try {
+  probes = vm.runInContext(`
+    function __differs(a, b) { return __bufKey(a) !== __bufKey(b); }
+    ({
+      bodyView: typeof agentBodySprite === "function" &&
+        __differs(agentBodySprite(agentLook(3).shirt, "stand", "m", "front"),
+                  agentBodySprite(agentLook(3).shirt, "stand", "m", "side")),
+      headView: typeof agentHeadSprite === "function" &&
+        __differs(agentHeadSprite(AGENT_SKINS[0], "short", AGENT_HAIRS[0], "m", false, "front"),
+                  agentHeadSprite(AGENT_SKINS[0], "short", AGENT_HAIRS[0], "m", false, "side")),
+      pantsView: typeof agentPantsSprite === "function" &&
+        __differs(agentPantsSprite(agentLook(5).pants, "stand", "m", agentLook(5).skin, "vert"),
+                  agentPantsSprite(agentLook(5).pants, "stand", "m", agentLook(5).skin, "side")),
+      creatureView: typeof creatureSprite === "function" &&
+        __differs(creatureSprite("cow", 0, "front"), creatureSprite("cow", 0, "side")),
+      riverSprite: typeof riverSprite === "function",
+      buildingSprite: typeof buildingSprite === "function",
+      coffeeFarmSprite: typeof coffeeFarmSprite === "function",
+      packNew: typeof agentPackSprite === "function" && (() => {
+        // 旧实现新键全落沙袋兜底（内容一致）；落地后至少两种内容不同
+        const ks = ["water", "juice", "beer", "coffee", "beans"];
+        return new Set(ks.map(r => __bufKey(agentPackSprite(r)))).size >= 2;
+      })(),
+    })
+  `, ctx);
+} catch (e) { console.log("SKIP S6 探针求值异常:", e.message); }
+
+// SKIP 辅助：探针为假 → 打印 SKIP 行；落地后断言体抛异常（S6 半落地/缺 T 键）→ 如实 FAIL
+function assertS6(desc, landed, body) {
+  if (!landed) { console.log("SKIP", desc + "（S6 未落地）"); return; }
+  try { assert(body(), desc); }
+  catch (e) { assert(false, desc + " 抛异常: " + e.message); }
+}
+
+assertS6("body 全 pose（含 drink/brew/stumble）× 3 视图 × 2 性别非空（≥60px）", probes.bodyView, () => vm.runInContext(`
+  ["stand","walk1","walk2","run1","run2","sleep","hammer1","hammer2","axe1","axe2","hoe1","hoe2",
+   "shovel1","shovel2","eat1","eat2","fish1","fish2","row1","row2","drink1","drink2","brew1","brew2","stumble"]
+    .every(p => ["side", "front", "back"].every(vw => ["f", "m"].every(sx =>
+      sprStats(agentBodySprite(agentLook(3).shirt, p, sx, vw)).opaque >= 60)))
+`, ctx));
+assertS6("头层 3 视图 × 发型池 × 肤色 × 发色 × 羽饰全组合非空（≥40px）", probes.headView, () => vm.runInContext(`
+  ["side", "front", "back"].every(vw =>
+    [HAIR_STYLES_F, HAIR_STYLES_M].every(pool => pool.every(st => ["f", "m"].every(sx =>
+      AGENT_SKINS.every(sk => [AGENT_HAIRS[0], AGENT_HAIRS[3]].every(hc => [false, true].every(nv =>
+        sprStats(agentHeadSprite(sk, st, hc, sx, nv, vw)).opaque >= 40)))))))
+`, ctx));
+assertS6("腿层 side/vert 视图 × 7 姿态 × 2 性别 × 2 裤色非空（≥30px）", probes.pantsView, () => vm.runInContext(`
+  ["side", "vert"].every(vw =>
+    ["stand", "walk1", "walk2", "run1", "run2", "fish", "row"].every(pk =>
+      ["f", "m"].every(sx => [agentLook(5).pants, "#3a4a6b"].every(c =>
+        sprStats(agentPantsSprite(c, pk, sx, agentLook(5).skin, vw)).opaque >= 30))))
+`, ctx));
+assertS6("十种动物 × 3 视图 sprite 全部非空", probes.creatureView, () => vm.runInContext(`
+  Object.keys(CREATURE_META).every(k => ["side", "front", "back"].every(vw =>
+    sprStats(creatureSprite(k, 0, vw)).opaque >= 8))
+`, ctx));
+assertS6("建筑 sprite 4 种（井/酒坊/压榨坊/烘焙坊）非空", probes.buildingSprite, () => vm.runInContext(`
+  [T.WELL, T.BREWERY, T.PRESS, T.ROASTERY].every(tl => sprStats(buildingSprite(tl, 0)).opaque >= 60)
+`, ctx));
+assertS6("河流 sprite 4 帧动画全部非空", probes.riverSprite, () => vm.runInContext(`
+  [0, 1, 2, 3].every(f => [0, 1].every(v2 => sprStats(riverSprite(v2, f)).opaque >= 200))
+`, ctx));
+assertS6("咖啡田 sprite 4 变体非空", probes.coffeeFarmSprite, () => vm.runInContext(`
+  [0, 1, 2, 3].every(v2 => sprStats(coffeeFarmSprite(2, v2)).opaque >= 200)
+`, ctx));
+assertS6("背包 5 种新资源（water/juice/beer/coffee/beans）非空（≥20px）", probes.packNew, () => vm.runInContext(`
+  ["water", "juice", "beer", "coffee", "beans"].every(r => sprStats(agentPackSprite(r)).opaque >= 20)
+`, ctx));
+
 // ---- 3. 真实场景帧光栅化：三个缩放档都执行且有预期色系 ----
 vm.runInContext(`
   function drawAt(zoom, cx, cy, useFresh) {

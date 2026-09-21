@@ -7,9 +7,12 @@ const tasks = {
   list: [],
 };
 
-const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 4, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3, FILL: 10, EXCAV: 8 };
-// 工程资源消耗：架桥耗木材、造陆耗沙土（完工时从最近聚落库存扣除）
-const TASK_RESOURCE_COST = { BRIDGE: { wood: 1 }, FILL: { sand: 1 } };
+const TASK_DEFAULT_NEED = { BUILD: 10, FARM: 9, GATHER: 4, HUNT: 6, PASTURE: 16, CAPTURE: 5, FISH: 5, PLANT: 4, QUARRY: 18, SANDPIT: 12, PLANT_BERRY: 5, BRIDGE: 3, FILL: 10, EXCAV: 8,
+  WELL: 12, BREWERY: 18, PRESS: 14, ROASTERY: 16, FETCH_WATER: 4, PRESS_JUICE: 6, BREW_BEER: 8, BREW_COFFEE: 7 };
+// 工程资源消耗：架桥耗木材、造陆耗沙土（联合库存结算，doWork 挂起 + tasksTake 跳过双处生效）；
+// 制作型任务耗水/粮/豆（非联合库存：完工时从所属城市库存扣除，tasksTake 领取时同步过滤——不足跳过省工）
+const TASK_RESOURCE_COST = { BRIDGE: { wood: 1 }, FILL: { sand: 1 },
+  PRESS_JUICE: { water: 1, food: 2 }, BREW_BEER: { water: 1, food: 3 }, BREW_COFFEE: { water: 1, beans: 2 } };
 
 function tasksAdd(t) {
   t.id = _taskId++;
@@ -17,7 +20,8 @@ function tasksAdd(t) {
   t.need = t.need !== undefined ? t.need : (TASK_DEFAULT_NEED[t.type] || 0); // 兜底：漏设 need 的任务永不完工、占死名额
   t.born = world.time;   // 立项时间：任务老化防饥饿（越久越优先被领取）
   t.workers = new Set();
-  if (t.type === "BUILD" || t.type === "FARM" || t.type === "PASTURE") setTile(t.x, t.y, T.SITE); // 立项即圈地
+  if (t.type === "BUILD" || t.type === "FARM" || t.type === "PASTURE" ||
+      t.type === "WELL" || t.type === "BREWERY" || t.type === "PRESS" || t.type === "ROASTERY") setTile(t.x, t.y, T.SITE); // 立项即圈地（建筑类沿用 PASTURE 先例）
   tasks.list.push(t);
   return t;
 }
@@ -30,7 +34,8 @@ function tasksPending(type, excludeFrozen) {
 function taskJobPref(t) {
   switch (t.type) {
     case "FARM": return "FARM";
-    case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT": case "EXCAV": return "BUILD";
+    case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT": case "EXCAV":
+    case "WELL": case "BREWERY": case "PRESS": case "ROASTERY": return "BUILD";
     case "CAPTURE": return t.creature && t.creature.type === "fish" ? "FISH" : "HUNT";
     case "HUNT": return "HUNT";
     case "FISH": return "FISH";
@@ -43,7 +48,7 @@ function taskJobPref(t) {
 // 工程任务资源不足时跳过（小人转去做资源采集，不空转）；
 // 先做"够得着"的（blockedCount 低者优先），再按距离取最近
 function tasksTake(agent) {
-  const ax = agent.x | 0, ay = agent.y | 0;
+  const ax = Math.floor(agent.x), ay = Math.floor(agent.y);   // floor：负坐标段 |0 向零截断会错一行
   const myJob = JOBS[agent.job] ? JOBS[agent.job].task : null;
   let best = null, bestScore = Infinity;
   for (const t of tasks.list) {
@@ -53,6 +58,12 @@ function tasksTake(agent) {
       const cost = TASK_RESOURCE_COST[t.type];
       const lack = Object.keys(cost).some(k => jointStock(k) < cost[k]);
       if (lack) continue;   // 库存不够一格的 → 不领
+    } else if (t.type === "PRESS_JUICE" || t.type === "BREW_BEER" || t.type === "BREW_COFFEE") {
+      // 制作型任务：原料在所属城市库存（非联合库存），不足则跳过领取（领了也得挂起，提前跳过省工）
+      const s = ownerSettle(t.x, t.y) || nearestSettlement(t.x, t.y);
+      const cost = TASK_RESOURCE_COST[t.type];
+      const lack = !s || Object.keys(cost).some(k => (ensureStock(s)[k] || 0) < cost[k]);
+      if (lack) continue;
     }
     const cap = t.type === "BUILD" || t.type === "FARM" ? 2 : 4;
     if (t.workers.size >= cap) continue;
@@ -63,7 +74,10 @@ function tasksTake(agent) {
     const crisis = (t.type === "DIG" && t.res === "wood") ? Math.max(0, 8 - jointStock("wood")) * 200 : 0;
     // 走廊桥是国家工程（两岛间唯一通路），优先级高于日常任务
     const natl = t.type === "BRIDGE" && t.corridor ? 1500 : 0;
-    const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000 - age * 3 - crisis - natl;
+    // 渴者优先派打水：打水终点就是水井边（顺路自饮），否则渴着的人与打水任务互相错过——
+    // 行程门拦着渴人不接活、接活的人又不渴，城库水永远攒不起来（30 格内才导流，远途先喝）
+    const thirstFetch = agent.thirst < 35 && t.type === "FETCH_WATER" && d <= 30 ? -800 : 0;
+    const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000 - age * 3 - crisis - natl + thirstFetch;
     if (score < bestScore) { bestScore = score; best = t; }
   }
   return best;
@@ -102,7 +116,8 @@ function tasksFinish(t, agent, was) {
     }
     case "FARM": {
       setTile(t.x, t.y, T.FARM);
-      world.farms.push({ x: t.x, y: t.y, grow: randRange(0, SIM.FARM_MATURITY * 0.5) });
+      // crop 透传（"coffee"|undefined，undefined=普通粮田——消费方须容错缺省）
+      world.farms.push({ x: t.x, y: t.y, grow: randRange(0, SIM.FARM_MATURITY * 0.5), crop: t.crop });
       logMsg(`开垦新农田（共 ${world.farms.length} 块）。`);
       emit("farm-done");
       break;
@@ -212,6 +227,47 @@ function tasksFinish(t, agent, was) {
       setTile(t.x, t.y, T.DOCK);
       world.docks.push({ x: t.x, y: t.y });
       logMsg(`码头建成，航海家们开始筹划远航。`);
+      break;
+    }
+    case "WELL": {
+      // 水井落成（tile 常量由 config 契约提供，falsy 容错防集成期半成品崩溃）
+      if (T.WELL !== undefined) setTile(t.x, t.y, T.WELL);
+      logMsg(`水井落成，清冽的井水近在眼前。`);
+      break;
+    }
+    case "BREWERY": {
+      if (T.BREWERY !== undefined) setTile(t.x, t.y, T.BREWERY);
+      logMsg(`酒坊落成，粮谷将在这里酿成醉人的麦酒。`);
+      break;
+    }
+    case "PRESS": {
+      if (T.PRESS !== undefined) setTile(t.x, t.y, T.PRESS);
+      logMsg(`压榨坊落成，鲜果将在这里榨成清甜的果汁。`);
+      break;
+    }
+    case "ROASTERY": {
+      if (T.ROASTERY !== undefined) setTile(t.x, t.y, T.ROASTERY);
+      logMsg(`烘焙坊落成，咖啡豆的焦香将唤醒小镇的清晨。`);
+      break;
+    }
+    case "FETCH_WATER": {
+      // 打水：完成者背包驮水回仓（走既有搬运回仓语义，deposit 入所属城市 water 字段）；
+      // 一趟 5 桶（低衰减口径下一次直饮约抵 5 桶，库存才攒得起来，酿造链才有原料）
+      return { res: "water", amount: 2 };
+    }
+    case "PRESS_JUICE": case "BREW_BEER": case "BREW_COFFEE": {
+      // 制作：原料从所属城市库存扣除（与 tasksTake 领取过滤双处生效；不足时钳到 0 防负库存），
+      // 产出直接入库不走搬运（ownerSettle 无主则最近聚落兜底，参照 FILL 就地结算写法）
+      const s = ownerSettle(t.x, t.y) || nearestSettlement(t.x, t.y);
+      const cost = TASK_RESOURCE_COST[t.type];
+      if (s && cost) {
+        const st = ensureStock(s);
+        for (const k of Object.keys(cost)) st[k] = Math.max(0, (st[k] || 0) - cost[k]);
+        const out = t.type === "PRESS_JUICE" ? "juice" : t.type === "BREW_BEER" ? "beer" : "coffee";
+        st[out] = (st[out] || 0) + 1;
+        logThrottled(t.type === "PRESS_JUICE" ? "压榨坊榨出了新鲜的果汁。"
+          : t.type === "BREW_BEER" ? "酒坊酿出了一桶麦酒。" : "烘焙坊烘出了新一批咖啡。", 30);
+      }
       break;
     }
     case "EXCAV": {
