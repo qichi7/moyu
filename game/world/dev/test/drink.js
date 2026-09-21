@@ -34,6 +34,9 @@ function walkTileNear(cx, cy, maxR) {
   return null;
 }
 
+// ---- 工具：清空背包粮水饮（v0.4.1 槽位背包：路上自用会抢在 seekDrink 前解渴，行为面测试须包空）----
+function zeroPack(a) { a.pack = new Array(10).fill(null); }
+
 // ---- 工具：从主粮仓附近找一条 len+1 格的直线可走走廊（face 测试用）----
 function findRun(dx, dy, len) {
   const bx = world.store.x, by = world.store.y;
@@ -114,13 +117,14 @@ drinker.x = spot.x + 0.5; drinker.y = spot.y + 0.5;
 drinker.thinkCd = 0; drinker.hunger = 90; drinker.energy = 100;
 drinker.task = null; drinker.exploring = null;
 drinker.path = null; drinker.onArrive = null;
+zeroPack(drinker);   // 背包清空：包内有水会被路上自用抢喝，测不到 seekDrink 行为面
 drinker.thirst = 25; drinker.state = "idle";
 let g = 0;
 while (drinker.state === "idle" && g++ < 20) simUpdate(STEP);
 assert(drinker.state === "walk", "渴了的小人动身去粮仓喝水（需求分支优先于领任务）");
 g = 0;
 while (drinker.state === "walk" && g++ < 600) simUpdate(STEP);
-assert(drinker.state === "drink", "到达粮仓进入 drink 状态（原地饮用 2 秒）");
+assert(drinker.state === "drink", "到达粮仓进入 drink 状态（原地饮用 1 秒）");
 const thLow = drinker.thirst, wBefore = ensureStock(sc).water;
 g = 0;
 while (drinker.state === "drink" && g++ < 100) simUpdate(STEP);
@@ -133,6 +137,7 @@ assert(drinker.drunkT === 0 && drinker.coffeeT === 0, "喝清水无副作用（�
 st0.coffee = 0; st0.juice = 0; st0.water = 0; st0.beer = 3;
 drinker.thinkCd = 0; drinker.thirst = 25; drinker.state = "idle"; drinker.drunkT = 0;
 drinker.path = null; drinker.onArrive = null;
+zeroPack(drinker);   // 同上：包空才走 seekDrink 老路
 g = 0;
 while (drinker.state !== "drink" && g++ < 620) simUpdate(STEP);
 g = 0;
@@ -276,6 +281,7 @@ const stH = ensureStock(sc);
 stH.food = 10; stH.water = 5; stH.coffee = 0; stH.juice = 0; stH.beer = 0;
 hu.thinkCd = 0; hu.hunger = 20; hu.thirst = 20; hu.energy = 100;
 hu.task = null; hu.exploring = null; hu.path = null; hu.onArrive = null; hu.state = "idle";
+zeroPack(hu);   // 包内若有存粮会被路上自用就地吃掉，测不到「饥饿优先于喝水」的分支序
 let g2 = 0;
 while (hu.state === "idle" && g2++ < 20) simUpdate(STEP);
 g2 = 0;

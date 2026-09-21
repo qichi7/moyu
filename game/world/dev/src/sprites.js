@@ -826,7 +826,7 @@ function agentHeadLieSprite(skin, hairC) {
   });
 }
 
-// ---- 背包：8×8 点阵（carrying.res → 麻袋/柴捆/灰石/沙袋）----
+// ---- 背包：8×8 点阵（haul 槽 item → 麻袋/柴捆/灰石/沙袋/水桶/果篮/酒坛/咖啡袋/豆袋）----
 function agentPackSprite(res) {
   return sprGet(`k${res}`, () => {
     const { cv, g } = sprCtx(8, 8);
@@ -973,21 +973,21 @@ function bakeTurtle() {
 }
 function bakeWhale() {
   const { cv, g } = sprCtx(36, 18);
-  fillEllipseF(g, 14, 9, 13, 6, "#2c4a66");
-  fillEllipseF(g, 13, 12, 10, 3, "#3d6284");         // 白腹
-  rectF(g, 26, 8, 4, 3, "#2c4a66");                  // 尾柄
-  fillEllipseF(g, 30, 6, 3.4, 2.4, "#2c4a66");       // 尾鳍上叶
-  fillEllipseF(g, 30, 12, 3.4, 2.4, "#2c4a66");      // 尾鳍下叶
-  fillEllipseF(g, 10, 13, 2.6, 1.4, "#24405a");      // 胸鳍
-  pxF(g, 24, 7, "#cfe4f2");                          // 眼
-  rectF(g, 24, 11, 6, 1, "#24405a");                 // 嘴线
+  fillEllipseF(g, 20, 9, 13, 6, "#2c4a66");          // 躯干（中心偏右，头朝右——与全游戏侧视约定一致）
+  fillEllipseF(g, 21, 12, 10, 3, "#3d6284");         // 白腹
+  rectF(g, 6, 8, 4, 3, "#2c4a66");                   // 尾柄（左）
+  fillEllipseF(g, 3, 6, 3.4, 2.4, "#2c4a66");        // 尾鳍上叶（左）
+  fillEllipseF(g, 3, 12, 3.4, 2.4, "#2c4a66");       // 尾鳍下叶（左）
+  fillEllipseF(g, 24, 13, 2.6, 1.4, "#24405a");      // 胸鳍（近头侧）
+  pxF(g, 29, 7, "#cfe4f2");                          // 眼（头端）
+  rectF(g, 28, 11, 5, 1, "#24405a");                 // 嘴线（头端）
   return outlineSprite(cv, "#122234");
 }
 function bakeFish() {
   const { cv, g } = sprCtx(6, 4);
-  rectF(g, 0, 1, 4, 2, "#78b4dc");
-  rectF(g, 4, 1, 2, 2, "#5a94bc");                   // 尾
-  pxF(g, 1, 1, "#0a2438");                           // 眼
+  rectF(g, 2, 1, 4, 2, "#78b4dc");                   // 身（头朝右）
+  rectF(g, 0, 1, 2, 2, "#5a94bc");                   // 尾（左）
+  pxF(g, 4, 1, "#0a2438");                           // 眼
   return cv;
 }
 function bakeBird(frame, view) {

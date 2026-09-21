@@ -95,6 +95,72 @@ function faceTurn(e, dx, dy) {
   e.faceHoldT = 0;
 }
 
+// ---- 槽位背包（冻结契约 v0.4.1）：10 个物理格子装任意东西 ----
+// a.pack = Array(10).fill(null)；slot = { item, n, haul? }，haul=true 的槽是搬运货（回仓 deposit 自动入库）。
+// 堆叠上限查 config.SIM.PACK_STACK（消耗品/资源 ×3、工具 ×1）；可 haul 类型：wood/stone/sand/food/water。
+// 合并规则：同 item 且同 haul 标记（haul 有无视为不同类）先合并，堆满开新格，无空格返回实装数（< 请求数）。
+// haul 参数缺省 = 非 haul 槽。四个助手 + packHaulCount 定义在顶层：tasks.js/render.js 同作用域直接调用。
+function packCount(pack, item, haul) {
+  if (!pack) return 0;
+  const flag = !!haul;
+  let sum = 0;
+  for (const s of pack) if (s && s.item === item && !!s.haul === flag) sum += s.n;
+  return sum;
+}
+
+function packAdd(pack, item, n, haul) {
+  if (!pack || n <= 0) return 0;
+  const cap = SIM.PACK_STACK[item] || 0;
+  if (cap <= 0) return 0;
+  const flag = !!haul;
+  let left = n;
+  const hasSame = pack.some(s => s && s.item === item && !!s.haul === flag);
+  for (const s of pack) {          // ① 同类槽先合并（同 item 且同 haul 标记）
+    if (left <= 0) break;
+    if (s && s.item === item && !!s.haul === flag && s.n < cap) {
+      const put = Math.min(cap - s.n, left);
+      s.n += put; left -= put;
+    }
+  }
+  for (let i = 0; i < pack.length && left > 0; i++) {   // ② 堆满开新格；无空格剩余作罢
+    if (pack[i]) continue;
+    if (cap <= 1 && hasSame) break;   // 唯一物（工具 ×1）已持有：拒绝重复，不再开格
+    const put = Math.min(cap, left);
+    pack[i] = { item, n: put, haul: flag };
+    left -= put;
+  }
+  return n - left;                 // 实际装入数（包满时 < 请求数）
+}
+
+function packTake(pack, item, n, haul) {
+  if (!pack || n <= 0) return 0;
+  const flag = !!haul;
+  let left = n;
+  for (let i = 0; i < pack.length && left > 0; i++) {   // 跨格实扣，扣空置 null
+    const s = pack[i];
+    if (!s || s.item !== item || !!s.haul !== flag) continue;
+    const take = Math.min(s.n, left);
+    s.n -= take; left -= take;
+    if (s.n <= 0) pack[i] = null;
+  }
+  return n - left;
+}
+
+function packFree(pack) {
+  if (!pack) return 0;
+  let c = 0;
+  for (const s of pack) if (!s) c++;
+  return c;
+}
+
+// 搬运货总量（haul 槽求和）：decide 搬运分支 / die 遗产 / 渲染叠加层共用
+function packHaulCount(pack) {
+  if (!pack) return 0;
+  let sum = 0;
+  for (const s of pack) if (s && s.haul) sum += s.n;
+  return sum;
+}
+
 class Agent {
   constructor(x, y, native, opts) {
     this.x = x + 0.5; this.y = y + 0.5;   // 浮点 tile 坐标，格中心
@@ -125,6 +191,8 @@ class Agent {
     this.thirst = 100;                     // 水分：0~100，100 = 不渴（<30 找水喝，<8 持续脱水病倒）
     this.drunkT = 0;                       // 醉酒剩余秒数（喝麦酒：移速放缓、饥饿衰减放缓）
     this.coffeeT = 0;                      // 咖啡因剩余秒数（喝咖啡：精力衰减放缓）
+    // 随身背包（冻结契约 v0.4.1）：10 个物理槽位装任意东西（slot = { item, n, haul? }，全空起步）
+    this.pack = new Array(10).fill(null);
     this.face = "down";                    // 朝向：up/down/left/right（移动按实际位移更新，开工面向任务格）
     this.faceHoldT = 1;                    // 朝向持锁计时：1 = 不持锁（首次设向不受锁），切换后归 0 重新计锁
     this.home = null;                      // {x,y} 房屋
@@ -282,6 +350,33 @@ class Agent {
     else this.starveT = 0;
     if (this.starveT > 40) { this.starveT = 0; this.migrate(); }
 
+    // ---- 背包路上自用（v0.4.1 槽位背包）：需求衰减后、决策（seekDrink 分支）前——
+    // 包内有存货就地吃喝，不停步不换 state；包空才走 decide 里的 seekDrink/行程预算老路。
+    // 取用顺序：自购（非 haul）槽优先，吃完才动搬运的口粮（同 item 的 haul 槽回退——
+    // wood/stone/sand 的 haul 槽按 item 查找天然不在取食范围）----
+    const pk = this.pack;
+    if (pk && (this.hunger < SIM.PACK_LOW || this.thirst < SIM.PACK_LOW)) {
+      if (this.hunger < SIM.PACK_LOW &&
+          (packTake(pk, "food", 1) > 0 || packTake(pk, "food", 1, true) > 0)) {
+        this.hunger = Math.min(100, this.hunger + SIM.PACK_RESTORE.food);
+      }
+      if (this.thirst < SIM.PACK_LOW) {
+        if (packTake(pk, "water", 1) > 0 || packTake(pk, "water", 1, true) > 0) {
+          this.thirst = Math.min(100, this.thirst + SIM.PACK_RESTORE.water);
+        } else {
+          // 无水但有其他饮品：依序取用果汁/麦酒/咖啡（恢复与副作用和城库饮用一致）
+          const alt = packCount(pk, "juice") > 0 ? "juice" : packCount(pk, "beer") > 0 ? "beer" : packCount(pk, "coffee") > 0 ? "coffee" : null;
+          if (alt) {
+            packTake(pk, alt, 1);
+            this.thirst = Math.min(100, this.thirst + SIM.PACK_RESTORE[alt]);
+            if (alt === "juice") this.energy = Math.min(100, this.energy + SIM.PACK_JUICE_ENERGY);
+            else if (alt === "beer") this.drunkT = SIM.DRUNK_TIME;
+            else this.coffeeT = SIM.COFFEE_TIME;
+          }
+        }
+      }
+    }
+
     // 决策：thinkCd 门控 + 高倍速下的全局轮询预算（SCHED.decideBudget 由 main.js 按倍速设定，
     // headless 测试默认 Infinity 不受影响）——未轮到时稍后重试，保证决策频率与倍速解耦
     if (this.thinkCd <= 0) {
@@ -298,12 +393,13 @@ class Agent {
         const st = sc && ensureStock(sc);
         if (st && st.food > 0) {
           st.food -= 1; this.hunger = 100;
+          this.restockPack(sc);   // 粮仓结算顺路补给背包（补给点①）
           this.state = "idle";
         } else { this.state = "idle"; } // 本城没粮，回去等规划器开荒/挖塘
         break;
       }
       case "drink": {
-        // 原地饮用 2 秒后结算：城库饮品扣库存 1 + 给效果；水井/河湖直饮 +40 无副作用
+        // 原地饮用 1 秒后结算：城库饮品扣库存 1 + 给效果；水井/河湖直饮 +100 无副作用
         this.drinkWait -= dt;
         if (this.drinkWait > 0) break;
         if (this.drinkRes && this.drinkCity) {
@@ -318,7 +414,7 @@ class Agent {
           }
           // 库存恰被喝光：白跑一趟，等下次决策另寻水源
         } else {
-          this.thirst = Math.min(100, this.thirst + 40);   // 井水/河水直饮（与城库清水 75 同档，低衰减下约撑 50s）
+          this.thirst = Math.min(100, this.thirst + SIM.DRINK_RESTORE.water);   // 井水/河水直饮（恢复量与城库清水同源：100）
           logThrottled(`${this.name} 趴在水边畅饮了一通。`, 20);
         }
         this.drinkRes = null; this.drinkCity = null;
@@ -406,11 +502,13 @@ class Agent {
     // 3. 领任务干活（受困者跳过：寻路必败只会把远处任务的 blockedCount 刷到冻结）
     if (!this.task && world.time >= (this.trapUntil || 0)) {
       // 保险：手上有产出先就地登记入库（否则领新任务 → 旧产出被下次完工覆盖而蒸发）
-      if (this.carrying) this.deposit();
+      if (packHaulCount(this.pack) > 0) this.deposit();
       const t = tasksTake(this);
       if (t) {
         // 劳动保护：路程耗能（ENERGY_DECAY 0.9/s ÷ 船速 1.7 格/s 往返）预估不足 → 先睡觉，防止远途过劳死
         const d = Math.abs(t.x - this.x) + Math.abs(t.y - this.y);
+        // 领远任务先补给背包（补给点③）：远途自给粮水，减少中途跑粮仓/水井的往返
+        if (d > SIM.PACK_RESTOCK_DIST) this.restockPack(ownerSettle(this.x, this.y));
         if (this.energy < Math.min(95, 18 + d * (this.job === "explorer" ? 0.4 : 0.75))) { this.goSleep(); return; }   // 探索者耐走（系数减半）
         // 生命需求先行：渴跌破临界平线不接新任务（thirst<35 与分支 2.5 喝水线同档——
         // 旧版 min(65,22+d×1.7) 行程门曾把渴值常驻 30~65 区间的居民全数拦成「渴而不工」，
@@ -439,8 +537,8 @@ class Agent {
       const tk = this.task;   // 闭包捕获：onArrive 触发时任务可能已被协同完工释放
       if (this.goTo(tk.x, tk.y)) { this.state = "walk"; this.onArrive = () => { this.state = "work"; this.faceTo(tk.x + 0.5, tk.y + 0.5); }; return; }
     }
-    // 3.5 搬运：身上有产出先送回仓库入库（名称即语义：仓库里的才算资源）
-    if (this.carrying && this.state === "idle") {
+    // 3.5 搬运：身上有产出（haul 槽）先送回仓库入库（名称即语义：仓库里的才算资源）
+    if (packHaulCount(this.pack) > 0 && this.state === "idle") {
       const s = nearestSettlement(Math.round(this.x), Math.round(this.y));
       if (s && this.goTo(s.x, s.y)) {
         this.state = "walk";
@@ -545,13 +643,39 @@ class Agent {
     }
   }
 
-  // 入库：把搬运的产出登记进仓库（粮食与其他资源一致：进所属城市库存，城市内共享）
+  // 入库：把搬运的产出（haul 槽）登记进仓库（粮食与其他资源一致：进所属城市库存，城市内共享）。
+  // 非 haul 槽不动——自己的口粮与工具不上缴；暂无归属聚落则货留在包里下次再送（不蒸发）
   deposit() {
-    if (!this.carrying) return;
-    const { res, amount } = this.carrying;
-    this.carrying = null;
+    const p = this.pack;
+    if (!p || packHaulCount(p) <= 0) return;
     const s = ownerSettle(Math.round(this.x), Math.round(this.y));
-    if (s) ensureStock(s)[res] += amount;
+    if (!s) return;
+    const st = ensureStock(s);
+    let hauled = false;
+    for (let i = 0; i < p.length; i++) {
+      const sl = p[i];
+      if (!sl || !sl.haul) continue;
+      st[sl.item] += sl.n;
+      p[i] = null;
+      hauled = true;
+    }
+    if (hauled) this.restockPack(s);   // 入库结算顺路补给背包（补给点②）
+  }
+
+  // 背包补给（补给点③见 decide 领远任务分支；工具不补——首次执行对应工作时自动领取，永久持有）：
+  // food 补至 3、water 补至 2、果汁/麦酒/咖啡各补 1，有城库货才拿并扣城库 stock（堆叠上限 PACK_STACK 封顶）
+  restockPack(city) {
+    const st = city && ensureStock(city);
+    const p = this.pack;
+    if (!st || !p) return;
+    for (const k of Object.keys(SIM.PACK_RESTOCK)) {
+      const have = packCount(p, k);   // 非 haul 计数（补给进自己的槽，不混入搬运货）
+      const want = Math.min(SIM.PACK_RESTOCK[k] - have, (SIM.PACK_STACK[k] || 0) - have, st[k] || 0);
+      if (want > 0) {
+        const got = packAdd(p, k, want);   // 实装数可能 < want（无空格时）：按实装扣城库
+        if (got > 0) st[k] -= got;
+      }
+    }
   }
 
   // 死亡结算：释放任务与住房，通知世界（背包产出就地登记——拓荒者的遗物不白白散失）
@@ -560,7 +684,7 @@ class Agent {
     this.dead = true;
     if (this.task) { tasksRelease(this.task, this); this.task = null; }
     if (this.rescuing) { this.rescuing.rescuer = null; this.rescuing = null; }   // 释放被困动物的认领锁
-    if (this.carrying) { this.deposit(); this.carrying = null; }   // 遗产：产出就地入库
+    if (packHaulCount(this.pack) > 0) this.deposit();   // 遗产：搬运产出就地登记入库
     this.home = null;
     logMsg(`${this.name} ${reason}，享年 ${Math.floor(this.age)} 岁。`);
     emit("agent-death", this);
@@ -748,13 +872,13 @@ class Agent {
     if (stk) for (const r of DRINK_ORDER) if ((stk[r] || 0) > 0) { pick = r; break; }
     if (pick && sc && this.goTo(sc.x, sc.y)) {
       this.state = "walk";
-      this.onArrive = () => { this.state = "drink"; this.drinkWait = 2; this.drinkRes = pick; this.drinkCity = sc; };
+      this.onArrive = () => { this.state = "drink"; this.drinkWait = 1; this.drinkRes = pick; this.drinkCity = sc; };
       return true;
     }
     const w = this.nearestWaterSpot();
     if (w && this.goTo(w.x, w.y)) {
       this.state = "walk";
-      this.onArrive = () => { this.state = "drink"; this.drinkWait = 2; this.drinkRes = null; this.drinkCity = null; };
+      this.onArrive = () => { this.state = "drink"; this.drinkWait = 1; this.drinkRes = null; this.drinkCity = null; };
       return true;
     }
     return false;   // ③ 找不到任何水源：调用方回退后续分支
@@ -915,6 +1039,11 @@ class Agent {
         }
       }
     }
+    // 工具加成（v0.4.1 槽位背包）：持有对应工具（首次执行该类工作自动领取，永久持有）→ 进度 ×1.2。
+    // 加成加在 effort 源头：doWork 的进度制（t.progress += effort）与 DIG 的 workTile 磨血
+    // （workTile(t, effort)）两条进度路径共用这一个变量，一处乘算两处生效
+    const tool = taskToolOf(t);
+    if (tool && packCount(this.pack, tool) > 0) effort *= SIM.PACK_TOOL_BONUS;
     // 工程资源检查：架桥耗木材、造陆耗沙土（联合库存，跨聚落汇总），不足则挂起等补给
     if (t.type === "BRIDGE" || t.type === "FILL") {
       const cost = TASK_RESOURCE_COST[t.type];
@@ -934,28 +1063,20 @@ class Agent {
       return;
     }
     if (t.type === "DIG") {
-      // 伐木/采石：磨 tile 血量，产出由工人搬运回仓
+      // 伐木/采石：磨 tile 血量，产出由 tasksFinish 直接入包（haul 槽，回仓入库）
       const r = workTile(t, effort);
       if (r && r.done) {
-        const y = tasksFinish(t, this, r.was);   // 完成任务，传入改造前 tile 判定产出
+        tasksFinish(t, this, r.was);   // 完成任务，传入改造前 tile 判定产出（死锁 #16 的 was 语义）
         this.task = null;
-        this.state = "idle";
-        if (y) {
-          this.carrying = y;
-          this.state = "idle";           // 下一轮决策将回仓入库
-        }
+        this.state = "idle";           // 下一轮决策将回仓入库
       }
     } else {
       // 其余任务一律进度制（建造/农牧/畜牧/采集/狩猎等），防止无出口的假 workTile 卡死
       t.progress += effort;
       if (t.progress >= t.need) {
-        const y = tasksFinish(t, this);   // 完成任务，取得搬运产出
+        tasksFinish(t, this);   // 完成任务，产出已由 tasksFinish 入包（haul 槽）
         this.task = null;
-        this.state = "idle";
-        if (y) {
-          this.carrying = y;
-          this.state = "idle";           // 下一轮决策将回仓入库
-        }
+        this.state = "idle";    // 下一轮决策将回仓入库
       }
     }
     this.energy -= SIM.ENERGY_DECAY * dt * 0.5;

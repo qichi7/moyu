@@ -141,6 +141,31 @@
   }
   #follow-btn:hover { color: #fff; border-color: #4a5f8a; }
   #follow-btn.active { background: #2c3a58; color: #e8d9a0; border-color: #4a5f8a; }
+
+  /* 背包区（信息面板内）：5 列方格共 10 格，亮格=有货、暗格=空；配色沿用 info-panel 深色系 */
+  .pack-grid {
+    display: grid; grid-template-columns: repeat(5, 26px);
+    gap: 3px; margin: 4px 0 2px; justify-content: start;
+  }
+  .pack-cell {
+    position: relative; width: 26px; height: 26px;
+    display: flex; align-items: center; justify-content: center;
+    background: #161c2a; border: 1px solid #2a3448; border-radius: 4px;
+    font-size: 14px; line-height: 1;
+  }
+  .pack-cell.empty { opacity: 0.28; background: #10141f; border-color: #1c2333; }
+  .pack-cell i {
+    position: absolute; right: 1px; bottom: 0;
+    font-style: normal; font-size: 9px; color: #e8d9a0;
+    font-variant-numeric: tabular-nums; line-height: 1;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  }
+  /* 窄屏：背包格缩小（独立 media 块置于基础样式之后，保证覆盖生效） */
+  @media (max-width: 700px) {
+    .pack-grid { grid-template-columns: repeat(5, 20px); gap: 2px; }
+    .pack-cell { width: 20px; height: 20px; font-size: 11px; }
+    .pack-cell i { font-size: 8px; }
+  }
 </style>
 </head>
 <body>

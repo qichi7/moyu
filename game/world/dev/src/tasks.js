@@ -80,7 +80,53 @@ function tasksTake(agent) {
     const score = (t.blockedCount || 0) * 100000 + d * 10 - jobMatch * 5000 - age * 3 - crisis - natl + thirstFetch;
     if (score < bestScore) { bestScore = score; best = t; }
   }
+  if (best) grantTaskTool(best, agent);   // 成功领取 → 首次执行对应工作自动领取工具（v0.4.0）
   return best;
+}
+
+// ---- 背包工具（v0.4.0 冻结契约）----// 任务 → 对应工具：FISH→钓竿、DIG 伐木→斧头、DIG 其他（采石等）→镐、FARM→锄头、
+// BUILD 及建造类（含 BRIDGE/FILL/DOCK 等工程）→锤子。DIG 的伐木判定与 taskJobPref 同口径
+// （res==="stone" 为采石，其余含缺省视为伐木——走廊/扩区随手立项的 DIG 不带 res，多为清树）
+function taskToolOf(t) {
+  switch (t.type) {
+    case "FISH": return "rod";
+    case "FARM": return "hoe";
+    case "DIG": return t.res === "stone" ? "pick" : "axe";
+    case "BUILD": case "PASTURE": case "PLANT": case "PLANT_BERRY": case "QUARRY": case "SANDPIT":
+    case "EXCAV": case "WELL": case "BREWERY": case "PRESS": case "ROASTERY":
+    case "BRIDGE": case "FILL": case "DOCK": return "hammer";
+    default: return null;   // HUNT/GATHER/CAPTURE/FETCH_WATER 等徒手活不发工具
+  }
+}
+
+const _TOOL_NAMES = { rod: "钓竿", axe: "斧头", pick: "镐头", hoe: "锄头", hammer: "锤子" };
+
+// 搬运产出入包（冻结契约 v0.4.1）：资源（木/石/沙/粮/水）先进背包 haul 槽，回仓 deposit 再入库；
+// 包满装不下的差额就地入库兜底（产出不蒸发）。返回实装入包数
+function grantCarry(agent, res, amount) {
+  const got = agent && agent.pack ? packAdd(agent.pack, res, amount, true) : 0;
+  if (got < amount) {
+    const s = ownerSettle(agent.x, agent.y) || nearestSettlement(agent.x, agent.y);
+    if (s) ensureStock(s)[res] += (amount - got);
+  }
+  return got;
+}
+
+// 发放工具：永久持有无限耐久，重复领取不加（对应工作进度 ×1.2 的加成判定在 agent.doWork）。
+// 钓竿是木作：扣联合木 1，库存不足也照发（工具是劳动资料，不该被库存卡死生产），只记不同日志
+function grantTaskTool(t, agent) {
+  const tool = taskToolOf(t);
+  if (!tool) return;
+  const p = agent.pack || (agent.pack = new Array(10).fill(null));
+  if (packCount(p, tool) > 0) return;   // 已持有：永久工具不重复领取
+  packAdd(p, tool, 1);                  // 入槽（非 haul；工具堆叠上限 ×1）
+  if (tool === "rod") {
+    const ok = jointStock("wood") >= 1;
+    if (ok) jointConsume("wood", 1);
+    logThrottled(`${agent.name} 从仓库取了一根钓竿${ok ? "" : "（联合木料不足，仍先行发放）"}。`, 30);
+  } else {
+    logThrottled(`${agent.name} 从仓库取了一把${_TOOL_NAMES[tool]}。`, 30);
+  }
 }
 
 function tasksRelease(t, agent) {
@@ -124,9 +170,9 @@ function tasksFinish(t, agent, was) {
     }
     case "DIG": {
       setTile(t.x, t.y, T.GRASS);
-      // 产出由工人搬运回仓：伐木得木材、采石得石材（was 由 workTile 传入——完工后 tile 已改写，不能重读）
-      if (was === T.TREE) return { res: "wood", amount: 6 };
-      if (was === T.MOUNTAIN) return { res: "stone", amount: 7 };
+      // 产出由工人背包搬运回仓：伐木得木材、采石得石材（was 由 workTile 传入——完工后 tile 已改写，不能重读）
+      if (was === T.TREE) { grantCarry(agent, "wood", 6); return null; }
+      if (was === T.MOUNTAIN) { grantCarry(agent, "stone", 7); return null; }
       break;
     }
     case "FILL": {
@@ -172,17 +218,17 @@ function tasksFinish(t, agent, was) {
       break;
     }
     case "FISH": {
-      if (catchFish(t.fishX, t.fishY)) return { res: "food", amount: 4 };
+      if (catchFish(t.fishX, t.fishY)) { grantCarry(agent, "food", 4); return null; }
       break;
     }
     case "GATHER": {
-      // 采集：浆果/果树 → 粮；沙滩 → 沙土（产出由工人搬运回仓）
-      if (t.res === "sand") return { res: "sand", amount: 3 };
-      if (gatherBerry(t.x, t.y)) return { res: "food", amount: SIM.GATHER_YIELD };
+      // 采集：浆果/果树 → 粮；沙滩 → 沙土（产出由工人背包搬运回仓）
+      if (t.res === "sand") { grantCarry(agent, "sand", 3); return null; }
+      if (gatherBerry(t.x, t.y)) { grantCarry(agent, "food", SIM.GATHER_YIELD); return null; }
       break;
     }
     case "HUNT": {
-      // 狩猎：猎物从世界移除，肉由猎手搬运回仓；同时撤销绑同一猎物的捕获任务
+      // 狩猎：猎物从世界移除，肉由猎手背包搬运回仓；同时撤销绑同一猎物的捕获任务
       const c = t.creature;
       if (c && !c.dead) {
         c.dead = true;
@@ -193,7 +239,8 @@ function tasksFinish(t, agent, was) {
             tasks.list.splice(i, 1);
           }
         }
-        return { res: "food", amount: huntReward(c) };
+        grantCarry(agent, "food", huntReward(c));
+        return null;
       }
       break;
     }
@@ -251,9 +298,10 @@ function tasksFinish(t, agent, was) {
       break;
     }
     case "FETCH_WATER": {
-      // 打水：完成者背包驮水回仓（走既有搬运回仓语义，deposit 入所属城市 water 字段）；
-      // 一趟 5 桶（低衰减口径下一次直饮约抵 5 桶，库存才攒得起来，酿造链才有原料）
-      return { res: "water", amount: 2 };
+      // 打水：完成者背包驮水回仓（haul 槽，deposit 入所属城市 water 字段）；
+      // 一趟 5 桶跨两格驮（3+2，低衰减口径下一次直饮约抵 5 桶，库存才攒得起来，酿造链才有原料）
+      grantCarry(agent, "water", 5);
+      return null;
     }
     case "PRESS_JUICE": case "BREW_BEER": case "BREW_COFFEE": {
       // 制作：原料从所属城市库存扣除（与 tasksTake 领取过滤双处生效；不足时钳到 0 防负库存），

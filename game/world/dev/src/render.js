@@ -362,6 +362,13 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
           ctx.fillText("!", px, py - hh * 0.9);
         }
         drawC(spr, px - w / 2, py - hh * 0.62, w, hh);
+        if (c.type === "whale") {   // 喷水柱（v0.2.0 像素化时遗失，恢复；相位用 world.time 与缩放解耦）
+          const sp2 = (t * 0.5) % 2;
+          if (sp2 < 1) {
+            ctx.fillStyle = `rgba(240,248,255,${(0.6 - sp2 * 0.6).toFixed(2)})`;
+            ctx.fillRect(px + w * 0.08, py - hh * 0.8 - sp2 * hh * 0.5, w * 0.06, hh * 0.45);
+          }
+        }
       }
       if (c.pasture) { // 圈养标记
         ctx.strokeStyle = "rgba(200,170,80,0.8)"; ctx.lineWidth = 0.8;
@@ -498,9 +505,11 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
     if (pose.legs)   // 腿层（sleep 无腿层；正面/背面共用 "vert"，旧签名多传实参无害）
       putLayer(agentPantsSprite(look.pants, pose.legs, a.sex, look.skin, view === "side" ? "side" : "vert"),
         ax, ay, s + 0.5, s + 0.5);
-    if (a.carrying) {   // 资源背包：身体左后、略上移露包顶
-      const pk = agentPackSprite(a.carrying.res);
-      putLayer(pk, ax, ay + 3 * k, 8 * k, 8 * k);
+    // 资源背包叠加（v0.4.1 槽位背包）：身后有搬运货（haul 槽）就画通用背包——取第一个 haul 槽的资源选样式
+    if (a.pack) {
+      for (const sl of a.pack) {
+        if (sl && sl.haul) { putLayer(agentPackSprite(sl.item), ax, ay + 3 * k, 8 * k, 8 * k); break; }
+      }
     }
     putLayer(agentBodySprite(top, pose.key, a.sex, view), ax, ay, s + 0.5, s + 0.5);
     const headSpr = pose.key === "sleep"

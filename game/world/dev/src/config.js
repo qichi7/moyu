@@ -39,8 +39,7 @@ const TILE_META = {
   [T.ROASTERY]: { name: "烘焙坊", color: "#5a4a3a", walk: false, h: 0 },
 };
 
-const WORLD_W = 240, WORLD_H = 180;
-const INIT_REGION = { x: 68, y: 50, w: 104, h: 80 }; // 初始大陆区域
+const WORLD_W = 240, WORLD_H = 180;   // 仅作语义参考：无限地图时代初始生成以主岛原点为中心（genWorld），无固定区域
 
 const SIM = {
   DAY_LEN: 90,          // 一个昼夜 = 90 sim 秒
@@ -88,11 +87,11 @@ const SIM = {
   BOAT_FISH_YIELD: 2,         // 渔船每次起网渔获
   FISHING_INTERVAL: 10,       // 渔船起网周期（秒）
   // ---- 口渴与饮品 ----
-  THIRST_DECAY: 1.4,          // 口渴每秒下降（walk 实际 ≈1.32/s：直饮 +70 约撑 50s，避免全民 24s 一渴的循环）
+  THIRST_DECAY: 0.7,          // 口渴每秒下降（walk 实际 ≈0.84/s：直饮/城库饮水恢复 100 约撑 119s，路上另有背包水自用，避免高频喝水打断生产）
   STATE_HUNGER: { idle: 1.0, walk: 1.15, run: 1.5, work: 1.45, sleep: 0.5 },  // 饥饿衰减按状态倍率（睡觉减半）
   STATE_ENERGY: { idle: 0.85, walk: 1.1, run: 1.6, work: 1.35 },              // 体力衰减按状态倍率（睡觉不衰减，走 ENERGY_REGEN 恢复）
   STATE_THIRST: { idle: 1.0, walk: 1.2, run: 1.5, work: 1.3, sleep: 0.55 },   // 口渴衰减按状态倍率
-  DRINK_RESTORE: { water: 55, juice: 75, beer: 60, coffee: 50 },              // 各饮品一次饮用的解渴量（清水 75：约抵 57s walk 消耗）
+  DRINK_RESTORE: { water: 100, juice: 100, beer: 100, coffee: 100 },          // 各饮品一次饮用的解渴量（统一 100 喝一次回满；果汁/麦酒/咖啡另有效果见下）
   DRUNK_TIME: 40,             // 醉酒状态持续时间（秒）
   COFFEE_TIME: 120,           // 咖啡因提神持续时间（秒）
   COFFEE_ENERGY_FACTOR: 0.55, // 咖啡因期间体力衰减倍率
@@ -101,6 +100,14 @@ const SIM = {
   DEHYDRY_TIME: 40,           // 口渴归零后的脱水耐受时长（秒），超时进入脱水伤害
   SAFE_THIRST: 12,            // 行程预算：按当前路径走完时渴值预计低于此 → 中途弃程先喝水（防隧道视野渴死）
   SAFE_HUNGER: 8,             // 行程预算：按当前路径走完时饥饿预计低于此 → 中途弃程先吃饭
+  // ---- 背包（v0.4.0：粮仓补给 + 路上自用 + 工具加成）----
+  PACK_RESTOCK_DIST: 15,      // 领任务距离超过此值 → 先补给背包再出发（近活不值得跑仓）
+  PACK_LOW: 35,               // 路上自用阈值：hunger/thirst 低于此且包内有货 → 就地吃喝（不停步不换 state）
+  PACK_TOOL_BONUS: 1.2,       // 持有对应工具时的工作进度倍率（首次执行该类工作自动领取，永久持有）
+  PACK_STACK: { food: 3, water: 3, juice: 3, beer: 3, coffee: 3, wood: 3, stone: 3, sand: 3, rod: 1, axe: 1, pick: 1, hoe: 1, hammer: 1 },  // 背包堆叠上限（v0.4.1：资源入包 wood/stone/sand ×3）
+  PACK_RESTOCK: { food: 3, water: 2, juice: 1, beer: 1, coffee: 1 },          // 补给目标量（有城库货才拿并扣城库 stock；工具不补）
+  PACK_RESTORE: { food: 50, water: 65, juice: 75, beer: 60, coffee: 50 },     // 路上自用恢复量（果汁/麦酒/咖啡另有精力/醉/咖啡因效果）
+  PACK_JUICE_ENERGY: 10,      // 果汁自用额外恢复的精力
   // ---- 咖啡田 ----
   COFFEE_MATURITY: 90,        // 咖啡田成熟秒数（粮食田用 FARM_MATURITY）
   COFFEE_YIELD: 2,            // 咖啡田每次成熟产豆量

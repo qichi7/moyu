@@ -18,8 +18,10 @@ node dev/test/entry.js   # 入口冒烟：stub DOM 跑构建产物启动链，7 
 node dev/test/voyage.js  # 航海专项：满载返航 / 低补给被困救援闭环，18 项断言
 node dev/test/creature.js # 动物专项：老死 / 搁浅死亡与救援 / 繁衍 / 渔场 / 渔船 / 挖塘 / 运鱼 / 灌溉 / 岛数随机，27 项断言
 node dev/test/explorer.js # 探索者专项：保底转职 / 前沿点亮 / 腿数解除，6 项断言
+node dev/test/family.js  # 亲子专项：固定姓/去重/sex 确定性/随亲姓/出生点，36 项断言
 node dev/test/pixel.js   # 渲染专项：软件光栅化跑 drawScene 与全套 sprite 烘焙，52 项断言
 node dev/test/drink.js   # 饮品专项：口渴/状态差分/饮用结算/醉酒减速/咖啡田不产粮/face 朝向契约（含持锁迟滞），29 项断言（依赖 build 产物 .tmp_logic.js，先 node dev/build.js）
+node dev/test/pack.js    # 背包专项：槽位合并/容量/haul 搬运链/deposit/工具与加成，41 项断言
 open index.html          # 人工验收（agent 每次修改完成后必须自动执行，见第 6 节）
 ```
 
@@ -36,7 +38,7 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 5. **区域生成必须 chunk 对齐**：`generateRegion` 内部已做对齐扩展——绕过它直接写 chunk 会产生「半写 chunk」（bounding 只盖 chunk 一部分，其余格保持默认值 0 = VOID 且永不修复——历史死锁 #2）。
 6. **点亮永不黑回**：VOID→DEEP 的转换记录在 `world.litCells`，`settleFarTile` 的三分支语义（reveal 点亮 / 首次 VOID / 重算保持原值）不要动。**发现岛显现必须用 combined litTest（探索斑块 ∪ 岛缘海圆）**——直接对矩形 bounding 做 reveal 全亮会留下方形亮海块（历史 bug）。
 7. **发现只由居民点亮触发**：`generateRegion` 的 `noDiscover` 参数——视口生成（`processExplore`）、工程生成（`expand`/`genWorld`）一律传 `true`；只有 `revealArea`（居民探索）允许触发发现网格。漏传会导致「拖一下视角虚空冒岛」的叙事崩坏。
-8. **资源计数 = 仓库库存**：采集/狩猎产出由小人 `carrying` 背包搬运，走到最近聚落 `deposit()` 才入 `settlement.stock`/全局粮池；死亡时背包散失。名册显示的就是这个库存。工程（BRIDGE/FILL）完工扣资源、库存不足在 `doWork` 与 `tasksTake` 双处挂起。
+8. **资源计数 = 仓库库存**：采集/狩猎/打水/伐木/采石/采沙产出经 `grantCarry`（tasks.js）入小人背包 **haul 槽**（`packAdd(pack, res, n, true)`，包满差额就地入库兜底），走到最近聚落 `deposit()` 清 haul 槽才入 `settlement.stock`；**个人口粮/饮品槽不上缴**；死亡时 haul 槽就地登记、个人物品散失。名册显示的就是这个库存。工程（BRIDGE/FILL）完工扣资源、库存不足在 `doWork` 与 `tasksTake` 双处挂起。
 9. **生物引用用稳定 id**：`agent.id` 自增唯一（名册 `data-id`、查找用 `agents.find(id)`），`agents.indexOf` 会因死亡 splice 错位。
 10. **视觉与逻辑时钟分离**：昼夜明暗用 `visualTod`（main.js 维护，增速封顶 **10×**）、波光用 `waveT`（暂停即静止）——两者经参数传入 `drawScene`，**勿在渲染层直接读 `world.timeOfDay` 或 `performance.now()`**；小人作息等逻辑仍用 `world.timeOfDay`（模拟时间，`isDaytime()` 勿动）。
 11. **航海状态冻结需求**：`agent.state === "voyage"` 时 `update` 提前 return（坐标由船携带、hunger/energy 不衰减）——防止远航饿死；船实体在 `world.ships`（sailing/return/docked 三态 + 航程上限），靠岸/返航/清理见 `shipTick`；造船消耗联合木材 `SIM.SHIP_COST`。
@@ -48,18 +50,18 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 | 文件 | 职责 | 关键入口 |
 |------|------|---------|
 | events.js | 事件总线 | `onEvent(name,fn)` / `emit(name,data)` |
-| config.js | 全部常量：tile 表 `T`+`TILE_META`（24 种，新增水井/酒坊/压榨坊/烘焙坊）、模拟参数 `SIM`——含**口渴/饮品链**（`THIRST_DECAY`、状态衰减系数 `STATE_HUNGER/ENERGY/THIRST`、`DRINK_RESTORE`、`DRUNK_TIME/DRUNK_SPEED_FACTOR/BEER_HUNGER_FACTOR`、`COFFEE_TIME/COFFEE_ENERGY_FACTOR`、`DEHYDRY_TIME`）与**咖啡田**（`COFFEE_MATURITY/COFFEE_YIELD`）、物种寿命 `SPECIES_AGE`、时代 `ERAS`、航海参数 | 调数值先看这里 |
+| config.js | 全部常量：tile 表 `T`+`TILE_META`（24 种，新增水井/酒坊/压榨坊/烘焙坊）、模拟参数 `SIM`——含**口渴/饮品链**（`THIRST_DECAY`、状态衰减系数 `STATE_HUNGER/ENERGY/THIRST`、`DRINK_RESTORE`、`DRUNK_TIME/DRUNK_SPEED_FACTOR/BEER_HUNGER_FACTOR`、`COFFEE_TIME/COFFEE_ENERGY_FACTOR`、`DEHYDRY_TIME`）与**咖啡田**（`COFFEE_MATURITY/COFFEE_YIELD`）、物种寿命 `SPECIES_AGE`、时代 `ERAS`、航海参数、背包 `PACK_RESTOCK/PACK_LOW/PACK_STACK/PACK_RESTORE/PACK_TOOL_BONUS/PACK_JUICE_ENERGY` | 调数值先看这里 |
 | noise.js | 种子随机 `rng/rand/randInt`、值噪声 `makeNoise().fbm`、`hash2(x,y)` | 确定性生成全靠它 |
 | path.js | BFS 寻路（160×160 窗口、负坐标、blocked 检测） | `findPath(sx,sy,tx,ty)` |
 | world.js | chunk 系统、`generateRegion`（两遍生成：海拔场+悬崖/洞穴，岛公式+发现网格+点亮）、`carveRiver` 河流（逐格登记 `world.rivers` 惰性 Set，河流信息框/渲染/直饮判定用）、`expand` 扩张、tile 读写、资源库存（`ensureStock` **9 字段**：wood/stone/sand/food/water/juice/beer/coffee/beans，缺失字段统一补 0）与联合库存、世界纪事 `logMsg`（每条递增单调计数 `world.logSeq`——logs 截断 200 条后 length 恒定，HUD 判刷新必须用 logSeq） | `tileAt/setTile/findSpot/ensureStock/revealArea/jointStock/jointConsume/carveRiver/logMsg` |
-| tasks.js | 任务系统 **23 种**（新增水井/酒坊/压榨坊/烘焙坊 4 建筑 + 打水/榨汁/酿酒/烘咖啡 4 制作；FARM 可带 `crop:"coffee"` 透传成咖啡田，消费方须容错缺省）：立项/领任务（职业匹配+任务老化+资源过滤）/完成结算；**成本结算两类**——BRIDGE/FILL 走联合库存（doWork 挂起 + tasksTake 跳过双处）；榨汁/酿酒/烘咖啡走**所属城市库存**（tasksTake 领取过滤 + tasksFinish 完工扣除双处，缺料钳 0 防负库存；产出直接入库不走搬运；打水走背包搬运回仓） | `tasksAdd/tasksTake/tasksFinish/TASK_RESOURCE_COST` |
+| tasks.js | 任务系统 **23 种**（新增水井/酒坊/压榨坊/烘焙坊 4 建筑 + 打水/榨汁/酿酒/烘咖啡 4 制作；FARM 可带 `crop:"coffee"` 透传成咖啡田，消费方须容错缺省）：立项/领任务（职业匹配+任务老化+资源过滤）/完成结算；**成本结算两类**——BRIDGE/FILL 走联合库存（doWork 挂起 + tasksTake 跳过双处）；榨汁/酿酒/烘咖啡走**所属城市库存**（tasksTake 领取过滤 + tasksFinish 完工扣除双处，缺料钳 0 防负库存；产出直接入库不走搬运；打水走背包搬运回仓）；**产出经 `grantCarry` 入背包 haul 槽**（v0.4.1 槽位制，包满差额就地入库） | `tasksAdd/tasksTake/tasksFinish/TASK_RESOURCE_COST/grantCarry` |
 | creature.js | 十种生物实体（栖息地系统 `habitatOk`：游荡/逃跑疲劳/跟随/驯化/圈养/繁殖/狼捕食；野生繁衍分栖息地上限；老死；搁浅被困死亡——施工改变地形后等待救援或死亡，`carriedBy` 被人搬运）+ **四方向朝向**（`updateFace` 走统一入口 `faceTurn` 持锁迟滞，按实际位移主轴更新、被挡不动保持；逃跑/游荡/跟随各移动路径实际位移才更新） | `creatures` 数组、`populateIslandCreatures`、`habitatOk`、`wildBreedTick` |
-| agent.js | 小人：个体属性（探索欲/勤劳）、喜好（explore/homebody/animal/fishing/none）、职业（7 种可转职）、状态机、探索旅程、**航海（startVoyage）**、迁居、登岛命名即定居化、年龄死亡；性别（id hash 确定性）/父姓母姓记录/性别化名字池；**口渴与饮品（thirst/drunkT/coffeeT；`DRINK_ORDER` 城库取用顺序 coffee>juice>beer>water；drink 态原地 2 秒结算；`nearestWaterSpot` 水井/河湖直饮找水，圈扫 40 格结果缓存 2s；thirst<8 持续 40s 脱水病倒 `sickSource="thirst"`）**；**四方向朝向**（统一入口 `faceOf/faceTurn` 在 agent.js 顶层定义、creature.js 同作用域共用——`faceTurn` 带持锁迟滞：反向掉头立即切、90° 变向需 `faceHoldT` 满 0.8s（update 累计封顶 1、切换归 0 重计，undefined 视为 1 首设不受锁），`stepAlong` 按实际位移主轴更新 + `faceTo` 开工面向任务格（显式设向绕锁直设并重置计锁）） | `Agent.update → decide / die / startVoyage` |
+| agent.js | 小人：个体属性（探索欲/勤劳）、喜好（explore/homebody/animal/fishing/none）、职业（7 种可转职）、状态机、探索旅程、**航海（startVoyage）**、迁居、登岛命名即定居化、年龄死亡；性别（id hash 确定性）/父姓母姓记录/性别化名字池；**口渴与饮品（thirst/drunkT/coffeeT；`DRINK_ORDER` 城库取用顺序 coffee>juice>beer>water；drink 态原地 2 秒结算；`nearestWaterSpot` 水井/河湖直饮找水，圈扫 40 格结果缓存 2s；thirst<8 持续 40s 脱水病倒 `sickSource="thirst"`）**；**四方向朝向**（统一入口 `faceOf/faceTurn` 在 agent.js 顶层定义、creature.js 同作用域共用——`faceTurn` 带持锁迟滞：反向掉头立即切、90° 变向需 `faceHoldT` 满 0.8s（update 累计封顶 1、切换归 0 重计，undefined 视为 1 首设不受锁），`stepAlong` 按实际位移主轴更新 + `faceTo` 开工面向任务格（显式设向绕锁直设并重置计锁））；**随身槽位背包**（4 助手 `packCount/packAdd/packTake/packFree` + `packHaulCount` 为唯一读写入口，资源/工具/补给全走助手） | `Agent.update → decide / die / startVoyage` |
 | sim.js | 调度核心：`plannerTick`（10 分支需求聚合 + **饮品链立项**（设施 era+人口≥8 门槛、粮仓周边全域唯一；打水/榨汁/酿酒/烘咖啡库存阈值触发；咖啡田扩种须 5 格内有水）+ **粮食产能口径排除咖啡田**（`foodFarms=!f.crop`，开荒线/出生线/进食点统一过滤，边界含等号语义未动）+ 死任务清理 + 亲子确定）、劳动力市场 `jobMarketTick`（builder 需求含 4 新工坊）、聚落演化、时代、出生、宴席、死亡清理、船舶 `shipTick`；**咖啡田独立结算**（farmTick：90s 产 2 豆进城市 beans，不产粮） | `simInit / simUpdate / plannerTick / shipTick` |
 | render.js | 场景编排：drawScene 贴 sprite 图集 + 动态叠加层（工程进度/昼夜/分区底纹/地区名标注/选中环/瀑布）、**face→view 朝向映射与 left 翻转**（putLayer 包裹分层，影子/光环/状态粒子在翻转外）、**河流（水格三层判定：池塘→河流→海）/咖啡田（farmInfo 缓存 crop 变体）/四工坊（16×24 底部锚定）渲染，全部带契约未落地回退路径**、**醉酒 wobble**（sin 摆动+偶发 stumble，影子不随动）、**小人分层绘制与姿态分发 `agentPoseOf`（走/跑/吃/工具两帧/钓竿浮标/船内划手双桨固定 side/喝水 drink 两帧/酿造 brew 两帧/醉酒 stumble）**、动物朝向接线（drawC 翻转包裹/鱼群切线朝向）、chunk 缩略图（zoom<0.4）、缩放平滑语义（≥1 关/0.4~1 开） | `drawScene / agentPoseOf` |
 | audio.js | 程序化音效（振荡器合成，无音频文件） | `sfx.play(name)` |
 | sprites.js | 像素 Sprite 图集：全部 tile/房屋 24 变体/**小人分层像素系统三视图（`agentLook` 外观随机 + head/body/pants 三层 25 姿态 × 2 性别；body/pants front|back 归一 "vert"（中缝细节）、head front/side/back（双眼/侧脸/后脑）；新增 drink/brew/stumble 姿态）+ 背包 9 种（新增 water/juice/beer/coffee/beans）**/十种动物三视图（`QUAD_VIEW` 四足兽正/背视点阵 + turtle/whale/fish/bird 特例）/4 种船/**`riverSprite`（4 帧偏青绿）/`buildingSprite`（16×24 向上探出）/`coffeeFarmSprite`**/浪花抖动叠加层的 16×16 点阵惰性烘焙；色彩基建（shade/shadeHex/ELEV_TIERS/TILE_ELEV_VARIANTS/POND_VARIANTS/RIVER_VARIANTS）在此 | `tileSprite/waterSprite/pondSprite/riverSprite/houseSprite/buildingSprite/coffeeFarmSprite/propSprite/agentLook/agentBodySprite/agentPantsSprite/agentHeadSprite/agentHeadLieSprite/agentPackSprite/creatureSprite/shipSprite/foamSprite/ditherSprite` |
-| main.js | 主循环（固定步长，速度 0/1/2/10/100/1000 档）、Pointer Events 相机（拖拽/捏合/点按）、视觉昼夜 `visualTod`、波光时钟 `waveT`、视角跟随、点击拾取、信息面板（**渴值条五档青蓝梯度（thirst 缺失整行隐藏）、状态行醉/咖啡标注、地块「河流 · 水源」判定（池塘优先）、meta 缺失兜底「建筑」**）、居民名册（**库存行含水/饮/酒/咖**）、**世界动态面板**（`collectActivities` 纯派生只读逻辑层 + `updateActivity` 0.6s 节流；九类活动目录，点击行随机 `focusAgent` 定位跟随）、**三面板折叠**（名册/纪事/动态标题 ▾/▸，内存态）、**纪事 HUD 判刷新用 `world.logSeq`（`\|\| logs.length` 容错回退）** | `focusAgent / handlePick / updateRoster / updateActivity / collectActivities / followMode` |
+| main.js | 主循环（固定步长，速度 0/1/2/10/100/1000 档）、Pointer Events 相机（拖拽/捏合/点按）、视觉昼夜 `visualTod`、波光时钟 `waveT`、视角跟随、点击拾取、信息面板（**渴值条五档青蓝梯度（thirst 缺失整行隐藏）、状态行醉/咖啡标注、地块「河流 · 水源」判定（池塘优先）、meta 缺失兜底「建筑」**）、居民名册（**库存行含水/饮/酒/咖**）、**世界动态面板**（`collectActivities` 纯派生只读逻辑层 + `updateActivity` 0.6s 节流；九类活动目录，点击行随机 `focusAgent` 定位跟随）、**三面板折叠**（名册/纪事/动态标题 ▾/▸，内存态）、**纪事 HUD 判刷新用 `world.logSeq`（`\|\| logs.length` 容错回退）** | `focusAgent / handlePick / updateRoster / updateActivity / collectActivities / packGridHtml / followMode` |
 
 ## 4. 已校准的死锁（改相关代码前必读）
 
@@ -148,6 +150,7 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 → node dev/test/explorer.js（探索者回归，6 项）
 → node dev/test/pixel.js   （渲染回归，52 项）
 → node dev/test/family.js  （亲子回归，36 项）
+→ node dev/test/pack.js    （背包回归，41 项）
 → node dev/test/drink.js   （饮品回归，29 项）
 → open index.html          （运行游戏，只开一次）
 ```
@@ -156,7 +159,10 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 
 测试失败的处理顺序：先看是不是**新代码**破坏了既有语义（对照第 4 节死锁表），再考虑断言本身是否需要随设计更新（改断言要说明理由，禁止静默放松）。
 
-## 7. 当前状态快照（2026-09-20 交接 · v0.3.0 增量）
+## 7. 当前状态快照（2026-09-20 交接 · v0.4.1 增量）
+
+- **背包系统（v0.4.0）**：每人 10 格随身背包 `a.pack`（food/water/juice/beer/coffee 堆叠 ×3 + rod/axe/pick/hoe/hammer ×1）——补给三触发点（吃饭结算/入库 deposit/领远任务 d>15，扣城库、工具不补）；路上自用（update 内 hunger/thirst<35 原地秒用不停步，包空才走 seekDrink/SAFE_* 老路，**睡眠中也可自用**——顺带封死锁 #18 的睡中脱水路径）；工具首次做对应工作经 tasksTake 挂钩自动领取（FISH→rod 扣联合木 1 不足照发、DIG伐木→axe、DIG石→pick、FARM→hoe、BUILD/BRIDGE/FILL/DOCK→hammer），永久持有，doWork/workTile 双进度路径共用 effort 源头 ×1.2；信息框 2×5 格子（packGridHtml，falsy 容错全暗格）；**渴节奏重调**：THIRST_DECAY **0.7**、DRINK_RESTORE 四项 **100**、直饮 100、drinkWait 1s（探针：直饮 -31%/城库饮用 -72%）；数值全在 config PACK_* 表；回归 test/pack.js 24 项。历史注：v0.3.2 曾报 THIRST_DECAY 落 1.1 但实文件未落（1.4 残留），v0.4.0 直落 0.7——**改 config 后必须 grep 复核实值**
+- **槽位背包（v0.4.1）**：背包重构为**真·槽位制**——`a.pack = Array(10).fill(null)`，槽位 `null | {item, n, haul?}`；4 助手（agent.js 顶层 `packCount/packAdd/packTake/packFree` + `packHaulCount`）为唯一读写入口；同 item 同 haul 先合并、堆满开新格、**总容量 10 格**；堆叠消耗品/资源（wood/stone/sand 新增）×3、工具 ×1；**搬运系统并入**：`a.carrying` 已删除，tasksFinish 产出经 `grantCarry` 入 haul 槽（包满差额就地入库），`deposit()` 只清 haul 槽（个人口粮不上缴、无主时保留不蒸发），decide 搬运分支/die 遗产/render 叠加层/main「背着」行全部由 haul 槽派生；drink.js 的 zeroPack 改 `new Array(10).fill(null)`；回归 test/pack.js 41 项。**朝向修正（v0.4.1 末）**：鲸鱼/小鱼侧视图曾头尾反置（尾鳍画在右侧、与全游戏「头朝右」约定相反），bakeWhale/bakeFish 重绘；**鲸鱼喷水柱系 v0.2.0 像素化时遗失、已恢复**（相位 world.time，与缩放解耦）
 
 - **v0.3.1 增量（三并行子 agent：记事停更修复 / 朝向持锁 / 动态面板）**：①**世界记事停更修复**——`world.logSeq` 单调计数（`logMsg` 内 +1），main.js 纪事 HUD 以 `logSeq !== lastLogSeq` 判刷新（`|| logs.length` 容错回退），见死锁 **#19**；②**朝向持锁迟滞**——统一入口 `faceOf/faceTurn`（agent.js 顶层，creature.js 同作用域共用）：反向掉头立即切、90° 变向需 `faceHoldT` 满 0.8s（各实体 update 累计封顶 1、切换归 0 重计），`faceTo` 开工面向绕锁直设；creature 逃跑/游荡/跟随各路径「实际位移才更新」同口径；drink.js 含锁行为断言（10c 持锁抑制 + 锁满自然转向）；③**世界动态面板**——右侧活动目录九类（航海/喝酒/喝咖啡/喝水/垂钓/搬运动物/牧羊/酿造/探索），`collectActivities` 纯派生只读逻辑层 + 0.6s 节流，点击行随机 `focusAgent` 定位跟随；**三面板折叠**（居民名册/世界纪事/世界动态标题 ▾/▸，收起状态仅存内存）；**信息框状态行**新增「搬运中：移动X」（`a.rescuing && a.rescuing.carriedBy === a` 派生，物种名查 `CREATURE_META[type].name`，查不到兜底「搬运动物中」）
 

@@ -438,6 +438,29 @@
   const JOBS_CN = { farmer: "农夫", lumberjack: "伐木工", miner: "采石工", hunter: "猎人", fisher: "渔民", builder: "工匠", explorer: "探险家" };
   const HOBBY_CN = { explore: "向往远方", homebody: "恋家", animal: "喜爱牲畜", fishing: "垂钓爱好者", none: "随遇而安" };
 
+  // 背包物品视图表：[图标, 中文名]，13 项全集（含搬运资源 haul 槽）；渲染层只做展示
+  const ITEM_VIEW = {
+    food: ["🍞", "口粮"], water: ["💧", "水袋"], juice: ["🧃", "果汁"], beer: ["🍺", "麦酒"], coffee: ["☕", "咖啡"],
+    rod: ["🎣", "鱼竿"], axe: ["🪓", "斧头"], pick: ["⛏️", "镐"], hoe: ["🔨", "锄头"], hammer: ["🥄", "锤子"],
+    wood: ["🪵", "木材"], stone: ["🪨", "石材"], sand: ["🟡", "沙土"]
+  };
+
+  // 背包 10 格（v0.4.1 真·槽位制）：按槽位序渲染，slot={item,n,haul?} 亮格（图标+右下角数量+悬停名），
+  // null/缺失暗格；a.pack 非数组/未初始化全暗格（falsy 容错、区域常驻、面板结构稳定）
+  function packGridHtml(a) {
+    const pack = Array.isArray(a.pack) ? a.pack : [];
+    let html = `<div class="pack-grid">`;
+    for (let i = 0; i < 10; i++) {
+      const slot = pack[i];
+      if (!slot) { html += `<span class="pack-cell empty"></span>`; continue; }
+      const view = ITEM_VIEW[slot.item] || ["❔", "物品"];
+      const n = Math.floor(slot.n) || 0;   // 浮点脏值取整，空值/负数一律按 0
+      const haulTag = slot.haul ? "（回仓入库中）" : "";
+      html += `<span class="pack-cell" title="${view[1]}×${n}${haulTag}">${view[0]}${n > 0 ? `<i>${n}</i>` : ""}</span>`;
+    }
+    return html + `</div>`;
+  }
+
   function agentPanelHtml(a) {
     const foodC = a.hunger > 40 ? "#6fae4e" : a.hunger > 15 ? "#e0b64a" : "#c23b3b";
     const enC = a.energy > 35 ? "#5a8fd0" : "#c2623b";
@@ -447,8 +470,20 @@
       const s = settleOf(a.home.x, a.home.y);
       return s ? s.name : "自宅";
     })() : "无家可归";
-    const RES_CN = { food: "粮", wood: "木材", stone: "石材", sand: "沙土" };
-    const carry = a.carrying ? `<br>背着：${RES_CN[a.carrying.res] || a.carrying.res} ×${a.carrying.amount}（回仓入库中）` : "";
+    // 「背着」行（v0.4.1）：遍历背包 haul 槽位按物品种类聚合（同类多槽合并计数），无 haul 槽则整行不显示
+    const hauling = [];
+    if (Array.isArray(a.pack)) {
+      for (const slot of a.pack) {
+        if (!slot || !slot.haul) continue;
+        const n = Math.floor(slot.n) || 0;
+        if (n <= 0) continue;
+        const same = hauling.find(h => h.item === slot.item);
+        if (same) same.n += n; else hauling.push({ item: slot.item, n });
+      }
+    }
+    const carry = hauling.length
+      ? `<br>背着：${hauling.map(h => (ITEM_VIEW[h.item] || ["", "物品"])[1] + "×" + h.n).join("、")}（回仓入库中）`
+      : "";
     return `职业：${JOBS_CN[a.job] || a.job}<br>` +
       `状态：${a.sick ? "生病了" : (STATE_CN[a.state] || a.state)}${a.task ? "（" + TASK_CN[a.task.type] + "）" : ""}${a.drunkT > 0 ? "（醉醺醺）" : ""}${a.coffeeT > 0 ? "（咖啡提神）" : ""}` +
       // 搬运动物标注：rescuing 指向被困动物且 carriedBy 是自己时正在搬运（物种名查不到则兜底泛称）
@@ -465,7 +500,8 @@
       `探索欲：${adventureTier(a.adventure)}<br>` +
       `勤劳：${diligenceTier(a.diligence)}<br>` +
       `喜好：${HOBBY_CN[a.hobby] || "随遇而安"}<br>` +
-      `住所：${home}${carry}`;
+      `住所：${home}${carry}<br>` +
+      packGridHtml(a);
   }
 
   function showAgentPanel(a, cx, cy) {
