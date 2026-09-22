@@ -14,16 +14,16 @@
 ```bash
 node dev/build.js        # 构建产物 → 根目录 index.html（改任何 src 后必须重新构建）
 node dev/test/smoke.js   # 逻辑冒烟：headless 12000 sim 秒（120000 步 × 0.1s），11 项断言
-node dev/test/entry.js   # 入口冒烟：stub DOM 跑构建产物启动链，7 项断言
-node dev/test/voyage.js  # 航海专项：满载返航 / 低补给被困救援闭环 / 船穿桥，21 项断言
-node dev/test/creature.js # 动物专项：老死 / 搁浅死亡与救援 / 繁衍 / 渔场 / 渔船 / 挖塘 / 运鱼 / 灌溉 / 岛数随机，27 项断言
+node dev/test/entry.js   # 入口冒烟：stub DOM 跑构建产物启动链 + demo 契约/打断切换/沙盘绘制扫描，10 项断言
+node dev/test/voyage.js  # 航海专项：满载返航 / 低补给被困救援闭环 / 船穿桥 / 岛际大桥立项与贯通，25 项断言
+node dev/test/creature.js # 动物专项：老死 / 搁浅死亡与救援 / 繁衍 / 渔场 / 渔船 / 挖塘 / 运鱼 / 灌溉 / 岛数随机 / 牧场门与水生圈养排除，28 项断言
 node dev/test/explorer.js # 探索者专项：保底转职 / 前沿点亮 / 腿数解除，6 项断言
 node dev/test/family.js  # 亲子专项：固定姓/去重/sex 确定性/随亲姓/出生点，36 项断言
-node dev/test/pixel.js   # 渲染专项：软件光栅化跑 drawScene 与全套 sprite 烘焙，52 项断言
+node dev/test/pixel.js   # 渲染专项：软件光栅化跑 drawScene 与全套 sprite 烘焙，64 项断言
 node dev/test/drink.js   # 饮品专项：口渴/状态差分/饮用结算/醉酒减速/咖啡田不产粮/face 朝向契约（含持锁迟滞），28 项断言（依赖 build 产物 .tmp_logic.js，先 node dev/build.js）
 node dev/test/pack.js    # 背包专项：槽位合并/容量/haul 搬运链/deposit/工具与加成，41 项断言
-node dev/test/mood.js    # 心情专项：衰减/喜好快乐/饮用分档/抑郁闭环/找乐子/宴席/余韵，26 项断言（依赖 .tmp_logic.js）
-node dev/test/species.js # 物种专项：新物种表/栖息地/上限守卫/驯化泛化/珍稀渔获/月光花光环/海豚追随，21 项断言（依赖 .tmp_logic.js）
+node dev/test/mood.js    # 心情专项：衰减/喜好快乐/饮用分档/抑郁闭环/找乐子/宴席/余韵/迁居/意外死亡三分支，30 项断言（依赖 .tmp_logic.js）
+node dev/test/species.js # 物种专项：新物种表/栖息地/上限守卫/驯化泛化/珍稀渔获/月光花光环/海豚追随，26 项断言（依赖 .tmp_logic.js）
 node dev/test/park.js    # 娱乐专项：立项门槛/完工 tile/游乐园圈地浮台/设施补建/游玩闭环，26 项断言（依赖 .tmp_logic.js）
 open index.html          # 人工验收（agent 每次修改完成后必须自动执行，见第 6 节）
 ```
@@ -67,7 +67,7 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 | render.js | 场景编排：drawScene 贴 sprite 图集 + 动态叠加层（工程进度/昼夜/分区底纹/地区名标注/选中环/瀑布）、**face→view 朝向映射与 left 翻转**（putLayer 包裹分层，影子/光环/状态粒子在翻转外）、**河流（水格三层判定：池塘→河流→海）/咖啡田（farmInfo 缓存 crop 变体）/四工坊（16×24 底部锚定）渲染，全部带契约未落地回退路径**、**醉酒 wobble**（sin 摆动+偶发 stumble，影子不随动）、**小人分层绘制与姿态分发 `agentPoseOf`（走/跑/吃/工具两帧/钓竿浮标/船内划手双桨固定 side/喝水 drink 两帧/酿造 brew 两帧/醉酒 stumble）**、动物朝向接线（drawC 翻转包裹/鱼群切线朝向）、chunk 缩略图（zoom<0.4）、缩放平滑语义（≥1 关/0.4~1 开） | `drawScene / agentPoseOf` |
 | audio.js | 程序化音效（振荡器合成，无音频文件） | `sfx.play(name)` |
 | sprites.js | 像素 Sprite 图集：全部 tile/房屋 24 变体/**小人分层像素系统三视图（`agentLook` 外观随机 + head/body/pants 三层 25 姿态 × 2 性别；body/pants front|back 归一 "vert"（中缝细节）、head front/side/back（双眼/侧脸/后脑）；新增 drink/brew/stumble 姿态）+ 背包 9 种（新增 water/juice/beer/coffee/beans）**/十种动物三视图（`QUAD_VIEW` 四足兽正/背视点阵 + turtle/whale/fish/bird 特例）/4 种船/**`riverSprite`（4 帧偏青绿）/`buildingSprite`（16×24 向上探出）/`coffeeFarmSprite`**/浪花抖动叠加层的 16×16 点阵惰性烘焙；色彩基建（shade/shadeHex/ELEV_TIERS/TILE_ELEV_VARIANTS/POND_VARIANTS/RIVER_VARIANTS）在此 | `tileSprite/waterSprite/pondSprite/riverSprite/houseSprite/buildingSprite/coffeeFarmSprite/propSprite/agentLook/agentBodySprite/agentPantsSprite/agentHeadSprite/agentHeadLieSprite/agentPackSprite/creatureSprite/shipSprite/foamSprite/ditherSprite` |
-| demo.js | 机制演示引擎（v0.6.0）：DEMO_TOPICS 10 主题脚本时间轴（steps 文案 + draw 画布回调）+ 播放器（demoStart/demoTick，倍速 0.5~4×，播完打勾）；绘制复用全局 sprite 图集；拼接在 render 之后 main 之前，**不进 .tmp_logic.js**（UI 层，entry.js 有契约+绘制扫描断言） | `DEMO_TOPICS / demoStart / demoTick` |
+| demo.js | 机制演示引擎（v0.6.1 迷你沙盘版）：`DEMO_TOPICS` 10 主题 = 字符画布 `stage.rows`（STAGE_TILES 25 字符映射）+ `actors` 出场角色（man=agentLook 三层小人 / animal=creatureSprite / ship，moves 关键帧移动与朝向镜像）+ `fx`（label/ring 驯化环/heart/cloud/reveal/bridge 链生长/building 落成/cycle 轮播高亮）+ `hud` 覆盖条；播放器 `demoStart`（点击即打断切换）/`demoTick`（倍速 0.5~4×、完成自动打勾）/`demoRefreshMenu`/`demoWelcome`；绘制复用全局 sprite 图集；拼接在 render 之后 main 之前，**不进 .tmp_logic.js**（UI 层，entry.js 有契约+打断+绘制扫描断言） | `DEMO_TOPICS / demoStart / demoTick / demoRefreshMenu / demoWelcome` |
 | main.js | 主循环（固定步长，速度 0/1/2/10/100/1000 档）、Pointer Events 相机（拖拽/捏合/点按）、视觉昼夜 `visualTod`、波光时钟 `waveT`、视角跟随、点击拾取、信息面板（**渴值条五档青蓝梯度（thirst 缺失整行隐藏）、状态行醉/咖啡标注、地块「河流 · 水源」判定（池塘优先）、meta 缺失兜底「建筑」**）、居民名册（**库存行含水/饮/酒/咖**）、**世界动态面板**（`collectActivities` 纯派生只读逻辑层 + `updateActivity` 0.6s 节流；九类活动目录，点击行随机 `focusAgent` 定位跟随）、**三面板折叠**（名册/纪事/动态标题 ▾/▸，内存态）、**纪事 HUD 判刷新用 `world.logSeq`（`\|\| logs.length` 容错回退）** | `focusAgent / handlePick / updateRoster / updateActivity / collectActivities / packGridHtml / followMode` |
 
 ## 4. 已校准的死锁（改相关代码前必读）
@@ -154,15 +154,15 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 → 全部子 agent 完成 → 主 agent：node dev/build.js    （产物刷到根目录 index.html）
 → node dev/test/smoke.js   （逻辑回归，11 项）
 → node dev/test/entry.js   （入口回归，10 项：启动链 + demo 契约/绘制扫描）
-→ node dev/test/voyage.js  （航海回归，21 项）
-→ node dev/test/creature.js（动物回归，27 项）
+→ node dev/test/voyage.js  （航海回归，25 项）
+→ node dev/test/creature.js（动物回归，28 项）
 → node dev/test/explorer.js（探索者回归，6 项）
-→ node dev/test/pixel.js   （渲染回归，52 项）
+→ node dev/test/pixel.js   （渲染回归，64 项）
 → node dev/test/family.js  （亲子回归，36 项）
 → node dev/test/pack.js    （背包回归，41 项）
 → node dev/test/drink.js   （饮品回归，28 项）
-→ node dev/test/mood.js    （心情回归，26 项）
-→ node dev/test/species.js （物种回归，21 项）
+→ node dev/test/mood.js    （心情回归，30 项）
+→ node dev/test/species.js （物种回归，26 项）
 → node dev/test/park.js    （娱乐回归，26 项）
 → open index.html          （运行游戏，只开一次）
 ```
@@ -173,8 +173,9 @@ open index.html          # 人工验收（agent 每次修改完成后必须自�
 
 测试失败的处理顺序：先看是不是**新代码**破坏了既有语义（对照第 4 节死锁表），再考虑断言本身是否需要随设计更新（改断言要说明理由，禁止静默放松）。
 
-## 7. 当前状态快照（2026-09-22 交接 · v0.6.0 增量）
+## 7. 当前状态快照（2026-09-22 交接 · v0.6.1 增量）
 
+- **v0.6.1 演示迷你沙盘**：demo.js 重构——dStage 字符画布渲染器（STAGE_TILES 25 字符映射，底锚建筑/水动画/tileSprite 三路绘制）+ 角色系统（moves 关键帧段：from/to/anim，朝向由水平移动推导并镜像，man=agentLook 三层小人、animal=creatureSprite、ship=shipSprite）+ fx（label/ring 驯化环/heart/cloud/reveal/bridge 链生长/building 落成/cycle 物种轮播高亮）；**双栏面板**：demo-layout flex——左 #demo-list 滚动菜单（点击即打断 demoStart 切换，selected/✓ 高亮），右 #demo-right 固定沙盘（modal-box overflow hidden，仅左栏滚）；demoLastSpeed 跨主题保持倍速；完成自动打勾（demoTick 内 DEMO_DONE.add+refreshMenu）；「↻ 重播」按钮；entry.js 断言升级：画布行宽一致性 + 打断切换（mood→drinks t<0.2）+ 全主题全时段沙盘绘制扫描
 - **v0.6.0 看护与教学（三任务一次发布）**：
   - **看护补齐**：迁居机制（mood.js 21）、意外死亡三分支（概率 config 化 `SIM.ACCIDENT`，mood.js 22 强制触发验证——**测试注意：y 向 half-up 取整要用 .4 偏移**）、岛际大桥 corridor 贯通（voyage.js 场景 D 驱动工匠实建 8+ 格含深海）；「看护矩阵」= 各功能 → 套件映射见 §6.1
   - **机制演示**：dev/src/demo.js（新文件，进 render 拼接链）——10 主题 × 时间轴 steps + draw 回调；main.js 打开弹窗即 setSpeed(0)（savedSpeed 关闭恢复）；demoTick 挂主循环 realDt；entry.js 新增 3 断言（契约 + 绘制扫描，sprite 用 stub）

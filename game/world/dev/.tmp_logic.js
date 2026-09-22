@@ -16,7 +16,7 @@ function emit(name, data) {
 
 "use strict";
 // ============ 全局配置 ============
-const BUILD_ID = "v0.6.0";
+const BUILD_ID = "v0.6.1";
 
 // tile 类型
 const T = {

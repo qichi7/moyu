@@ -125,10 +125,12 @@ assert(state.time > 0, "模拟时间已开始流动（world.time > 0）");
   entryCtx.creatureSprite = () => fakeSpr;
   entryCtx.buildingSprite = () => fakeSpr;
   entryCtx.shipSprite = () => fakeSpr;
+  entryCtx.houseSprite = () => fakeSpr;
   const demoRes = vm.runInContext(`
     let ok = true;
     for (const tp of DEMO_TOPICS) {
-      if (!tp.id || !tp.name || !tp.draw || !(tp.dur > 0)) ok = false;
+      if (!tp.id || !tp.name || !tp.draw && !tp.stage || !(tp.dur > 0)) ok = false;
+      if (tp.stage && (!tp.stage.rows || !tp.stage.rows.every(r => r.length === tp.stage.rows[0].length))) ok = false;
       let last = -1;
       for (const st of tp.steps) { if (!(st.t > last) || !st.text) ok = false; last = st.t; }
       if (tp.steps[tp.steps.length - 1].t > tp.dur) ok = false;
@@ -137,10 +139,14 @@ assert(state.time > 0, "模拟时间已开始流动（world.time > 0）");
     let drew = false, allOk = true, err = "";
     try {
       demoStart("mood");
-      demoState.cv = { width: 360, height: 240 };
+      for (let i = 0; i < 10; i++) demoTick(0.1);   // mood 播到 1s
+      const before = demoState.topic.id;
+      demoStart("drinks");                           // 打断：点另一个机制立即切换
+      const switched = before === "mood" && demoState.topic.id === "drinks" && demoState.t < 0.2;
+      demoState.cv = { width: 440, height: 280 };
       demoState.g = new Proxy({}, { get: (t, k) => (k in t ? t[k] : () => {}), set: () => true });
       for (let i = 0; i < 20; i++) demoTick(0.05);
-      drew = true;
+      drew = switched;
       for (const tp of DEMO_TOPICS) {
         demoState.topic = tp; demoState.t = tp.dur * 0.9; demoState.done = false;
         for (let i = 0; i < 30; i++) demoTick(0.05);
@@ -148,9 +154,9 @@ assert(state.time > 0, "模拟时间已开始流动（world.time > 0）");
     } catch (e) { allOk = false; err = e.message; }
     ({ ok, nTopics, drew, allOk, err });
   `, entryCtx);
-  assert(demoRes.ok && demoRes.nTopics >= 10, "demo 契约：" + demoRes.nTopics + " 个主题数据/时间轴/时长完整");
-  assert(demoRes.drew, "demo 播放：绘制回调驱动正常（stub ctx）");
-  assert(demoRes.allOk, "demo 播放：全部主题全时段绘制扫描无异常" + (demoRes.err ? "（" + demoRes.err + "）" : ""));
+  assert(demoRes.ok && demoRes.nTopics >= 10, "demo 契约：" + demoRes.nTopics + " 个主题数据/画布行宽/时间轴完整");
+  assert(demoRes.drew, "demo 打断切换：点击另一机制立即重置播放（mood→drinks）");
+  assert(demoRes.allOk, "demo 播放：全部主题全时段沙盘绘制扫描无异常" + (demoRes.err ? "（" + demoRes.err + "）" : ""));
 }
 
 process.exitCode = failed ? 1 : 0;

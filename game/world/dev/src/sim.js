@@ -738,10 +738,10 @@ function plannerTick() {
   if (pop > 0 && totalFood() > 40 && foodFarms * 5 >= pop + 4 && hasRoom && rand() < SIM.BIRTH_CHECK * SIM.PLANNER_INTERVAL) {
     // 亲子：出生序号确定性选亲（hash2 不消耗 rand 流，保证固定种子回归与旧版逐位一致）
     const seq = (world.birthSeq = (world.birthSeq || 0) + 1);
-    const mothers = agents.filter(a => !a.dead && a.sex === "f" && a.age >= 16 && a.age <= 45);   // 育龄母池（0 岁新生儿天然不在内）
+    const mothers = agents.filter(a => !a.dead && a.sex === "f" && a.age >= 20 && a.age <= 60);   // 育龄母池（v0.6.4：不分性别统一 20~60；0 岁新生儿天然不在内）
     const mother = mothers.length ? mothers[(hash2(seq, 7717) * mothers.length) | 0] : null;
     let father = null;
-    const adultM = agents.filter(a => !a.dead && a.sex === "m" && a.age >= 16);
+    const adultM = agents.filter(a => !a.dead && a.sex === "m" && a.age >= 20 && a.age <= 60);   // 父亲候选池：与母池同育龄 20~60（v0.6.4）
     if (mother && adultM.length) {
       // 父亲选取：同屋优先 → 同聚落次之 → 全体成年男兜底（home 按坐标比较：各人 home 是独立对象，引用永不相同）
       const sameHouse = mother.home ? adultM.filter(a => a.home &&

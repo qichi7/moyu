@@ -835,7 +835,8 @@
     if (id === "demo-modal") {
       demoSavedSpeed = speed;
       if (speed !== 0) setSpeed(0);       // 演示时暂停主世界进程
-      demoOpenList();
+      demoRefreshMenu();
+      if (!demoState) demoWelcome();      // 未开始播放：右侧沙盘铺欢迎底图
       sfx.play("click");
     }
   }
@@ -867,7 +868,7 @@
       if (c) closeModal(c.dataset.close);
     });
   });
-  // 演示列表点击 → 开始播放；倍速按钮循环；返回列表
+  // 演示菜单点击 → 立即打断当前演示并切换（双栏常驻：菜单滚动不影响右侧沙盘）
   const demoListEl = el("demo-list");
   if (demoListEl) demoListEl.addEventListener("click", e => {
     const item = e.target.closest("[data-demo]");
@@ -880,14 +881,15 @@
     if (!demoState) return;
     const seq = [0.5, 1, 2, 4];
     demoState.speed = seq[(seq.indexOf(demoState.speed) + 1) % seq.length];
+    demoLastSpeed = demoState.speed;
     demoSpeedBtn.textContent = "速度 " + demoState.speed + "×";
     sfx.play("click");
   });
-  const demoStopBtn = el("demo-stop");
-  if (demoStopBtn) demoStopBtn.addEventListener("click", () => {
-    if (demoState) DEMO_DONE.add(demoState.topic.id);
-    demoState = null;
-    demoOpenList();
+  const demoReplayBtn = el("demo-replay");
+  if (demoReplayBtn) demoReplayBtn.addEventListener("click", () => {
+    if (!demoState) return;
+    demoState.t = 0;
+    demoState.done = false;
     sfx.play("click");
   });
 
