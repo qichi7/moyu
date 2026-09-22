@@ -240,6 +240,7 @@ function tasksFinish(t, agent, was) {
       }
       if (rare && agent) {
         rare.dead = true;
+        rare.deathReason = "被钓起";
         grantCarry(agent, "food", 8);
         agent.mood = Math.min(100, (agent.mood || 0) + CREATURE_META[rare.type].fishJoy);
         logMsg(`${agent.name} 钓到了珍稀的${CREATURE_META[rare.type].name}！这足以炫耀好些天。`);
@@ -265,6 +266,7 @@ function tasksFinish(t, agent, was) {
       const c = t.creature;
       if (c && !c.dead) {
         c.dead = true;
+        c.deathReason = "被狩猎";
         for (let i = tasks.list.length - 1; i >= 0; i--) {
           const k = tasks.list[i];
           if (k !== t && k.creature === c && !k.done) {

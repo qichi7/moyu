@@ -114,6 +114,10 @@ assert(state.houses >= 4, "初始粮仓与房屋已落成");
 assert(state.agentN >= 12, "初始小人已出生（≥12）");
 assert(state.time > 0, "模拟时间已开始流动（world.time > 0）");
 
+// ---- 更新日志弹窗契约（v0.6.5）：构建产物含顶栏按钮与弹窗容器 ----
+assert(html.includes('id="changelog-btn"'), "构建产物含更新日志按钮 #changelog-btn（v0.6.5）");
+assert(html.includes('id="changelog-modal"'), "构建产物含更新日志弹窗 #changelog-modal（v0.6.5）");
+
 // ---- 机制演示契约（v0.6.0）：主题数据完整 + 全部绘制回调在 stub ctx 上无引用错误 ----
 {
   const fakeSpr = { width: 16, height: 16 };

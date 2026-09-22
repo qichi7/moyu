@@ -198,6 +198,8 @@ simInit(42);
 for (let i = 0; i < 800; i++) simUpdate(STEP);
 world.era = 2;
 // 构造一对已命名「岛屿」标记：A 在沿岸陆地格，B 在其某方向 10 格外的海面（连线穿海）
+// 选址加严（收口修正）：首海格 6 格内不得有既有桥 tile、且不得已有任务占位——否则立项分支
+// 的 nearAny/撞车门槛会把本测试对筛掉（v0.6.1 起随机流漂移曾致本场景间歇 0/10）
 let pairA = null, pairB = null;
 outerD:
 for (let y = -30; y <= 30 && !pairA; y++) for (let x = -30; x <= 30; x++) {
@@ -208,17 +210,38 @@ for (let y = -30; y <= 30 && !pairA; y++) for (let x = -30; x <= 30; x++) {
       const t = tileAt(x + dx * k, y + dy * k);
       if (t !== T.WATER && t !== T.DEEP) { ok = false; break; }   // 浅海/深海皆可架（本版特性）
     }
-    if (ok) { pairA = { x, y }; pairB = { x: x + dx * 10, y: y + dy * 10 }; break outerD; }
+    if (ok && !nearAny(x + dx, y + dy, [T.BRIDGE], 6) &&
+        !tasks.list.some(tk => !tk.done && tk.x === x + dx && tk.y === y + dy)) {
+      pairA = { x, y }; pairB = { x: x + dx * 10, y: y + dy * 10 }; break outerD;
+    }
   }
 }
 if (!pairA) { assert(true, "场景D：地理不满足（无沿岸构造点），跳过"); } else {
   const islA = { x: pairA.x, y: pairA.y, r: 6, name: "测试西岛", claimed: true };
   const islB = { x: pairB.x, y: pairB.y, r: 6, name: "测试东岛", claimed: true };
+  // 立项按「最近命名对优先」竞争，且「真实↔测试」的混合对（如 云浦↔测试西岛 d≈9 < 测试对 10）
+  // 也会参赛：其连线可能无可达海格、立项不成又永占队头（30s 重查永远选中它）——测试对被永久
+  // 饿死（HEAD~1 靠流位置侥幸胜出，v0.6.1 起必 0/10）。包一层 plannerTick：每次调用前把除测试对
+  // 以外的全部命名对（含混合对）预登记为已立项，保证测试对唯一 qualify（被测的 corridor 机制不变）
   world.islands.push(islA, islB);
+  const _rawPlannerD = plannerTick;
+  plannerTick = function () {
+    const namedAll = world.islands.filter(o => o.name && o.r >= 3);
+    const isFake = o => o === islA || o === islB;
+    for (let i = 0; i < namedAll.length; i++) for (let j = i + 1; j < namedAll.length; j++) {
+      const a = namedAll[i], b = namedAll[j];
+      if (isFake(a) && isFake(b)) continue;   // 只放行测试对
+      world.interBridges.add(a.x + "," + a.y + "|" + b.x + "," + b.y);
+      world.interBridges.add(b.x + "," + b.y + "|" + a.x + "," + a.y);
+    }
+    return _rawPlannerD();
+  };
   world.settlements.forEach(s => ensureStock(s).wood = 200);
   jointStockDirty();
   plannerTick();
-  const bridge = tasks.list.find(t => t.type === "BRIDGE" && t.corridor);
+  // 只认测试对本线的走廊任务（列表里还有探险路径立项的别对桥任务）
+  const bridge = tasks.list.find(t => t.type === "BRIDGE" && t.corridor &&
+    Math.abs(t.x - pairA.x) <= 1 && Math.abs(t.y - pairA.y) <= 1);
   assert(!!bridge && tileAt(bridge.x, bridge.y) !== T.GRASS, "岛际大桥：连线海上首格立项 BRIDGE（带 corridor）");
   assert(!!bridge && (tileAt(bridge.x, bridge.y) === T.WATER || tileAt(bridge.x, bridge.y) === T.DEEP),
     "岛际大桥：桥格落在海上（" + (bridge ? TILE_META[tileAt(bridge.x, bridge.y)].name : "-") + "）");
@@ -236,11 +259,23 @@ if (!pairA) { assert(true, "场景D：地理不满足（无沿岸构造点），
     b.energy = 100; b.hunger = 90; b.thirst = 90; b.mood = 100; b.depressed = false;
     b.pack = new Array(10).fill(null);
   });
-  const dirScan = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([dx, dy]) =>
-    tileAt(pairA.x + dx * 10, pairA.y + dy * 10) === T.WATER || tileAt(pairA.x + dx * 10, pairA.y + dy * 10) === T.DEEP);
+  // 计数方向 = 测试对本线方向（收口修正：原 dirScan 用「第 10 格是水」重选方向，东向第 10 格
+  // 恰为水而中途是陆地时会数错线——立项扫描资格是「连续 10 格全水」，两口径并不等价）
+  const dirScan = [(pairB.x - pairA.x) / 10, (pairB.y - pairA.y) / 10];
   let built = 0;
   for (let i = 0; i < 9000 && built < 8; i++) {
     simUpdate(STEP);
+    // 驻守补给（收口修正）：需求衰减会把工人拽离桥头（口渴/进食/睡觉），链式任务因 blockedCount
+    // 累积被领取资格剔除后无人问津、走廊停摆——定期把驻守队拉回桥头满状态再上工，恢复本场景
+    // 「派工匠驻守桥头」的设定前提（被测的 corridor 链式生长机制本身不动）
+    if (i % 300 === 299) {
+      builders.forEach(b => {
+        b.x = pairA.x + 0.5; b.y = pairA.y + 0.5;
+        b.state = "idle"; b.task = null; b.thinkCd = 0; b.onArrive = null; b.path = null;
+        b.energy = 100; b.hunger = 90; b.thirst = 90; b.mood = 100; b.depressed = false;
+      });
+      for (const t of tasks.list) if (t.type === "BRIDGE" && t.corridor) t.blockedCount = 0;
+    }
     built = dirScan ? Array.from({ length: 10 }, (_, k) =>
       tileAt(pairA.x + dirScan[0] * (k + 1), pairA.y + dirScan[1] * (k + 1))).filter(t => t === T.BRIDGE).length : 0;
   }

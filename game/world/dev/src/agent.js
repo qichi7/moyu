@@ -218,7 +218,10 @@ class Agent {
     // 个体属性（0~1，人各不同）
     this.adventure = this.native ? randRange(0.5, 1) : randRange(0.05, 1); // 探索欲：高的常远行，低的恋家
     this.diligence = randRange(0.25, 1);   // 勤劳：影响干活效率
-    this.age = randRange(16, 45);          // 岁数：1 游戏年（12 昼夜）长 1 岁
+    // 岁数：1 游戏年（12 昼夜）长 1 岁；下限随 v0.6.4 育龄 20 对齐——初始队列必须含育龄内女性，
+    // 否则开局仅个别适龄女性、早亡后（抑郁/意外）全境再无育龄人口（幼年长到 20 岁需 20 游戏年），
+    // 世界必然陷入绝育崩盘（seed42 smoke 实测人口归零）
+    this.age = randRange(20, 45);
     // 职业：探险家看探索欲，工匠看勤劳，其余按社会需求比例随机
     this.job = this.adventure > 0.75 ? "explorer"
              : this.diligence > 0.8 ? "builder"

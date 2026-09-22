@@ -1,6 +1,6 @@
 // headless 亲子与性别测试：vm 加载 .tmp_logic.js（与 smoke.js 同款加载模式）
 // 覆盖：男女分名池 / 固定单姓与固定复姓 / 名池规模 / 去重 / sex 确定性 / 新生儿随亲姓（surname 字段，支持复姓）
-//      / 父母可追溯 / 出生点偏向母亲家 / 复姓入库（软断言） / surname 字段一致性
+//      / 父母可追溯 / 出生点偏向母亲家 / 复姓入库（软断言） / surname 字段一致性 / 育龄边界 19/20/60/61（v0.6.4）
 const vm = require("vm");
 const fs = require("fs");
 const path = require("path");
@@ -194,6 +194,73 @@ assert(agents.every(a => a.name.startsWith(a.surname)),
     vm.runInContext(runScript, ctx, { filename: "family-run.js", timeout: 900000 });
   } catch (e) {
     console.error("FAIL 行为上下文抛异常:", e);
+    failed = true;
+  }
+  if (ctx.__failed) failed = true;
+}
+
+// ---- 第三部分：育龄边界（v0.6.4）——只留一名雌性 + 备足出生条件，19/20/60/61 四档强测 ----
+// 每档独立 simInit(42) 保持确定性；plannerTick 每次出生判定概率 = BIRTH_CHECK×PLANNER_INTERVAL = 0.2，
+// 跑 400 轮对冲（可育档漏网 0.8^400≈0）；注意清场后必须备足粮食/农田/房屋三闸门，否则出生线先卡死。
+const boundScript = `
+${logic}
+
+function assert(cond, msg) {
+  if (cond) { console.log("PASS", msg); return true; }
+  console.log("FAIL", msg);
+  __failed = true;
+  return false;
+}
+
+function boundaryCase(age) {
+  simInit(42);
+  const f = agents.find(a => !a.dead && a.sex === "f");
+  if (!f) return { ok: false, mothered: -1, orphan: -1 };
+  agents.length = 0;               // 清场：只留这一名雌性
+  agents.push(f);
+  tasks.list.length = 0;           // 清空初始任务，避免与清场人口纠缠
+  f.age = age;
+  // 备足出生三闸门：存粮 >40；产粮田×5 >= 人口+4（pop=1 → ≥1 块田）；房屋×3 > 人口（初始 4 间即足）
+  world.settlements.forEach(s => { ensureStock(s).food = 500; });
+  if (world.farms.filter(x => !x.crop).length < 1) {
+    world.farms.push({ x: Math.floor(f.x), y: Math.floor(f.y), grow: 0 });
+  }
+  // 断言口径 = 「该女性名下的出生数」（mother 记录精确指向她）。世界全程只有这一名雌性且无雄性，
+  // 任何有母记录的新生儿必然由她所出。孤儿出生（mother=null → findBirthSpot 兜底）是既有人口
+  // 安全网（无育龄女性时世界唯一人口来源，HEAD~1 基线 smoke 依赖它存活），不可移除——只能绕开：
+  // 本断言只考核被测机制（育龄池过滤），孤儿数仅作 INFO 输出。
+  let mothered = 0, orphan = 0;
+  const rawSpawn = spawnAgent;
+  spawnAgent = function (x, y, native, opts) {
+    const a = rawSpawn(x, y, native, opts);
+    if (opts && opts.mother === f.name) mothered++;
+    else if (!opts || (!opts.father && !opts.mother)) orphan++;
+    return a;
+  };
+  const before = agents.length;
+  for (let i = 0; i < 400; i++) plannerTick();
+  spawnAgent = rawSpawn;
+  return { ok: true, mothered, orphan, total: agents.length - before };
+}
+
+for (const age of [19, 61]) {
+  const r = boundaryCase(age);
+  console.log("INFO 育龄边界 age=" + age + "：名下出生 " + r.mothered + "，孤儿出生 " + r.orphan + "（安全网路径，不考核）");
+  assert(r.ok && r.mothered === 0, "育龄边界：age=" + age + " 名下零出生（400 轮 plannerTick，名下 " + r.mothered + "）");
+}
+for (const age of [20, 60]) {
+  const r = boundaryCase(age);
+  assert(r.ok && r.mothered >= 1, "育龄边界：age=" + age + " 名下出生 ≥1（400 轮 plannerTick，名下 " + r.mothered + "）");
+}
+`;
+
+{
+  const ctx = vm.createContext({ console });
+  ctx.__failed = false;
+  try {
+    vm.runInContext(boundScript, ctx, { filename: "family-bound.js", timeout: 300000 });
+  } catch (e) {
+    console.error("FAIL 育龄边界上下文抛异常:", e);
     failed = true;
   }
   if (ctx.__failed) failed = true;

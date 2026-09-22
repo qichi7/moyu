@@ -181,6 +181,8 @@
   .modal-close { cursor: pointer; color: #6b7688; font-size: 18px; line-height: 1; padding: 0 4px; }
   .modal-close:hover { color: #fff; }
   .modal-body { padding: 10px 14px 14px; color: #aeb6c6; font-size: 12px; }
+  /* 更新日志（v0.6.5）：一条 = 版本号+标题（高亮）+ 破折号一句描述 */
+  #changelog-modal .cl-line b { color: #d8dee9; font-weight: 600; }
   .help-sec { color: #8a93a8; font-size: 10px; letter-spacing: 2px; margin: 10px 0 4px; }
   .help-sec:first-child { margin-top: 0; }
   .help-grid { display: grid; grid-template-columns: 72px 1fr; gap: 5px 10px; }
@@ -251,6 +253,7 @@
       <button id="s1000" data-v="1000">1000×</button>
       <button id="sfx-toggle">音效:开</button>
       <button id="help-btn" title="玩法教程">教程</button>
+      <button id="changelog-btn" title="更新日志">日志</button>
       <button id="demo-btn" title="机制演示（会暂停主世界）">▶ 演示</button>
     </div>
   </div>
@@ -283,6 +286,38 @@
         <span>音效</span><span>顶栏「音效:开/关」；首次点击页面后生效（浏览器策略）</span>
         <span>热刷新</span><span>http:// 打开时改动文件自动刷新；file:// 双击打开无此限制</span>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- 更新日志弹窗（v0.6.5）：功能演进史（仅收录功能，不收录 bug 修复） -->
+<div id="changelog-modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">更新日志<span class="modal-close" data-close="changelog-modal">×</span></div>
+    <div class="modal-body">
+      <div class="cl-line"><b>v0.1 基础版</b>——单岛大陆、小人自主生活（觅食/睡觉/干活）、需求聚合驱动建房/开荒、相机与变速</div>
+      <div class="cl-line"><b>v0.2.0 像素画风</b>——全画面 16×16 细像素点阵、水面 4 帧动画、海岸浪花、夜间亮窗</div>
+      <div class="cl-line"><b>v0.2.1 像素小人</b>——分层小人（外观随机约 3600 组合）、20 姿态、性别区分、亲子姓氏</div>
+      <div class="cl-line"><b>v0.2.2 名字库</b>——56 单姓 + 20 复姓 × 男女名池，姓氏传家</div>
+      <div class="cl-line"><b>v0.3.0 渴值与饮品链</b>——口渴需求与脱水病倒、水/果汁/麦酒/咖啡、水井·压榨坊·酒坊·烘焙坊·咖啡田、河流、四方向朝向</div>
+      <div class="cl-line"><b>v0.3.1 动态面板</b>——世界动态九类活动目录、三面板折叠</div>
+      <div class="cl-line"><b>v0.4.0 背包系统</b>——10 格随身背包、5 消耗品 + 5 工具、路上自用、持工具效率加成</div>
+      <div class="cl-line"><b>v0.4.1 槽位背包</b>——真·槽位制背包、产出先入包再搬运回仓</div>
+      <div class="cl-line"><b>v0.5.0 心情·物种·娱乐</b>——心情与抑郁、17 新物种（驯化/飞行/珍稀）、娱乐链与游乐园、珍稀捕获喜悦</div>
+      <div class="cl-line"><b>v0.5.1 岛际大桥</b>——邻近岛屿自动架跨海大桥</div>
+      <div class="cl-line"><b>v0.5.2 信息栏简化</b>——四维条 2×2 网格、状态行小标签</div>
+      <div class="cl-line"><b>v0.5.3 牧场门</b>——围栏必留门，牲畜出门溜达</div>
+      <div class="cl-line"><b>v0.5.4 节奏放缓</b>——饥饿/口渴衰减减半</div>
+      <div class="cl-line"><b>v0.5.6 兽不避人</b>——狩猎回归工时本位</div>
+      <div class="cl-line"><b>v0.5.7 动态轮播</b>——同一活动的参与人轮换展示</div>
+      <div class="cl-line"><b>v0.5.8 意外死亡</b>——坠崖/鲨鱼/噎死三种世界无常</div>
+      <div class="cl-line"><b>v0.5.9 死亡广播</b>——居民去世全屏讣告横幅</div>
+      <div class="cl-line"><b>v0.6.0 教程与演示</b>——玩法教程弹窗、10 主题机制演示（播放时暂停主世界）</div>
+      <div class="cl-line"><b>v0.6.1 演示沙盘</b>——双栏演示面板、真实 tile 迷你沙盘与出场角色</div>
+      <div class="cl-line"><b>v0.6.2 圈养散养</b>——牲畜出栏自由活动并自行回栏；动物育龄（幼年不育、老年停育）</div>
+      <div class="cl-line"><b>v0.6.3 死亡广播扩展</b>——信息框打开即讣告（无需跟随视角），动物离世也可播报</div>
+      <div class="cl-line"><b>v0.6.4 育龄统一</b>——人类不分性别统一 20~60 岁育龄</div>
+      <div class="cl-line"><b>v0.6.5 更新日志</b>——本面板上线</div>
     </div>
   </div>
 </div>

@@ -298,7 +298,7 @@
   }
   hud.build.textContent = BUILD_ID;
 
-  // ---- 死亡广播（v0.5.9）：被跟随的小人死亡 → 全屏横幅昭告姓名/死因/地点/时间，8 秒自动收起 ----
+  // ---- 死亡广播（v0.6.3）：任意选中的居民或动物，信息框打开即广播 → 全屏横幅昭告姓名/死因/地点/时间，8 秒自动收起 ----
   let deathBcd = 0;
   function showDeathBroadcast(a) {
     const box = el("death-broadcast");
@@ -314,7 +314,7 @@
     const s = settleOf(a.x, a.y);
     if (s) place = s.name;
     box.innerHTML = `<div class="db-title">讣 告</div>` +
-      `<div class="db-name">${a.name}</div>` +
+      `<div class="db-name">${a.name || ("一只" + (CREATURE_META[a.type] ? CREATURE_META[a.type].name : "生物"))}</div>` +
       `<div class="db-line">${a.deathReason || "与世长辞"}（享年 ${Math.floor(a.age)} 岁）</div>` +
       `<div class="db-line">卒于 ${place} · 第${Math.floor(totalDays / SIM.YEAR_DAYS) + 1}年第${totalDays % SIM.YEAR_DAYS + 1}月 ${hh}:${mm}</div>` +
       `<div class="db-hint">—— 点击任意处致哀 ——</div>`;
@@ -594,8 +594,8 @@
     if (selectedAgent) {
       const a = selectedAgent;
       if (a.dead) {
-        // 被跟随/选中的居民去世：昭告全境（v0.5.9 死亡广播），再收起面板与跟随
-        if (followMode) showDeathBroadcast(a);
+        // 选中的居民去世：信息框打开即昭告（v0.6.3：不再要求跟随视角），再收起面板与跟随
+        showDeathBroadcast(a);
         infoPanel.classList.add("hidden"); selectedAgent = null; followMode = false; syncFollowBtn(); return;
       }
       const s = TILE_PX * camera.zoom;
@@ -609,7 +609,11 @@
     }
     if (selectedCreature) {
       const c = selectedCreature;
-      if (c.dead) { infoPanel.classList.add("hidden"); selectedCreature = null; followMode = false; syncFollowBtn(); return; }
+      if (c.dead) {
+        // 选中的动物离世：同样播报讣告（v0.6.3），再收起面板与跟随
+        showDeathBroadcast(c);
+        infoPanel.classList.add("hidden"); selectedCreature = null; followMode = false; syncFollowBtn(); return;
+      }
       const s = TILE_PX * camera.zoom;
       const px = CW / 2 + (c.x - camera.x) * s;
       const py = CH / 2 + (c.y - camera.y) * s;
@@ -854,6 +858,12 @@
     sfx.play("click");
     const m = el("help-modal");
     if (m && !m.classList.contains("hidden")) closeModal("help-modal"); else openModal("help-modal");
+  });
+  const changelogBtn = el("changelog-btn");
+  if (changelogBtn) changelogBtn.addEventListener("click", () => {
+    sfx.play("click");
+    const m = el("changelog-modal");
+    if (m && !m.classList.contains("hidden")) closeModal("changelog-modal"); else openModal("changelog-modal");
   });
   const demoBtn = el("demo-btn");
   if (demoBtn) demoBtn.addEventListener("click", () => {

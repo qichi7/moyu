@@ -1,6 +1,6 @@
 "use strict";
 // ============ 全局配置 ============
-const BUILD_ID = "v0.6.1";
+const BUILD_ID = "v0.6.5";
 
 // tile 类型
 const T = {

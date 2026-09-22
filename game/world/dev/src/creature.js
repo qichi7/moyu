@@ -44,6 +44,12 @@ function habitatOk(c, x, y) {
   }
 }
 
+// 育龄判定（v0.6.2）：幼年（<stages[0]）不能生、老年（≥stages[2]）停育；无寿命表物种兜底不限
+function breedAgeOk(c) {
+  const spAge = SPECIES_AGE[c.type];
+  return !spAge || (c.age >= spAge.stages[0] && c.age < spAge.stages[2]);
+}
+
 const creatures = [];
 
 class Creature {
@@ -82,17 +88,20 @@ class Creature {
     // 老死：寿命耗尽后平均 3 天内自然离世（概率衰减避免同龄瞬灭）
     if (spAge && this.age >= spAge.lifespan && rand() < dt / (SIM.DAY_LEN * 3)) {
       this.dead = true;
+      this.deathReason = "寿终正寝";
       logMsg(`一只年迈的${CREATURE_META[this.type].name}寿终正寝。`);
       return;
     }
     // 搁浅/被困：施工（填海/造陆）改变地形后脚下不再是栖息地，困太久会死，等待有人救援
-    // （圈养动物在人类管理的牧场里，脚下是 PASTURE tile，不参与搁浅判定）
+    // （圈养动物在人类管理的牧场里，脚下是 PASTURE tile，不参与搁浅判定；
+    //   v0.6.2 起散养的牲畜（this.pasture 非空）同属人类聚落管理范围，一样不参与搁浅死亡）
     // 位置取整必须 Math.floor（v0.5.0 修正）：实体坐标是 tile 中心 +0.5，Math.round(10.5)=11 会向东偏一格——
     // 岸边的鱼/蟹/锦鲤被误判站上沙滩/虚空 → 假搁浅潮 → 救援吸干劳动力 → 农田停摆饥荒（round/floor 家族，同死锁 #20）
     if (this.type !== "bird" && !this.pasture && !habitatOk(this, Math.floor(this.x), Math.floor(this.y))) {
       this.strandT = (this.strandT || 0) + dt;
       if (this.strandT > SIM.ANIMAL_STRAND_DEATH) {
         this.dead = true;
+        this.deathReason = this.type === "whale" ? "搁浅身亡" : "被困于陌生的地形";
         logMsg(this.type === "whale"
           ? "搁浅的鲸在滩涂上停止了呼吸。"
           : `一只${CREATURE_META[this.type].name}被困在陌生的地形里，没能撑下去。`);
@@ -144,6 +153,7 @@ class Creature {
       this.preyT = (this.preyT || 0) + dt;
       if (this.preyT > 4) {
         prey.dead = true;
+        prey.deathReason = "成了狼群的晚餐";
         this.preyT = 0;
         logThrottled("林间传来狼嚎——有野羊成了狼群的晚餐。", 60);
       }
@@ -230,18 +240,31 @@ class Creature {
   }
 
   // 圈养：栏内小范围活动 + 定期产粮 + 繁殖（水生物种圈养于水域渔场，游荡判定走栖息地）。
-  // v0.5.3：牧场有门（T.GATE 可走），牲畜会自己出门在牧场附近 5 格内溜达，不再全程圈死
+  // v0.6.2 散养语义：牲畜以牧场为家自由溜达——陆生 roam 半径 11 格（可经 GATE 门外出），
+  // 水生 4 格（仍被栖息地拦在水域内，鱼出不了水是既有语义）；离牧场中心 >6 格的陆生牲畜
+  // 下一目标改为确定性回栏（朝中心方向 min(d,5)，不掷随机角度）；moveBy 对圈养动物放行
+  // GATE 闸门，野生生物的栖息地语义一个字不改；繁殖受育龄（breedAgeOk）约束。
   updatePasture(dt) {
     const waterBound = CREATURE_META[this.type].habitat === "water" || CREATURE_META[this.type].habitat === "deep";
     this.moveCd -= dt;
     if (this.moveCd <= 0) {
       this.moveCd = 1.5 + rand() * 2;
-      const a = rand() * Math.PI * 2;
-      const roam = waterBound ? 2.5 : 5;   // 陆生牲畜走得更远（从门出去），水生仍在水域内
-      const tx = this.pasture.x + 0.5 + Math.cos(a) * roam, ty = this.pasture.y + 0.5 + Math.sin(a) * roam;
+      const pcx = this.pasture.x + 0.5, pcy = this.pasture.y + 0.5;
+      const dCenter = Math.hypot(this.x - pcx, this.y - pcy);
+      let tx, ty;
+      if (!waterBound && dCenter > 6) {
+        // 回栏偏置（v0.6.2，确定性）：离群过远则朝牧场中心走 min(d,5)，不消耗随机角度
+        const d = Math.min(dCenter, 5);
+        tx = this.x + (pcx - this.x) / dCenter * d;
+        ty = this.y + (pcy - this.y) / dCenter * d;
+      } else {
+        const a = rand() * Math.PI * 2;
+        const roam = waterBound ? 4 : 11;   // 陆生散养半径 10~12（取 11，经门外出），水生仍在水域内
+        tx = pcx + Math.cos(a) * roam; ty = pcy + Math.sin(a) * roam;
+      }
       const ok = waterBound
-        ? habitatOk(this, Math.round(tx), Math.round(ty))
-        : walkable(Math.round(tx), Math.round(ty));
+        ? habitatOk(this, Math.floor(tx), Math.floor(ty))
+        : walkable(Math.floor(tx), Math.floor(ty));
       if (ok) this.target = { x: tx, y: ty };
     }
     if (this.target) this.stepToward(this.target, this.speed * dt);
@@ -257,7 +280,8 @@ class Creature {
       this.breedCd = 120;
       const pen = creatures.filter(c => c.pasture && !c.dead && c.type === this.type &&
         Math.abs(c.x - this.pasture.x) + Math.abs(c.y - this.pasture.y) < 6);
-      if (pen.length < SIM.PASTURE_CAP && rand() < SIM.BREED_CHANCE) {
+      // v0.6.2：亲代须在育龄内（幼年不能生、老年停育）
+      if (pen.length < SIM.PASTURE_CAP && rand() < SIM.BREED_CHANCE && breedAgeOk(this)) {
         spawnCreature(this.pasture.x, this.pasture.y, this.type, true);
       }
     }
@@ -284,7 +308,13 @@ class Creature {
 
   moveBy(mx, my) {
     const nx = this.x + mx, ny = this.y + my;
-    if (habitatOk(this, Math.floor(nx), Math.floor(ny))) { this.x = nx; this.y = ny; }
+    // v0.6.2 散养通行：圈养动物（this.pasture 非空）放行牧场门 GATE 与栏内地板 PASTURE——
+    // 圈养牲畜生在栏心 PASTURE tile 上，其栖息地（GRASS/SAND）不含栏心，不放行则永远钉死在
+    // 栏心一格（v0.5.3「出门溜达」对陆生牲畜实际从未生效的根因）；野生生物栖息地语义不变
+    const ft = tileAt(Math.floor(nx), Math.floor(ny));
+    const ok = habitatOk(this, Math.floor(nx), Math.floor(ny)) ||
+      (this.pasture && (ft === T.GATE || ft === T.PASTURE));
+    if (ok) { this.x = nx; this.y = ny; }
     else this.target = null;
   }
 }
@@ -385,28 +415,32 @@ function populateIslandCreatures(bx, by, r) {
   return n;
 }
 
-// 野生总量自然增长（防止猎绝；分栖息地设上限）
+// 野生总量自然增长（防止猎绝；分栖息地设上限；v0.6.2：亲代须育龄内——上限计数仍按全部个体
+// （收口修正：若连计数也过滤育龄，老幼个体会绕过上限无限累积，species 套件实测 rabbit 38/30 等）
 function wildBreedTick() {
   if (world.time % 120 > 1) return;
   // 陆生：可猎物种 + 狼（捕食者种群也需延续，与羊群构成生态闭环）
   const land = creatures.filter(c => c.isWild() && !c.dead && (CREATURE_META[c.type].hunt || c.type === "wolf"));
-  if (land.length < SIM.WILD_BREED_CAP && land.length >= 4) {
-    const c = land[randInt(0, land.length - 1)];
+  const landParents = land.filter(c => breedAgeOk(c));
+  if (land.length < SIM.WILD_BREED_CAP && landParents.length >= 4) {
+    const c = landParents[randInt(0, landParents.length - 1)];
     const p = findSpot(Math.round(c.x), Math.round(c.y), 0, 3, T.GRASS) ||
               (c.type === "wolf" ? findSpot(Math.round(c.x), Math.round(c.y), 0, 5, T.TREE) : null);   // 森林深处的狼可在林地繁衍
     if (p) spawnCreature(p.x, p.y, c.type);
   }
   // 海龟（浅水繁殖）
   const turtles = creatures.filter(c => c.isWild() && !c.dead && c.type === "turtle");
-  if (turtles.length > 0 && turtles.length < SIM.TURTLE_CAP) {
-    const t0 = turtles[randInt(0, turtles.length - 1)];
+  const turtleParents = turtles.filter(c => breedAgeOk(c));
+  if (turtleParents.length > 0 && turtles.length < SIM.TURTLE_CAP) {
+    const t0 = turtleParents[randInt(0, turtleParents.length - 1)];
     const ps = findSpot(Math.round(t0.x), Math.round(t0.y), 0, 5, T.WATER);
     if (ps) spawnCreature(ps.x, ps.y, "turtle");
   }
   // 鲸（深海繁殖）
   const whales = creatures.filter(c => !c.dead && c.type === "whale");
-  if (whales.length > 0 && whales.length < SIM.WHALE_CAP) {
-    const w0 = whales[randInt(0, whales.length - 1)];
+  const whaleParents = whales.filter(c => breedAgeOk(c));
+  if (whaleParents.length > 0 && whales.length < SIM.WHALE_CAP) {
+    const w0 = whaleParents[randInt(0, whaleParents.length - 1)];
     const pw = findSpot(Math.round(w0.x), Math.round(w0.y), 0, 8, T.DEEP);
     if (pw) spawnCreature(pw.x, pw.y, "whale");
   }
@@ -418,7 +452,9 @@ function wildBreedTick() {
     if (!meta || meta.flier) continue;
     const pool = creatures.filter(c => c.isWild() && !c.dead && c.type === type);
     if (pool.length === 0 || pool.length >= cap) continue;
-    const p0 = pool[randInt(0, pool.length - 1)];
+    const parents = pool.filter(c => breedAgeOk(c));
+    if (parents.length === 0) continue;
+    const p0 = parents[randInt(0, parents.length - 1)];
     const ps = findSpot(Math.round(p0.x), Math.round(p0.y), 0, 6, habTile[meta.habitat] || T.GRASS);
     if (ps) spawnCreature(ps.x, ps.y, type);
   }

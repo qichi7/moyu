@@ -214,9 +214,11 @@ const diedWithDepression = world.logs.some(l => l.text.includes("因长期抑郁
 assert(died && diedWithDepression, "郁郁而终：60s 不治线（纪事含「因长期抑郁病倒」）");
 
 // ===== 16. 病倒痊愈：sickSource=mood 但走出抑郁 → 痊愈不死 =====
-const hB = agents[15];
+// 收口健壮化：随机流漂移会改变 agents[15] 落点（死亡 splice / 新生儿入列），改取在册成年者；
+// 窗口 4400→6000 步：全局丰收宴席（mood 全员 +25）若落在窗口内会重置病倒时钟一次，留足余量
+const hB = agents.find(a => !a.dead && a.age >= 15) || agents.find(a => !a.dead);
 freeze(hB); hB.mood = 5;
-for (let i = 0; i < 4400 && !hB.sick; i++) { topUp(hB); hB.hunger = 100; hB.energy = 100; hB.thirst = 100; simUpdate(STEP); }
+for (let i = 0; i < 6000 && !hB.sick; i++) { topUp(hB); hB.hunger = 100; hB.energy = 100; hB.thirst = 100; simUpdate(STEP); }
 assert(hB.sick && hB.sickSource === "mood", "痊愈前置：病倒（sickSource=mood）");
 hB.mood = 100;
 for (let i = 0; i < 400 && hB.sick; i++) { topUp(hB); hB.hunger = 100; hB.energy = 100; hB.thirst = 100; simUpdate(STEP); }

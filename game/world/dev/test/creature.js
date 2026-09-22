@@ -41,6 +41,7 @@ for (let i = 0; i < 9000; i++) {   // 900s：期望平均 3 天（180s）内离�
   if (oldCow.dead) { died = true; break; }
 }
 assert(died, "场景A：寿命耗尽的牛自然老死");
+assert(oldCow.deathReason === "寿终正寝", "场景A：老死死因标注 deathReason=寿终正寝（v0.6.2）");
 const youngCow = spawnCreature(cowSpot.x, cowSpot.y, "cow");
 youngCow.age = 3;   // 青年
 let diedYoung = false;
@@ -57,6 +58,7 @@ for (let i = 0; i < 12000; i++) {   // 1200s > 90s 坚持时长
   if (beachedWhale.dead) { strandDied = true; break; }
 }
 assert(strandDied, "场景B：搁浅鲸长时间无人救援 → 死亡");
+assert(beachedWhale.deathReason === "搁浅身亡", "场景B：搁浅死因标注 deathReason=搁浅身亡（v0.6.2）");
 assert((beachedWhale.strandT || 0) > SIM.ANIMAL_STRAND_DEATH - 5, "场景B：死亡前坚持时长符合设定");
 const okWhale = spawnCreature(3, 3, "whale");
 for (let i = 0; i < 300; i++) okWhale.update(STEP);
@@ -305,6 +307,148 @@ if (!pasSpot) { assert(true, "场景L：无构造点（跳过）"); } else {
     assert(!tasks.list.some(t => t.type === "CAPTURE" && t.creature === fish2),
       "场景L：水生动物不会被立项圈进陆上牧场（渔场另有路径）");
   }
+}
+
+// ---- 场景 M：圈养散养（v0.6.2）——出栏远游（>6 格）、全程存活、自行回栏（4 格内）、位置始终合法 ----
+simInit(42);
+// 开阔地选址：15×15 窗口内草地/沙地占比过 2/3（散养 roam 11 需要开阔地形，水岸/建筑群会围死路径）
+let mSpot = null, mOpen = -1;
+for (let r = 3; r <= 16; r++) {
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    const x = world.store.x + dx, y = world.store.y + dy;
+    if (tileAt(x, y) !== T.GRASS || nearAny(x, y, [T.HOUSE, T.FARM, T.WATER, T.DEEP], 2)) continue;
+    let open = 0;
+    for (let yy = y - 7; yy <= y + 7; yy++) for (let xx = x - 7; xx <= x + 7; xx++) {
+      const tt = tileAt(xx, yy);
+      if (tt === T.GRASS || tt === T.SAND) open++;
+    }
+    if (open > mOpen) { mOpen = open; mSpot = { x, y }; }
+  }
+}
+if (!mSpot || mOpen < 150) {
+  assert(true, "场景M：无开阔构造点（跳过，最大开敞度 " + mOpen + "/225）");
+} else {
+  tasksAdd({ type: "PASTURE", x: mSpot.x, y: mSpot.y, need: 1 });
+  const mt = tasks.list[tasks.list.length - 1];
+  mt.progress = mt.need;
+  tasksFinish(mt);
+  const mCow = spawnCreature(mSpot.x, mSpot.y, "cow", true);   // 圈养于牧场
+  mCow.age = 1.5;   // 幼年：关闭繁殖（breedAgeOk 门），保持单头确定性观测
+  const mcx = mSpot.x + 0.5, mcy = mSpot.y + 0.5;
+  let maxDist = 0, wentOut = false, cameBack = false, illegal = 0, aliveAll = true;
+  for (let i = 0; i < 12000; i++) {   // 1200s：数十次 roam 目标重选，足够出栏+回栏
+    mCow.update(STEP);
+    const d = Math.hypot(mCow.x - mcx, mCow.y - mcy);
+    if (d > maxDist) maxDist = d;
+    if (d > 6) wentOut = true;
+    else if (wentOut && d <= 4) cameBack = true;
+    const tt = tileAt(Math.floor(mCow.x), Math.floor(mCow.y));
+    if (!TILE_META[tt].walk) illegal++;
+    if (mCow.dead) { aliveAll = false; break; }
+  }
+  assert(maxDist > 6, "场景M：散养牛出栏远游（最远距牧场中心 " + maxDist.toFixed(1) + " 格 > 6）");
+  assert(aliveAll, "场景M：散养牛全程存活（圈养免搁浅、幼年不老死）");
+  assert(wentOut && cameBack, "场景M：出栏后至少一次回到距栏 4 格内（回栏偏置生效）");
+  assert(illegal === 0, "场景M：采样位置全部合法（floor 后 tile 均可走，非法采样 " + illegal + "）");
+}
+
+// ---- 场景 N：门通行（v0.6.2 moveBy 放行 GATE）——圈养牛自栏内穿门格到门外 ----
+simInit(42);
+let nSpot = null;
+outerN:
+for (let r = 3; r <= 16; r++) {
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    const x = world.store.x + dx, y = world.store.y + dy;
+    // 门默认开在南侧（ring 内 dx=0,dy=+1 且 GRASS/SAND 才入环）：y+1 门格、y+2/y+3 门外落点全须草地
+    if (tileAt(x, y) === T.GRASS && tileAt(x, y + 1) === T.GRASS &&
+        tileAt(x, y + 2) === T.GRASS && tileAt(x, y + 3) === T.GRASS &&
+        !nearAny(x, y, [T.HOUSE, T.FARM], 2)) { nSpot = { x, y }; break outerN; }
+  }
+}
+if (!nSpot) { assert(true, "场景N：无构造点（跳过）"); } else {
+  tasksAdd({ type: "PASTURE", x: nSpot.x, y: nSpot.y, need: 1 });
+  const nt = tasks.list[tasks.list.length - 1];
+  nt.progress = nt.need;
+  tasksFinish(nt);
+  const nGate = { x: nSpot.x, y: nSpot.y + 1 };
+  assert(tileAt(nGate.x, nGate.y) === T.GATE, "场景N：南侧门格已立起（GATE）");
+  const nCow = spawnCreature(nSpot.x, nSpot.y, "cow", true);   // 置于栏心（门内侧相邻格）
+  const outside = { x: nSpot.x + 0.5, y: nSpot.y + 3.5 };      // 门外两格的中心
+  let crossed = false, out2 = false, fenceHit = false;
+  for (let i = 0; i < 400 && !out2; i++) {
+    nCow.target = outside;                     // 手动锁定目标（不走 update，防 roam 改写目标）
+    nCow.stepToward(nCow.target, 0.05);        // 反复步进：moveBy 的 GATE 放行是本场景被测接缝
+    const fx = Math.floor(nCow.x), fy = Math.floor(nCow.y);
+    if (fx === nGate.x && fy === nGate.y) crossed = true;
+    if (fx === nSpot.x && fy === nSpot.y + 2) out2 = true;
+    if (tileAt(fx, fy) === T.FENCE) fenceHit = true;
+  }
+  assert(crossed, "场景N：牛穿过 GATE 门格（floor 坐标曾落在门格）");
+  assert(out2, "场景N：牛到达门外格");
+  assert(!fenceHit, "场景N：全程未踏入围栏格");
+  assert(!!nCow.pasture && !nCow.dead, "场景N：牛保持圈养身份存活");
+}
+
+// ---- 场景 O：育龄门（v0.6.2 breedAgeOk）——单元探针 + 圈养繁殖集成探针 ----
+assert(breedAgeOk({ type: "cow", age: 1 }) === false, "场景O：幼年牛（age 1 < stages[0]=2）不育");
+assert(breedAgeOk({ type: "cow", age: 5 }) === true, "场景O：壮年牛（age 5 ∈ [2,12)）可育");
+assert(breedAgeOk({ type: "cow", age: 12.5 }) === false, "场景O：老年牛（age 12.5 ≥ stages[2]=12）停育");
+assert(breedAgeOk({ type: "nonexistentbeast", age: 3 }) === true, "场景O：无寿命表物种兜底不限育");
+simInit(42);
+const oSpot = findSpot(world.store.x, world.store.y, 3, 12, T.GRASS, [T.HOUSE, T.FARM]);
+if (!oSpot) { assert(true, "场景O：无构造点（跳过）"); } else {
+  tasksAdd({ type: "PASTURE", x: oSpot.x, y: oSpot.y, need: 1 });
+  const ot = tasks.list[tasks.list.length - 1];
+  ot.progress = ot.need;
+  tasksFinish(ot);
+  const penCount = () => creatures.filter(c => !c.dead && c.type === "cow" && c.pasture &&
+    c.pasture.x === oSpot.x && c.pasture.y === oSpot.y).length;
+  const oCow = spawnCreature(oSpot.x, oSpot.y, "cow", true);
+  oCow.age = 1; oCow.breedCd = 0;
+  for (let i = 0; i < 80; i++) { oCow.breedCd = 0; oCow.update(STEP); }   // 强制 80 轮繁殖判定（对冲 BREED_CHANCE 概率）
+  assert(penCount() === 1, "场景O：幼年圈养牛 80 轮强制繁殖判定 → 同牧场同种数量不增（" + penCount() + "）");
+  oCow.age = 5;
+  for (let i = 0; i < 80; i++) { oCow.breedCd = 0; oCow.update(STEP); }
+  assert(penCount() >= 2, "场景O：育龄圈养牛 80 轮强制繁殖判定 → 至少繁殖出一只（现存 " + penCount() + "）");
+}
+
+// ---- 场景 P：deathReason 标注（v0.6.2）——老死大 dt 驱动 + 狩猎/钓起直接结算 ----
+simInit(42);
+const pSpot = (function () {
+  for (let r = 0; r <= 8; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    if (habitatOk({ type: "cow" }, 4 + dx, 4 + dy)) return { x: 4 + dx, y: 4 + dy };
+  }
+  return { x: 4, y: 4 };
+})();
+const pCow = spawnCreature(pSpot.x, pSpot.y, "cow");
+pCow.age = SPECIES_AGE.cow.lifespan;   // 寿命拉满
+let pDied = false;
+for (let i = 0; i < 20 && !pDied; i++) {   // dt=DAY_LEN → 每步老死概率恰 1/3（dt/(DAY_LEN*3)），20 步漏网仅 0.03%
+  pCow.update(SIM.DAY_LEN);
+  pDied = pCow.dead;
+}
+assert(pDied && pCow.deathReason === "寿终正寝", "场景P：大 dt 驱动老死，deathReason=寿终正寝");
+simInit(42);
+const hSpot = (function () {
+  for (let r = 0; r <= 8; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    if (habitatOk({ type: "deer" }, 4 + dx, 4 + dy)) return { x: 4 + dx, y: 4 + dy };
+  }
+  return { x: 4, y: 4 };
+})();
+const hunted = spawnCreature(hSpot.x, hSpot.y, "deer");
+const hunter = agents.find(a => !a.dead);
+tasksFinish({ type: "HUNT", x: hSpot.x, y: hSpot.y, need: 1, creature: hunted, workers: new Set() }, hunter, null);
+assert(hunted.dead && hunted.deathReason === "被狩猎", "场景P：狩猎结算标注 deathReason=被狩猎");
+const kW = findSpot(world.store.x, world.store.y, 2, 12, T.WATER);
+if (!kW) { assert(true, "场景P：无水域（钓起探针跳过）"); } else {
+  const koi = spawnCreature(kW.x, kW.y, "koi");
+  const fisher = agents.find(a => !a.dead);
+  tasksFinish({ type: "FISH", x: kW.x, y: kW.y, fishX: kW.x, fishY: kW.y, need: 1, workers: new Set() }, fisher, null);
+  assert(koi.dead && koi.deathReason === "被钓起", "场景P：珍稀渔获标注 deathReason=被钓起");
 }
 `;
 
