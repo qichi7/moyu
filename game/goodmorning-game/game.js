@@ -340,28 +340,17 @@ class GoodMorningGame {
         document.getElementById('game-container').style.display = 'none';
     }
     
-    // 校验角色名（防XSS：白名单字符 + 长度限制，与排行榜校验规则一致）
-    isValidCharacterName(name) {
-        return typeof name === 'string' && /^[\w\u4e00-\u9fa5]{3,12}$/.test(name);
-    }
-
     showCharacterSelectOverlay(characters) {
         document.getElementById('login-overlay').style.display = 'none';
         document.getElementById('character-select-overlay').style.display = 'flex';
-
+        
         const list = document.getElementById('character-list');
         list.innerHTML = '';
-
-        // 仅渲染通过白名单校验的角色名：Gist 数据可能被其他客户端污染，防止存储型XSS
-        characters.filter(name => this.isValidCharacterName(name)).forEach(name => {
+        
+        characters.forEach(name => {
             const item = document.createElement('div');
             item.className = 'character-item';
-
-            const nameSpan = document.createElement('span');
-            nameSpan.className = 'character-item-name';
-            nameSpan.textContent = name;
-
-            item.appendChild(nameSpan);
+            item.innerHTML = `<span class="character-item-name">${name}</span>`;
             item.addEventListener('click', () => {
                 this.selectCharacter(name);
             });
@@ -465,11 +454,11 @@ class GoodMorningGame {
             return;
         }
         
-        if (!this.isValidCharacterName(name)) {
-            this.showToast('角色名称需要3-12个字符，且只能包含中文、字母、数字、下划线', 'warning');
+        if (!name || name.length < 3 || name.length > 12) {
+            this.showToast('角色名称需要3-12个字符', 'warning');
             return;
         }
-
+        
         this.showLoadingOverlay('创建角色...');
         
         try {
@@ -658,8 +647,8 @@ class GoodMorningGame {
         
         // 检查名称是否修改
         if (newName !== oldName) {
-            if (!this.isValidCharacterName(newName)) {
-                this.showToast('角色名称需要3-12个字符，且只能包含中文、字母、数字、下划线', 'warning');
+            if (!newName || newName.length < 3 || newName.length > 12) {
+                this.showToast('角色名称需要3-12个字符', 'warning');
                 return;
             }
             

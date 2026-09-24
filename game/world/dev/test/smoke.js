@@ -74,7 +74,8 @@ assert(world.logSeq >= 100, "世界记事持续产生（logSeq=" + world.logSeq 
 const ctx = vm.createContext({ console });
 ctx.__failed = false;
 try {
-  vm.runInContext(test, ctx, { filename: "smoke.js", timeout: 600000 });
+  // v0.6.18 补粮门修复后世界繁荣度大增（12000s 窗口人口数百），600s 预算不够
+  vm.runInContext(test, ctx, { filename: "smoke.js", timeout: 2400000 });
 } catch (e) {
   console.error("FAIL 测试抛异常:", e);
   process.exitCode = 1;

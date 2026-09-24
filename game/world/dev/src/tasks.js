@@ -198,7 +198,14 @@ function tasksFinish(t, agent, was) {
         world.fishStock.delete(fk);
         for (let i = creatures.length - 1; i >= 0; i--) {
           const c = creatures[i];
-          if (c.type === "fish" && Math.hypot(c.x - t.x - 0.5, c.y - t.y - 0.5) < 1.5) creatures.splice(i, 1);
+          if (c.type === "fish" && Math.hypot(c.x - t.x - 0.5, c.y - t.y - 0.5) < 1.5) {
+            // v0.6.17 接缝修复：填海拆鱼不再静默抹除——鱼会游走，附近有可栖息水格则疏散
+            //（生态普查实测 era3 填海潮把繁衍池静默抽干至全灭，且不走 dead 流程无任何纪事）；
+            // 无处可去（海湾被整体填平）才移除实体
+            const refuge = findSpot(Math.round(c.x), Math.round(c.y), 2, 8, T.WATER);
+            if (refuge) { c.x = refuge.x + 0.5; c.y = refuge.y + 0.5; }
+            else creatures.splice(i, 1);
+          }
         }
       }
       break;

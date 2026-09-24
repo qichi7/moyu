@@ -42,6 +42,9 @@ const world = {
   interBridges: new Set(), // 岛际大桥对（genWorld 重置）
   lastBridgeHead: null,
   lastBridgeDir: null,
+  meteor: null,         // 流星（v0.6.14）：{ t0, dur }（sim 秒），null = 无
+  meteorNext: 0,        // 下一颗流星的最早时刻（sim 秒）
+  storm: null,          // 台风（v0.6.15）：{ x, y, dx, dy, born, life, r }，null = 无
   logs: [],
 };
 
@@ -95,6 +98,69 @@ function setTile(x, y, t) {
 
 // 兼容旧调用点：无限地图无边界
 const inWorld = () => true;
+
+// ---- 气候带与洋流（v0.6.15 带划分+洋流；v0.6.16 边界噪声曲线化+连续强度场+浮冰船速）----
+// 气候：以已定居区（房屋包围盒）南北缘为基线——北缘雪原、南缘旱带、中部温带。
+// v0.6.16：雪线/旱线 y 值 = 基线 + fbm 噪声扰动（按 x 的纯函数，不进缓存），直线分界 → 平滑曲线。
+// houses 变动（增删/换世界）即失效，另设 60s 兜底刷新（模块级缓存，基线计算低频）
+const _climCache = { map: null, t: -1, n: -1, minY: 0, maxY: 0 };
+function _climBase() {
+  const c = _climCache;
+  if (c.map !== world.chunks || world.time - c.t >= 60 || c.n !== world.houses.length) {
+    let minY = Infinity, maxY = -Infinity;
+    for (const h of world.houses) { if (h.y < minY) minY = h.y; if (h.y > maxY) maxY = h.y; }
+    c.map = world.chunks; c.t = world.time; c.n = world.houses.length;
+    c.minY = minY; c.maxY = maxY;
+  }
+  return c;
+}
+// 边界扰动：fbm 采样（x/48 尺度平滑，3 倍频）中心对称折算 → ±WOBBLE 漂移；
+// 雪线/旱线不同盐 = 坐标位移折算（参照 currentAt 的 hash2 位移法：两维各加常量错开相位）
+function _climWobble(x, sx, sy) {
+  const N = world.noise;
+  return N ? (N.fbm(x / 48 + sx, sy, 3) - 0.5) * 2 * SIM.CLIMATE.WOBBLE : 0;
+}
+// 雪线/旱线 y 值（纯函数，按 x）
+const snowEdgeY = x => _climBase().minY + SIM.CLIMATE.EDGE_INSET + _climWobble(x, 137.5, 711.3);
+const droughtEdgeY = x => _climBase().maxY - SIM.CLIMATE.EDGE_INSET + _climWobble(x, 919.1, 313.7);
+function climateAt(x, y) {
+  if (!world.houses.length) return "temperate";
+  if (y < snowEdgeY(x)) return "snow";
+  if (y > droughtEdgeY(x)) return "drought";
+  return "temperate";
+}
+// 连续气候强度场（v0.6.16）：离开边界深入雪原/旱带的深度 0~1，FADE 带宽内线性爬坡，temperate 为 0。
+// 纯函数；表现层按强度做地形贴花，浮冰船速以此判定
+function climateIntensity(x, y) {
+  if (!world.houses.length) return 0;
+  const se = snowEdgeY(x), de = droughtEdgeY(x), F = SIM.CLIMATE.FADE;
+  if (y < se) return Math.max(0, Math.min(1, (se - y) / F));
+  if (y > de) return Math.max(0, Math.min(1, (y - de) / F));
+  return 0;
+}
+
+// 洋流：16×16 海域块一个确定性流向（hash2 纯函数、无状态）；非水面返回零向量。
+// 8 方向表取单位向量（斜向 1/√2），同块恒定、跨块跳变即成"流带"
+const CURRENT_DIRS = [[1, 0], [0.7071, 0.7071], [0, 1], [-0.7071, 0.7071],
+  [-1, 0], [-0.7071, -0.7071], [0, -1], [0.7071, -0.7071]];
+function currentAt(x, y) {
+  const t = tileAt(Math.floor(x), Math.floor(y));
+  if (t !== T.WATER && t !== T.DEEP) return { dx: 0, dy: 0 };
+  const d = CURRENT_DIRS[(hash2(Math.floor(x / 16) + 511, Math.floor(y / 16) + 977) * 8) | 0];
+  return { dx: d[0], dy: d[1] };
+}
+
+// 船只环境航速乘数：洋流顺/逆流（航向·流向点积分档）+ 台风圈内减速 + 浮冰海面减速（v0.6.16；渔船/远航船共用）
+function shipEnvMul(s, hx, hy) {
+  const cur = currentAt(s.x, s.y);
+  const dot = hx * cur.dx + hy * cur.dy;
+  let m = dot > 0.25 ? SIM.CURRENT_SHIP_FAST : dot < -0.25 ? SIM.CURRENT_SHIP_SLOW : 1;
+  const st = world.storm;
+  if (st && Math.hypot(st.x - s.x, st.y - s.y) < st.r) m *= SIM.TYPHOON_SHIP;
+  const t = tileAt(Math.floor(s.x), Math.floor(s.y));
+  if ((t === T.WATER || t === T.DEEP) && climateIntensity(s.x, s.y) >= 0.5) m *= SIM.CLIMATE.ICE_SHIP || 0.85;
+  return m;
+}
 
 // ---- 探索发现：虚空被探索到时，随机显现小岛（确定性 hash，同一网格结果恒定） ----
 const DISCOVERY_GRID = 48;
@@ -194,8 +260,12 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
       let t;
       if (e < 0.28) {
         t = T.DEEP;
-        // 深海鲸：概率极低，同格防重（区域重算不重复生成）
-        if (hash2(x + 441, y + 819) < 0.008 && !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "whale");
+        // 深海鲸：概率极低，同格防重（区域重算不重复生成）；v0.6.17 接缝修复：补 WHALE_CAP 守卫
+        //（普查实测 12000s 鲸 12 > cap 5——探索点亮新深海的 hash spawn 绕过繁衍上限表，cap 语义被架空；
+        //  与下方 shark/moonfish 及 creature.js 探索偶现分支的守卫口径对齐）
+        if (hash2(x + 441, y + 819) < 0.008 &&
+            creatures.filter(c => c.type === "whale" && !c.dead).length < SIM.WHALE_CAP &&
+            !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "whale");
         // 深海新物种（v0.5.0）：鲨（氛围捕食者）/月光鱼（珍稀渔获）——hash 确定性 + 全局上限防泛滥
         else if (hash2(x + 371, y + 533) < 0.004 &&
                  creatures.filter(c => c.type === "shark" && !c.dead).length < (SIM.SPECIES_CAP.shark || 8) &&
@@ -213,7 +283,11 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
           if (creatures.filter(c => c.type === "fish" && !c.dead).length < (SIM.SPECIES_CAP.fish || 60) &&
               !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "fish");
         }
-        else if (hash2(x + 613, y + 209) < 0.005 && !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "turtle");
+        // 海龟 spawn 同受 TURTLE_CAP 约束（v0.6.17 接缝修复：普查实测 33 > cap 12，口径与鲸一致——
+        // 海龟寿命 30 游戏年几乎不老死，点亮新浅海的持续 spawn 会把 cap 无限顶破）
+        else if (hash2(x + 613, y + 209) < 0.005 &&
+                 creatures.filter(c => c.type === "turtle" && !c.dead).length < SIM.TURTLE_CAP &&
+                 !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "turtle");
         // 浅海新物种（v0.5.0）：锦鲤（珍稀渔获）/人鱼（氛围幻影）——hash 确定性 + 全局上限
         else if (hash2(x + 827, y + 619) < 0.0025 &&
                  creatures.filter(c => c.type === "koi" && !c.dead).length < (SIM.SPECIES_CAP.koi || 12) &&
@@ -251,7 +325,9 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
       const ed = y < ey1 && firstPass[li + w] ? elev[li + w] : e;
       if (e > 0.5 && Math.max(e - er, e - ed) > 0.11) {
         const c = world.chunks.get(chunkKey(x >> 5, y >> 5));
-        c.tiles[cIdx(x, y)] = T.CLIFF;
+        // v0.6.18 守卫：悬崖只落在本遍新生成的虚空格——探针实测已点亮的桥格被复写为悬崖
+        //（firstPass 标记在重叠点亮区存在复用漏洞），已生成地形/造物绝不改写
+        if (c.tiles[cIdx(x, y)] === T.VOID) c.tiles[cIdx(x, y)] = T.CLIFF;
       }
     }
   }
@@ -311,8 +387,9 @@ function shipTick(dt) {
       if (s.sailor) logMsg(`航海家 ${s.sailor.name} 的船补给仅够回程，调头返航。`);
       continue;
     }
-    const nx = s.x + Math.cos(s.ang) * SIM.SHIP_SPEED * dt;
-    const ny = s.y + Math.sin(s.ang) * SIM.SHIP_SPEED * dt;
+    const spd = SIM.SHIP_SPEED * shipEnvMul(s, Math.cos(s.ang), Math.sin(s.ang));   // 洋流顺逆 + 台风（v0.6.15）
+    const nx = s.x + Math.cos(s.ang) * spd * dt;
+    const ny = s.y + Math.sin(s.ang) * spd * dt;
     // 航行沿途大面积点亮虚空（航海开拓的核心价值）
     s.revealCd -= dt;
     if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 15); }
@@ -353,7 +430,8 @@ function shipTick(dt) {
       if (s.sailor) logMsg(`航海家 ${s.sailor.name} 的船在归途中补给耗尽，被困海上，发出求救信号！`);
       continue;
     }
-    const nx = s.x + (dx / d) * SIM.SHIP_SPEED * dt, ny = s.y + (dy / d) * SIM.SHIP_SPEED * dt;
+    const spd = SIM.SHIP_SPEED * shipEnvMul(s, dx / d, dy / d);   // 洋流顺逆 + 台风（v0.6.15）
+    const nx = s.x + (dx / d) * spd * dt, ny = s.y + (dy / d) * spd * dt;
     s.revealCd -= dt;
     if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 15); }
     const aheadT = tileAt(Math.round(nx), Math.round(ny));
@@ -391,8 +469,9 @@ function shipTick(dt) {
       let diff = Math.atan2(Math.sin(Math.atan2(dy, dx) - s.ang), Math.cos(Math.atan2(dy, dx) - s.ang));
       s.ang += diff * Math.min(1, dt * 2);
     }
-    s.x += Math.cos(s.ang) * SIM.SHIP_SPEED * dt;
-    s.y += Math.sin(s.ang) * SIM.SHIP_SPEED * dt;
+    const spd = SIM.SHIP_SPEED * shipEnvMul(s, Math.cos(s.ang), Math.sin(s.ang));   // 洋流顺逆 + 台风（v0.6.15）
+    s.x += Math.cos(s.ang) * spd * dt;
+    s.y += Math.sin(s.ang) * spd * dt;
   }
   // 长期停靠的船清理（远航需另造新船）
   for (let i = ships.length - 1; i >= 0; i--) {
@@ -442,10 +521,11 @@ function tickFishingBoats(dt) {
         const want = Math.atan2(dy, dx);
         s.ang += Math.atan2(Math.sin(want - s.ang), Math.cos(want - s.ang)) * Math.min(1, dt * 2);
       }
-      s.x += Math.cos(s.ang) * SIM.SHIP_SPEED * dt;
-      s.y += Math.sin(s.ang) * SIM.SHIP_SPEED * dt;
-    } else {
-      // 到点起网：扣鱼群资源，渔获入舱
+      const spd = SIM.SHIP_SPEED * shipEnvMul(s, Math.cos(s.ang), Math.sin(s.ang));   // 洋流顺逆 + 台风（v0.6.15）
+      s.x += Math.cos(s.ang) * spd * dt;
+      s.y += Math.sin(s.ang) * spd * dt;
+    } else if (!(world.storm && Math.hypot(world.storm.x - s.x, world.storm.y - s.y) < world.storm.r)) {
+      // 到点起网：扣鱼群资源，渔获入舱（台风圈内暂停捕捞推进，渔船原地顶风抛锚）
       s.fishCd -= dt;
       if (s.fishCd <= 0) {
         s.fishCd = SIM.FISHING_INTERVAL;
@@ -459,7 +539,8 @@ function tickFishingBoats(dt) {
     if (s.state !== "fishingReturn") continue;
     const dx = world.store.x - s.x, dy = world.store.y - s.y;
     const d = Math.hypot(dx, dy) || 1;
-    const nx = s.x + (dx / d) * SIM.SHIP_SPEED * dt, ny = s.y + (dy / d) * SIM.SHIP_SPEED * dt;
+    const spd = SIM.SHIP_SPEED * shipEnvMul(s, dx / d, dy / d);   // 洋流顺逆 + 台风（v0.6.15，渔船归航）
+    const nx = s.x + (dx / d) * spd * dt, ny = s.y + (dy / d) * spd * dt;
     const aheadT = tileAt(Math.round(nx), Math.round(ny));
     if (walkable(Math.round(nx), Math.round(ny)) && aheadT !== T.WATER && aheadT !== T.DEEP && aheadT !== T.BRIDGE) {
       // 靠岸卸货：渔获就地入粮池，渔民下船休整（渔船停靠码头，由常规清理回收）
@@ -534,7 +615,9 @@ function settleFarTile(c, i, x, y, reveal, litTest, wasGen) {
   } else if (!wasGen) {
     c.tiles[i] = T.VOID;                       // 首次视口生成：未探索虚空
   } else if (world.litCells.has(x + "," + y)) {
-    c.tiles[i] = T.DEEP;                       // 重算时已点亮的格保持点亮
+    // v0.6.18 接缝修复：重算恢复点亮也只作用于 VOID——旧写法无守卫，把落在点亮区内的
+    // 已建桥/造物整格抹回 DEEP（船/探索者每 2s revealArea 高频重算，桥建到一半被静默拆除）
+    if (c.tiles[i] === T.VOID) c.tiles[i] = T.DEEP;
   }
   // 其余重算：保持原值
 }
@@ -637,6 +720,11 @@ function genWorld(seed) {
   world.caves = [];
   world.quarries = [];
   world.sandpits = [];
+  world.meteor = null; world.meteorNext = 0; world.storm = null;   // 天象/天气随世界重置
+  // 种群随世界重置（v0.6.18 接缝修复）：creatures/agents 是模块级数组，genWorld 原本不清——
+  // 同进程多次 simInit（测试场景/未来重开世界）会残留旧世界实体，污染生态计数与 WILD_BREED_CAP 护栏
+  creatures.length = 0;
+  agents.length = 0;
 
   world.islands.push({ x: 0, y: 0, r: 14, claimed: true });
   const islN = 2 + randInt(0, 4);   // 初始 2~6 座无人岛（总岛数 3~7 随机）
@@ -847,7 +935,15 @@ function pickIslandName(o) {
 // 浆果/果树/鱼群再生（sim 每秒调用一次）
 function berryTick() {
   if (world.time % 60 > 1) return;   // 粗粒度：每 60 sim 秒再生一轮
-  for (const [k, v] of world.berryStock) if (v < SIM.BERRY_STOCK) world.berryStock.set(k, v + 1);
+  // 气候因子（v0.6.15）：雪原 ×SNOW_BERRY、旱带 ×DROUGHT_BERRY——按再生格气候以概率折算
+  //（格子再生是整份跳变，速率乘因子落成「本轮以因子概率 +1」，期望速率同乘）
+  for (const [k, v] of world.berryStock) {
+    if (v >= SIM.BERRY_STOCK) continue;
+    const [x, y] = k.split(",").map(Number);
+    const cl = climateAt(x, y);
+    const f = cl === "snow" ? SIM.CLIMATE.SNOW_BERRY : cl === "drought" ? SIM.CLIMATE.DROUGHT_BERRY : 1;
+    if (f >= 1 || rand() < f) world.berryStock.set(k, v + 1);
+  }
   for (const [k, v] of world.fishStock) if (v < 3) world.fishStock.set(k, v + 1);
 }
 

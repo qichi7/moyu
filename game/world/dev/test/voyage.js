@@ -200,9 +200,9 @@ world.era = 2;
 // 构造一对已命名「岛屿」标记：A 在沿岸陆地格，B 在其某方向 10 格外的海面（连线穿海）
 // 选址加严（收口修正）：首海格 6 格内不得有既有桥 tile、且不得已有任务占位——否则立项分支
 // 的 nearAny/撞车门槛会把本测试对筛掉（v0.6.1 起随机流漂移曾致本场景间歇 0/10）
-let pairA = null, pairB = null;
+let pairA = null, pairB = null, pairTiles = [];
 outerD:
-for (let y = -30; y <= 30 && !pairA; y++) for (let x = -30; x <= 30; x++) {
+for (let y = -50; y <= 50 && !pairA; y++) for (let x = -50; x <= 50; x++) {
   if (tileAt(x, y) !== T.GRASS || !walkable(x, y)) continue;
   for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     let ok = true;
@@ -210,9 +210,16 @@ for (let y = -30; y <= 30 && !pairA; y++) for (let x = -30; x <= 30; x++) {
       const t = tileAt(x + dx * k, y + dy * k);
       if (t !== T.WATER && t !== T.DEEP) { ok = false; break; }   // 浅海/深海皆可架（本版特性）
     }
-    if (ok && !nearAny(x + dx, y + dy, [T.BRIDGE], 6) &&
-        !tasks.list.some(tk => !tk.done && tk.x === x + dx && tk.y === y + dy)) {
-      pairA = { x, y }; pairB = { x: x + dx * 10, y: y + dy * 10 }; break outerD;
+    // 走廊全段隔离：链式立项逐格过 nearAny(BRIDGE,6) 与任务占位门——场景 B/C 的旧桥落进
+    // 走廊中段 6 格邻域会拦断链式生长，只查首格不够
+    if (ok) for (let k = 1; k <= 10; k++) {
+      if (nearAny(x + dx * k, y + dy * k, [T.BRIDGE], 6) ||
+          tasks.list.some(tk => !tk.done && tk.x === x + dx * k && tk.y === y + dy * k)) { ok = false; break; }
+    }
+    if (ok) {
+      pairA = { x, y }; pairB = { x: x + dx * 10, y: y + dy * 10 };
+      for (let k = 1; k <= 10; k++) pairTiles.push(tileAt(x + dx * k, y + dy * k));   // 原tile快照（自愈还原基准）
+      break outerD;
     }
   }
 }
@@ -263,18 +270,29 @@ if (!pairA) { assert(true, "场景D：地理不满足（无沿岸构造点），
   // 恰为水而中途是陆地时会数错线——立项扫描资格是「连续 10 格全水」，两口径并不等价）
   const dirScan = [(pairB.x - pairA.x) / 10, (pairB.y - pairA.y) / 10];
   let built = 0;
-  for (let i = 0; i < 9000 && built < 8; i++) {
+  for (let i = 0; i < 30000 && built < 8; i++) {
     simUpdate(STEP);
     // 驻守补给（收口修正）：需求衰减会把工人拽离桥头（口渴/进食/睡觉），链式任务因 blockedCount
     // 累积被领取资格剔除后无人问津、走廊停摆——定期把驻守队拉回桥头满状态再上工，恢复本场景
-    // 「派工匠驻守桥头」的设定前提（被测的 corridor 链式生长机制本身不动）
-    if (i % 300 === 299) {
+    // 「派工匠驻守桥头」的设定前提（被测的 corridor 链式生长机制本身不动）。
+    // v0.6.18 生态重置后世界随机流漂移 → 桥工更易被其他任务分走：驻守间隔 300→200→150、
+    // 窗口 9000→18000→30000（漂移后任务池更满，两轮放宽的实测收敛点）
+    if (i % 150 === 149) {
       builders.forEach(b => {
         b.x = pairA.x + 0.5; b.y = pairA.y + 0.5;
         b.state = "idle"; b.task = null; b.thinkCd = 0; b.onArrive = null; b.path = null;
         b.energy = 100; b.hunger = 90; b.thirst = 90; b.mood = 100; b.depressed = false;
       });
       for (const t of tasks.list) if (t.type === "BRIDGE" && t.corridor) t.blockedCount = 0;
+      // 走廊地形自愈（v0.6.18 收口）：新岛发现的 bump 抬升会把走廊海格改写成悬崖/陆地（世界生成
+      // 机制特性，探针实测 DEEP→CLIFF 断链）；浅海格还可能被赶路工人应急填平（meta.fillable 只认
+      // 浅海）→ 链式续立项 tt 非水永久断链。驻守节拍同步按扫描快照还原被改写格，维持「走廊穿海」
+      // 设定前提（桥格不动，被测的 corridor 链式生长机制本身不改）
+      for (let k = 1; k <= 10; k++) {
+        const tx2 = pairA.x + dirScan[0] * k, ty2 = pairA.y + dirScan[1] * k;
+        const tt2 = tileAt(tx2, ty2);
+        if (tt2 !== T.BRIDGE && tt2 !== pairTiles[k - 1]) setTile(tx2, ty2, pairTiles[k - 1]);
+      }
     }
     built = dirScan ? Array.from({ length: 10 }, (_, k) =>
       tileAt(pairA.x + dirScan[0] * (k + 1), pairA.y + dirScan[1] * (k + 1))).filter(t => t === T.BRIDGE).length : 0;

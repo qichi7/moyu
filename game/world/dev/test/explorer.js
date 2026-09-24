@@ -28,13 +28,14 @@ for (const a of agents) if (a.job === "explorer") a.job = "miner";
 jobMarketTick(agents.length);
 const hasExplorer = agents.some(a => !a.dead && a.job === "explorer");
 assert(hasExplorer, "场景A：无探索者时保底转职生效");
-// 不抽独苗：若世界只有 1 个 fisher，保底后 fisher 仍应存在（从人数最多职业抽取）
+// 不抽独苗：构造「全世界仅 1 个 fisher」的确定性前提（genWorld 重置后初始职业池可能天然无渔民——
+// 不再依赖初始分布，直接任命），保底转职应从人数最多职业（miner）抽取，独苗渔民留在岗上
 simInit(42);
 for (const a of agents) if (a.job === "explorer") a.job = "miner";
-// 构造：只留 1 个 fisher，其余 miner
-const fishers = agents.filter(a => a.job === "fisher" && !a.dead);
-for (let i = 1; i < fishers.length; i++) fishers[i].job = "miner";
-for (const a of agents) if (a.job === "fisher" && a !== fishers[0]) a.job = "miner";
+{
+  let fi = 0;
+  for (const a of agents) { if (!a.dead) { a.job = fi === 0 ? "fisher" : "miner"; fi++; } }
+}
 jobMarketTick(agents.length);
 assert(agents.some(a => !a.dead && a.job === "fisher"), "场景A：独苗职业（渔民）不被抽走");
 

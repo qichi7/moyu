@@ -16,7 +16,7 @@ function emit(name, data) {
 
 "use strict";
 // ============ 全局配置 ============
-const BUILD_ID = "v0.6.5";
+const BUILD_ID = "v0.6.18";
 
 // tile 类型
 const T = {
@@ -87,7 +87,8 @@ const SIM = {
   FARM_YIELD: 4,        // 每次成熟产粮
   BIRTH_CHECK: 0.05,    // 出生概率（规划器内按 4 秒窗口换算）
   // EXPAND_POP_CAP 已废弃：人口不设上限，扩张由住房饱和与选址失败驱动
-  SETTLEMENT_SCORE: [12, 60, 140],   // 聚落升级分数线：村庄/城镇/城市
+  SETTLEMENT_SCORE: [12, 36, 90],    // 聚落升级分数线：村庄/城镇/城市（v0.6.18 调低：era2 城镇 ≈ 8 房+6 田/辖区，人口 35~45 时主聚落自然达成；era3 城市 80~100 人可达）
+  EXPAND_EVERY: 30,                  // 疆土生长阈值（v0.6.18）：人口每增 30 人规划署开辟一片新疆土
   SETTLEMENT_RADIUS: 14,             // 聚落繁荣度统计半径
   BRIDGE_HP: 3,         // 架一座桥所需工时（比填海快得多）
   EXPLORE_CHANCE: 0.06, // 探索欲 1.0 的小人每次决策触发探索的概率
@@ -102,12 +103,16 @@ const SIM = {
   PASTURE_YIELD: 2,     // 每次产粮
   PASTURE_CAP: 6,       // 单牧场圈养上限
   BREED_CHANCE: 0.1,    // 繁殖概率（每 120 秒判定）
-  WILD_BREED_CAP: 60,   // 野生可猎动物总量上限
+  WILD_BREED_CAP: 120,  // 陆生系野生总量护栏（v0.6.17 降级为全局性能护栏：繁衍均衡化后每物种各有硬上限，此值只防陆生系实体总量失控，超护栏当 tick 跳过陆生繁衍）
+  WILD_BREED_SAFETY: 1.25,  // 均衡出生安全系数：期望出生 = 种群×tick÷寿命秒×此值（替换率 1.0 留 25% 爬坡余量，种群向物种上限缓慢恢复）
   TURTLE_CAP: 12,       // 海龟总量上限
   WHALE_CAP: 5,         // 鲸总量上限
   // ---- 物种扩充（v0.5.0）：新物种繁衍上限（珍稀物种种群小而延续；flier 飞行类不在此繁衍）----
+  // v0.6.17 补：goat/deer/boar/wolf（旧版无专键 → 无每物种上限，wildBreedTick 全局池随机选亲致种群失衡灭绝）
   SPECIES_CAP: { fish: 60, rabbit: 30, fox: 16, bear: 8, horse: 14, penguin: 20, crab: 26,
-    dolphin: 14, shark: 8, unicorn: 6, moonfish: 10, koi: 12, mermaid: 6 },
+    dolphin: 14, shark: 8, unicorn: 6, moonfish: 10, koi: 12, mermaid: 6,
+    goat: 40, deer: 20, boar: 16, wolf: 6 },
+  ECO_FLOOR: 4,         // 狩猎/捕获保护线（v0.6.17）：目标物种非圈养活体（驯服计入）≤ 此值 → 该物种不立项（在办任务照常完成）
   ANIMAL_STRAND_DEATH: 180, // 动物被困（脚下不再是栖息地）坚持时长（秒），超时死亡——给救援留足窗口
   // ---- 航海 ----
   SHIP_COST: 10,        // 造一艘远航船耗木材（联合库存）
@@ -162,6 +167,12 @@ const SIM = {
   MOOD_RECOVER_TIME: 20,
   MOOD_SICK_TIME: 300,        // 抑郁累计此时长 → 郁结成疾病倒（sickSource="mood"，走不出则不治）
   JOY_CD: 60,                 // 找乐子失败冷却（城库无酒时防连帧重试）
+  // ---- 乐事强度画像（v0.6.7）：每人每项乐事的愉悦倍率（hash2 确定性分档；调档值/盐值来这里）----
+  JOY_KEYS: ["flower", "drink", "explore", "climb", "fish", "animal", "home"],
+  JOY_NAMES: { flower: "赏花", drink: "喝酒", explore: "探险", climb: "爬山", fish: "垂钓", animal: "牧畜", home: "恋家" },
+  JOY_TIERS: [0.4, 0.7, 1.0, 1.4, 1.8],
+  JOY_SALTS: { flower: 7101, drink: 7103, explore: 7107, climb: 7111, fish: 7121, animal: 7127, home: 7133 },
+  JOY_HOBBY_MIN: 1.4,          // 主喜好键保底档
   // ---- 意外死亡（v0.6.0 config 化：每秒掷骰概率，测试可临时调 1 强制触发）----
   ACCIDENT: { cliff: 1 / 20000, shark: 1 / 15000, choke: 1 / 6000 },
   // ---- 娱乐链与游乐园（v0.5.0）----
@@ -175,11 +186,38 @@ const SIM = {
   PLAY_CD: 120,               // 玩过一次的冷却（防一直赖在游乐设施里）
   CHEER_TIME: 300,            // 尽兴而归：游乐园余韵时长（期间心情衰减 ×CHEER）
   MOOD_CHEER_FACTOR: 0.35,    // 余韵期间心情衰减倍率（「开心值很持久」的机制落点）
+  // ---- 骑乘（v0.6.10）：驯服马可骑，长途赶路提速 ----
+  RIDE_SPEED_FACTOR: 1.8,     // 骑乘移速倍率
+  RIDE_MOUNT_DIST: 8,         // 剩余路径超过此格数才找马代步（短途不值得）
+  RIDE_MOUNT_R: 1.5,          // 上马判定半径（格）
   // ---- 咖啡田 ----
   COFFEE_MATURITY: 90,        // 咖啡田成熟秒数（粮食田用 FARM_MATURITY）
   COFFEE_YIELD: 2,            // 咖啡田每次成熟产豆量
   // ---- 历法与年龄 ----
   YEAR_DAYS: 12,        // 1 昼夜 = 1 个月，12 昼夜 = 1 年（1 岁）
+  // ---- 动物迁徙（v0.6.14）：兽群/候鸟/鲸群按周期远行 ----
+  MIGRATION_PERIOD_MIN: 4 * 90,   // 迁徙间隔下限（sim 秒，4 游戏月；1 游戏月 = DAY_LEN = 90s；v0.6.17 修正旧版 ×30 的单位错误）
+  MIGRATION_PERIOD_MAX: 6 * 90,   // 迁徙间隔上限（sim 秒，6 游戏月）
+  MIGRATION_DIST_MIN: 30,     // 单次迁徙距离下限（格）
+  MIGRATION_DIST_MAX: 80,     // 单次迁徙距离上限（格）
+  // ---- 流星（v0.6.14）：夜间偶现，划空 3 秒；上颗之后 2~4 游戏夜冷却 ----
+  METEOR_GAP_MIN: 90 * 2,
+  METEOR_GAP_MAX: 90 * 4,
+  METEOR_DUR: 3,
+  METEOR_MOOD: 0.3,           // 目睹流星的心情回复/秒
+  // ---- 气候与洋流（v0.6.15 定居区北缘雪原/南缘旱带+顺逆流航速+台风；v0.6.16 边界噪声曲线化+连续强度场+浮冰船速）----
+  CLIMATE: { EDGE_INSET: 10, SNOW_FARM: 0.85, SNOW_BERRY: 0.8, DROUGHT_FARM: 0.8, DROUGHT_BERRY: 0.7,
+    WOBBLE: 20, FADE: 30,                    // 雪线/旱线噪声扰动幅度（±格）/ 强度场爬坡带宽（格）
+    ICE_P: 0.55, SNOW_P: 0.5, DRY_P: 0.5,    // 贴花概率基准：浮冰/积雪/干裂贴花出现概率（表现层按概率消费，非强度阈值）
+    ICE_SHIP: 0.85 },                        // 浮冰海面船速倍率（水面且 climateIntensity≥0.5）
+  CURRENT_SHIP_FAST: 1.15,    // 顺流航速倍率
+  CURRENT_SHIP_SLOW: 0.9,     // 逆流航速倍率
+  TYPHOON_R: 12,              // 台风影响半径（格）
+  TYPHOON_SHIP: 0.6,          // 台风圈内船速倍率
+  TYPHOON_MAN: 0.85,          // 台风圈内行人移速倍率
+  TYPHOON_CHANCE: 1 / 20000,  // 每秒窗口生成概率
+  TYPHOON_LIFE_MIN: 60,       // 台风寿命下限（秒）
+  TYPHOON_LIFE_MAX: 120,      // 台风寿命上限（秒）
 };
 
 // 高倍速模拟调度：decide 每帧预算（main.js 按倍速写入，agent 消费；headless 测试默认不限）
@@ -409,6 +447,9 @@ const world = {
   interBridges: new Set(), // 岛际大桥对（genWorld 重置）
   lastBridgeHead: null,
   lastBridgeDir: null,
+  meteor: null,         // 流星（v0.6.14）：{ t0, dur }（sim 秒），null = 无
+  meteorNext: 0,        // 下一颗流星的最早时刻（sim 秒）
+  storm: null,          // 台风（v0.6.15）：{ x, y, dx, dy, born, life, r }，null = 无
   logs: [],
 };
 
@@ -462,6 +503,69 @@ function setTile(x, y, t) {
 
 // 兼容旧调用点：无限地图无边界
 const inWorld = () => true;
+
+// ---- 气候带与洋流（v0.6.15 带划分+洋流；v0.6.16 边界噪声曲线化+连续强度场+浮冰船速）----
+// 气候：以已定居区（房屋包围盒）南北缘为基线——北缘雪原、南缘旱带、中部温带。
+// v0.6.16：雪线/旱线 y 值 = 基线 + fbm 噪声扰动（按 x 的纯函数，不进缓存），直线分界 → 平滑曲线。
+// houses 变动（增删/换世界）即失效，另设 60s 兜底刷新（模块级缓存，基线计算低频）
+const _climCache = { map: null, t: -1, n: -1, minY: 0, maxY: 0 };
+function _climBase() {
+  const c = _climCache;
+  if (c.map !== world.chunks || world.time - c.t >= 60 || c.n !== world.houses.length) {
+    let minY = Infinity, maxY = -Infinity;
+    for (const h of world.houses) { if (h.y < minY) minY = h.y; if (h.y > maxY) maxY = h.y; }
+    c.map = world.chunks; c.t = world.time; c.n = world.houses.length;
+    c.minY = minY; c.maxY = maxY;
+  }
+  return c;
+}
+// 边界扰动：fbm 采样（x/48 尺度平滑，3 倍频）中心对称折算 → ±WOBBLE 漂移；
+// 雪线/旱线不同盐 = 坐标位移折算（参照 currentAt 的 hash2 位移法：两维各加常量错开相位）
+function _climWobble(x, sx, sy) {
+  const N = world.noise;
+  return N ? (N.fbm(x / 48 + sx, sy, 3) - 0.5) * 2 * SIM.CLIMATE.WOBBLE : 0;
+}
+// 雪线/旱线 y 值（纯函数，按 x）
+const snowEdgeY = x => _climBase().minY + SIM.CLIMATE.EDGE_INSET + _climWobble(x, 137.5, 711.3);
+const droughtEdgeY = x => _climBase().maxY - SIM.CLIMATE.EDGE_INSET + _climWobble(x, 919.1, 313.7);
+function climateAt(x, y) {
+  if (!world.houses.length) return "temperate";
+  if (y < snowEdgeY(x)) return "snow";
+  if (y > droughtEdgeY(x)) return "drought";
+  return "temperate";
+}
+// 连续气候强度场（v0.6.16）：离开边界深入雪原/旱带的深度 0~1，FADE 带宽内线性爬坡，temperate 为 0。
+// 纯函数；表现层按强度做地形贴花，浮冰船速以此判定
+function climateIntensity(x, y) {
+  if (!world.houses.length) return 0;
+  const se = snowEdgeY(x), de = droughtEdgeY(x), F = SIM.CLIMATE.FADE;
+  if (y < se) return Math.max(0, Math.min(1, (se - y) / F));
+  if (y > de) return Math.max(0, Math.min(1, (y - de) / F));
+  return 0;
+}
+
+// 洋流：16×16 海域块一个确定性流向（hash2 纯函数、无状态）；非水面返回零向量。
+// 8 方向表取单位向量（斜向 1/√2），同块恒定、跨块跳变即成"流带"
+const CURRENT_DIRS = [[1, 0], [0.7071, 0.7071], [0, 1], [-0.7071, 0.7071],
+  [-1, 0], [-0.7071, -0.7071], [0, -1], [0.7071, -0.7071]];
+function currentAt(x, y) {
+  const t = tileAt(Math.floor(x), Math.floor(y));
+  if (t !== T.WATER && t !== T.DEEP) return { dx: 0, dy: 0 };
+  const d = CURRENT_DIRS[(hash2(Math.floor(x / 16) + 511, Math.floor(y / 16) + 977) * 8) | 0];
+  return { dx: d[0], dy: d[1] };
+}
+
+// 船只环境航速乘数：洋流顺/逆流（航向·流向点积分档）+ 台风圈内减速 + 浮冰海面减速（v0.6.16；渔船/远航船共用）
+function shipEnvMul(s, hx, hy) {
+  const cur = currentAt(s.x, s.y);
+  const dot = hx * cur.dx + hy * cur.dy;
+  let m = dot > 0.25 ? SIM.CURRENT_SHIP_FAST : dot < -0.25 ? SIM.CURRENT_SHIP_SLOW : 1;
+  const st = world.storm;
+  if (st && Math.hypot(st.x - s.x, st.y - s.y) < st.r) m *= SIM.TYPHOON_SHIP;
+  const t = tileAt(Math.floor(s.x), Math.floor(s.y));
+  if ((t === T.WATER || t === T.DEEP) && climateIntensity(s.x, s.y) >= 0.5) m *= SIM.CLIMATE.ICE_SHIP || 0.85;
+  return m;
+}
 
 // ---- 探索发现：虚空被探索到时，随机显现小岛（确定性 hash，同一网格结果恒定） ----
 const DISCOVERY_GRID = 48;
@@ -561,8 +665,12 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
       let t;
       if (e < 0.28) {
         t = T.DEEP;
-        // 深海鲸：概率极低，同格防重（区域重算不重复生成）
-        if (hash2(x + 441, y + 819) < 0.008 && !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "whale");
+        // 深海鲸：概率极低，同格防重（区域重算不重复生成）；v0.6.17 接缝修复：补 WHALE_CAP 守卫
+        //（普查实测 12000s 鲸 12 > cap 5——探索点亮新深海的 hash spawn 绕过繁衍上限表，cap 语义被架空；
+        //  与下方 shark/moonfish 及 creature.js 探索偶现分支的守卫口径对齐）
+        if (hash2(x + 441, y + 819) < 0.008 &&
+            creatures.filter(c => c.type === "whale" && !c.dead).length < SIM.WHALE_CAP &&
+            !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "whale");
         // 深海新物种（v0.5.0）：鲨（氛围捕食者）/月光鱼（珍稀渔获）——hash 确定性 + 全局上限防泛滥
         else if (hash2(x + 371, y + 533) < 0.004 &&
                  creatures.filter(c => c.type === "shark" && !c.dead).length < (SIM.SPECIES_CAP.shark || 8) &&
@@ -580,7 +688,11 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
           if (creatures.filter(c => c.type === "fish" && !c.dead).length < (SIM.SPECIES_CAP.fish || 60) &&
               !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "fish");
         }
-        else if (hash2(x + 613, y + 209) < 0.005 && !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "turtle");
+        // 海龟 spawn 同受 TURTLE_CAP 约束（v0.6.17 接缝修复：普查实测 33 > cap 12，口径与鲸一致——
+        // 海龟寿命 30 游戏年几乎不老死，点亮新浅海的持续 spawn 会把 cap 无限顶破）
+        else if (hash2(x + 613, y + 209) < 0.005 &&
+                 creatures.filter(c => c.type === "turtle" && !c.dead).length < SIM.TURTLE_CAP &&
+                 !creatures.some(c => Math.hypot(c.x - x - 0.5, c.y - y - 0.5) < 1.5)) spawnCreature(x, y, "turtle");
         // 浅海新物种（v0.5.0）：锦鲤（珍稀渔获）/人鱼（氛围幻影）——hash 确定性 + 全局上限
         else if (hash2(x + 827, y + 619) < 0.0025 &&
                  creatures.filter(c => c.type === "koi" && !c.dead).length < (SIM.SPECIES_CAP.koi || 12) &&
@@ -618,7 +730,9 @@ function generateRegion(x0, y0, x1, y1, noDiscover, reveal, litTest) {
       const ed = y < ey1 && firstPass[li + w] ? elev[li + w] : e;
       if (e > 0.5 && Math.max(e - er, e - ed) > 0.11) {
         const c = world.chunks.get(chunkKey(x >> 5, y >> 5));
-        c.tiles[cIdx(x, y)] = T.CLIFF;
+        // v0.6.18 守卫：悬崖只落在本遍新生成的虚空格——探针实测已点亮的桥格被复写为悬崖
+        //（firstPass 标记在重叠点亮区存在复用漏洞），已生成地形/造物绝不改写
+        if (c.tiles[cIdx(x, y)] === T.VOID) c.tiles[cIdx(x, y)] = T.CLIFF;
       }
     }
   }
@@ -678,8 +792,9 @@ function shipTick(dt) {
       if (s.sailor) logMsg(`航海家 ${s.sailor.name} 的船补给仅够回程，调头返航。`);
       continue;
     }
-    const nx = s.x + Math.cos(s.ang) * SIM.SHIP_SPEED * dt;
-    const ny = s.y + Math.sin(s.ang) * SIM.SHIP_SPEED * dt;
+    const spd = SIM.SHIP_SPEED * shipEnvMul(s, Math.cos(s.ang), Math.sin(s.ang));   // 洋流顺逆 + 台风（v0.6.15）
+    const nx = s.x + Math.cos(s.ang) * spd * dt;
+    const ny = s.y + Math.sin(s.ang) * spd * dt;
     // 航行沿途大面积点亮虚空（航海开拓的核心价值）
     s.revealCd -= dt;
     if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 15); }
@@ -720,7 +835,8 @@ function shipTick(dt) {
       if (s.sailor) logMsg(`航海家 ${s.sailor.name} 的船在归途中补给耗尽，被困海上，发出求救信号！`);
       continue;
     }
-    const nx = s.x + (dx / d) * SIM.SHIP_SPEED * dt, ny = s.y + (dy / d) * SIM.SHIP_SPEED * dt;
+    const spd = SIM.SHIP_SPEED * shipEnvMul(s, dx / d, dy / d);   // 洋流顺逆 + 台风（v0.6.15）
+    const nx = s.x + (dx / d) * spd * dt, ny = s.y + (dy / d) * spd * dt;
     s.revealCd -= dt;
     if (s.revealCd <= 0) { s.revealCd = 2; revealArea(Math.round(nx), Math.round(ny), 15); }
     const aheadT = tileAt(Math.round(nx), Math.round(ny));
@@ -758,8 +874,9 @@ function shipTick(dt) {
       let diff = Math.atan2(Math.sin(Math.atan2(dy, dx) - s.ang), Math.cos(Math.atan2(dy, dx) - s.ang));
       s.ang += diff * Math.min(1, dt * 2);
     }
-    s.x += Math.cos(s.ang) * SIM.SHIP_SPEED * dt;
-    s.y += Math.sin(s.ang) * SIM.SHIP_SPEED * dt;
+    const spd = SIM.SHIP_SPEED * shipEnvMul(s, Math.cos(s.ang), Math.sin(s.ang));   // 洋流顺逆 + 台风（v0.6.15）
+    s.x += Math.cos(s.ang) * spd * dt;
+    s.y += Math.sin(s.ang) * spd * dt;
   }
   // 长期停靠的船清理（远航需另造新船）
   for (let i = ships.length - 1; i >= 0; i--) {
@@ -809,10 +926,11 @@ function tickFishingBoats(dt) {
         const want = Math.atan2(dy, dx);
         s.ang += Math.atan2(Math.sin(want - s.ang), Math.cos(want - s.ang)) * Math.min(1, dt * 2);
       }
-      s.x += Math.cos(s.ang) * SIM.SHIP_SPEED * dt;
-      s.y += Math.sin(s.ang) * SIM.SHIP_SPEED * dt;
-    } else {
-      // 到点起网：扣鱼群资源，渔获入舱
+      const spd = SIM.SHIP_SPEED * shipEnvMul(s, Math.cos(s.ang), Math.sin(s.ang));   // 洋流顺逆 + 台风（v0.6.15）
+      s.x += Math.cos(s.ang) * spd * dt;
+      s.y += Math.sin(s.ang) * spd * dt;
+    } else if (!(world.storm && Math.hypot(world.storm.x - s.x, world.storm.y - s.y) < world.storm.r)) {
+      // 到点起网：扣鱼群资源，渔获入舱（台风圈内暂停捕捞推进，渔船原地顶风抛锚）
       s.fishCd -= dt;
       if (s.fishCd <= 0) {
         s.fishCd = SIM.FISHING_INTERVAL;
@@ -826,7 +944,8 @@ function tickFishingBoats(dt) {
     if (s.state !== "fishingReturn") continue;
     const dx = world.store.x - s.x, dy = world.store.y - s.y;
     const d = Math.hypot(dx, dy) || 1;
-    const nx = s.x + (dx / d) * SIM.SHIP_SPEED * dt, ny = s.y + (dy / d) * SIM.SHIP_SPEED * dt;
+    const spd = SIM.SHIP_SPEED * shipEnvMul(s, dx / d, dy / d);   // 洋流顺逆 + 台风（v0.6.15，渔船归航）
+    const nx = s.x + (dx / d) * spd * dt, ny = s.y + (dy / d) * spd * dt;
     const aheadT = tileAt(Math.round(nx), Math.round(ny));
     if (walkable(Math.round(nx), Math.round(ny)) && aheadT !== T.WATER && aheadT !== T.DEEP && aheadT !== T.BRIDGE) {
       // 靠岸卸货：渔获就地入粮池，渔民下船休整（渔船停靠码头，由常规清理回收）
@@ -901,7 +1020,9 @@ function settleFarTile(c, i, x, y, reveal, litTest, wasGen) {
   } else if (!wasGen) {
     c.tiles[i] = T.VOID;                       // 首次视口生成：未探索虚空
   } else if (world.litCells.has(x + "," + y)) {
-    c.tiles[i] = T.DEEP;                       // 重算时已点亮的格保持点亮
+    // v0.6.18 接缝修复：重算恢复点亮也只作用于 VOID——旧写法无守卫，把落在点亮区内的
+    // 已建桥/造物整格抹回 DEEP（船/探索者每 2s revealArea 高频重算，桥建到一半被静默拆除）
+    if (c.tiles[i] === T.VOID) c.tiles[i] = T.DEEP;
   }
   // 其余重算：保持原值
 }
@@ -1004,6 +1125,11 @@ function genWorld(seed) {
   world.caves = [];
   world.quarries = [];
   world.sandpits = [];
+  world.meteor = null; world.meteorNext = 0; world.storm = null;   // 天象/天气随世界重置
+  // 种群随世界重置（v0.6.18 接缝修复）：creatures/agents 是模块级数组，genWorld 原本不清——
+  // 同进程多次 simInit（测试场景/未来重开世界）会残留旧世界实体，污染生态计数与 WILD_BREED_CAP 护栏
+  creatures.length = 0;
+  agents.length = 0;
 
   world.islands.push({ x: 0, y: 0, r: 14, claimed: true });
   const islN = 2 + randInt(0, 4);   // 初始 2~6 座无人岛（总岛数 3~7 随机）
@@ -1214,7 +1340,15 @@ function pickIslandName(o) {
 // 浆果/果树/鱼群再生（sim 每秒调用一次）
 function berryTick() {
   if (world.time % 60 > 1) return;   // 粗粒度：每 60 sim 秒再生一轮
-  for (const [k, v] of world.berryStock) if (v < SIM.BERRY_STOCK) world.berryStock.set(k, v + 1);
+  // 气候因子（v0.6.15）：雪原 ×SNOW_BERRY、旱带 ×DROUGHT_BERRY——按再生格气候以概率折算
+  //（格子再生是整份跳变，速率乘因子落成「本轮以因子概率 +1」，期望速率同乘）
+  for (const [k, v] of world.berryStock) {
+    if (v >= SIM.BERRY_STOCK) continue;
+    const [x, y] = k.split(",").map(Number);
+    const cl = climateAt(x, y);
+    const f = cl === "snow" ? SIM.CLIMATE.SNOW_BERRY : cl === "drought" ? SIM.CLIMATE.DROUGHT_BERRY : 1;
+    if (f >= 1 || rand() < f) world.berryStock.set(k, v + 1);
+  }
   for (const [k, v] of world.fishStock) if (v < 3) world.fishStock.set(k, v + 1);
 }
 
@@ -1558,7 +1692,14 @@ function tasksFinish(t, agent, was) {
         world.fishStock.delete(fk);
         for (let i = creatures.length - 1; i >= 0; i--) {
           const c = creatures[i];
-          if (c.type === "fish" && Math.hypot(c.x - t.x - 0.5, c.y - t.y - 0.5) < 1.5) creatures.splice(i, 1);
+          if (c.type === "fish" && Math.hypot(c.x - t.x - 0.5, c.y - t.y - 0.5) < 1.5) {
+            // v0.6.17 接缝修复：填海拆鱼不再静默抹除——鱼会游走，附近有可栖息水格则疏散
+            //（生态普查实测 era3 填海潮把繁衍池静默抽干至全灭，且不走 dead 流程无任何纪事）；
+            // 无处可去（海湾被整体填平）才移除实体
+            const refuge = findSpot(Math.round(c.x), Math.round(c.y), 2, 8, T.WATER);
+            if (refuge) { c.x = refuge.x + 0.5; c.y = refuge.y + 0.5; }
+            else creatures.splice(i, 1);
+          }
         }
       }
       break;
@@ -1815,7 +1956,7 @@ const CREATURE_META = {
   rabbit:  { name: "兔",     yield: 2, speed: 1.7,  flee: 2.0,  size: 0.4,  habitat: "grass",  hunt: true },
   fox:     { name: "狐",     yield: 3, speed: 1.5,  flee: 1.9,  size: 0.6,  habitat: "forest", hunt: true },
   bear:    { name: "熊",     yield: 10, speed: 0.85, flee: 0.7, size: 1.2,  habitat: "forest", hunt: true },
-  horse:   { name: "马",     yield: 0, speed: 1.3,  flee: 1.7,  size: 1.1,  habitat: "grass",  hunt: false },
+  horse:   { name: "马",     yield: 0, speed: 1.3,  flee: 1.7,  size: 1.1,  habitat: "grass",  hunt: false, tamable: true, tameJoy: 20 },
   penguin: { name: "企鹅",   yield: 0, speed: 0.45, flee: 0.8,  size: 0.45, habitat: "sand",   hunt: false },
   crab:    { name: "蟹",     yield: 1, speed: 0.5,  flee: 0.9,  size: 0.3,  habitat: "sand",   hunt: true },
   dolphin: { name: "海豚",   yield: 0, speed: 2.2,  flee: 0,    size: 0.9,  habitat: "water",  hunt: false },
@@ -1839,6 +1980,13 @@ function habitatOk(c, x, y) {
     case "air":    return true;   // 鸟在天上飞，不受地形限制
     default:       return t === T.GRASS || t === T.SAND;
   }
+}
+
+// 圈养动物通行判定（v0.6.8）：栖息地 + 门 + 栏内；非圈养生物即 habitatOk（野生语义零改动）
+// （严格布尔收口：假分支短路可能透出 undefined/falsy 链——单元探针与后续调用方都值得恒定布尔契约）
+function pasturePassable(c, x, y) {
+  if (habitatOk(c, x, y)) return true;
+  return !!(c.pasture && (tileAt(x, y) === T.GATE || tileAt(x, y) === T.PASTURE));
 }
 
 // 育龄判定（v0.6.2）：幼年（<stages[0]）不能生、老年（≥stages[2]）停育；无寿命表物种兜底不限
@@ -1865,9 +2013,17 @@ class Creature {
     this.breedCd = 120;
     this.outputCd = SIM.PASTURE_INTERVAL;
     this.tameness = 0;        // 驯化进度（v0.5.0 修正：原版从未初始化——undefined+dt=NaN 永远到不了 3，驯化静默失效）
+    this.riddenBy = null;     // 骑乘者（agent）；骑乘中自主行为全冻结（v0.6.10）
+    this.migration = null;    // 迁徙目标（v0.6.14）：null = 定居期；{x,y} = 迁徙途中
+    this.migNext = world.time + randRange(SIM.MIGRATION_PERIOD_MIN, SIM.MIGRATION_PERIOD_MAX);
   }
 
-  isWild() { return !this.pasture && this.type !== "dog" && this.type !== "bird"; }
+  // v0.6.10 口径：保持 dog/bird 排除不变，追加排除「已驯化的 tamable 生物」——
+  // 马/独角兽驯化认主后不再算野生动物（不被狩猎/捕获池统计；v0.6.17 起 wildBreedTick
+  // 的种群计数与亲代兜底仍计入驯服个体——驯化不再掏空繁衍池）；
+  // 未驯化的 tamable 生物仍是 isWild（马驯化前照旧可捕获/被生态计数）
+  isWild() { return !this.pasture && this.type !== "dog" && this.type !== "bird" &&
+    !(CREATURE_META[this.type].tamable && this.tamed); }
 
   update(dt) {
     if (this.dead) return;
@@ -1879,9 +2035,15 @@ class Creature {
       this.x = this.carriedBy.x - 0.4; this.y = this.carriedBy.y - 0.4;
       return;
     }
-    // 年龄：1 游戏年长 1 岁，寿命封顶（无寿命表的物种不老化）
+    // 年龄：1 游戏年长 1 岁，寿命封顶（无寿命表的物种不老化）——骑乘中也照常增长（v0.6.10）
     const spAge = SPECIES_AGE[this.type];
     if (spAge) this.age = Math.min(spAge.lifespan, this.age + dt / (SIM.DAY_LEN * SIM.YEAR_DAYS));
+    // 骑乘中（v0.6.10）：坐标由骑手每帧同步（agent 侧契约），自身自主行为全冻结——游荡/驯化扫描
+    // 一概跳过；老死骰不掷：骑乘中的马由骑手照料，不会中途倒下（riddenBy 解除后恢复常规老死判定）
+    if (this.riddenBy) {
+      if (this.riddenBy.dead) { this.riddenBy = null; return; }
+      return;
+    }
     // 老死：寿命耗尽后平均 3 天内自然离世（概率衰减避免同龄瞬灭）
     if (spAge && this.age >= spAge.lifespan && rand() < dt / (SIM.DAY_LEN * 3)) {
       this.dead = true;
@@ -1907,8 +2069,13 @@ class Creature {
       return;   // 被困时无法移动（移动路径本就被 habitatOk 挡住），原地等待
     }
     this.strandT = 0;
+    // 迁徙（v0.6.14）：迁徙中接管全部自主行为（搁浅判定在其上——迁徙者被困照旧原地求救）
+    // 迁徙途中被圈养/驯化认主（migEligible 翻转）→ 立即弃迁（否则圈养个体被迁徙分支永久接管）
+    if (this.migration && !this.migEligible()) { this.migration = null; this.migSide = null; this.migBlock = 0; }
+    if (this.migration) { this.updateMigration(dt); return; }
+    this.tryMigrate();
     if (this.pasture) { this.updatePasture(dt); return; }
-    // 行为分发泛化（v0.5.0）：tamable 走驯化/跟随路径（狗/独角兽），flier 走飞行路径（鸟/凤凰/仙龙）
+    // 行为分发泛化（v0.5.0）：tamable 走驯化/跟随路径（狗/独角兽/马），flier 走飞行路径（鸟/凤凰/仙龙）
     if (CREATURE_META[this.type].tamable) { this.updateDog(dt); return; }
     if (CREATURE_META[this.type].flier) { this.updateBird(dt); return; }
     if (this.type === "wolf") { this.updateWolf(dt); return; }
@@ -1986,9 +2153,84 @@ class Creature {
     if (this.target) this.stepToward(this.target, this.speed * dt);
   }
 
+  // ---- 迁徙（v0.6.14）----
+  // 物种表：陆生鹿/野猪/马/兔 + 深海鲸 + 飞禽鸟；鱼群/海龟/海豚/狼不迁徙，
+  // 驯化认主与圈养个体不迁徙。bird 天然被 isWild() 排除（v0.6.10 口径），
+  // 资格按「物种表 + 非圈养 + 未驯化」判定——对非鸟物种与 isWild() 逐位等价
+  migEligible() {
+    if (this.pasture) return false;
+    if (CREATURE_META[this.type].tamable && this.tamed) return false;
+    return this.type === "deer" || this.type === "boar" || this.type === "horse" ||
+      this.type === "rabbit" || this.type === "whale" || this.type === "bird";
+  }
+
+  // 触发：到点（migNext）掷 0.5 概率，向随机方向 30~80 格找 habitatOk 的目标点
+  //（40 次尝试，找不到则本轮放弃、下个周期再试）；按物种分文案各自限频
+  tryMigrate() {
+    if (!this.migEligible() || world.time < this.migNext) return;
+    this.migNext = world.time + randRange(SIM.MIGRATION_PERIOD_MIN, SIM.MIGRATION_PERIOD_MAX);
+    if (rand() >= 0.5) return;
+    for (let i = 0; i < 40; i++) {
+      const a = rand() * Math.PI * 2;
+      const dist = randRange(SIM.MIGRATION_DIST_MIN, SIM.MIGRATION_DIST_MAX);
+      const nx = Math.round(this.x + Math.cos(a) * dist), ny = Math.round(this.y + Math.sin(a) * dist);
+      if (!habitatOk(this, nx, ny)) continue;
+      this.migration = { x: nx + 0.5, y: ny + 0.5 };
+      this.migSide = null;   // 绕行持边重置（每次新迁徙重掷）
+      this.migBlock = 0;     // 连续受阻计数归零
+      logThrottled(this.type === "bird" ? "候鸟结队远行。"
+        : this.type === "whale" ? "鲸群游向新海域。"
+        : "兽群开始向远方迁徙，追逐水草与季节。", 120);
+      return;
+    }
+  }
+
+  // 迁徙位移：stepToward 直奔目标；被栖息地挡住（moveBy 置空 target 且未到达）时沿切向
+  // ±90°（持边：侧向掷定贯穿本轮，防障碍前来回横跳）重设 5~10 格内同栖息地中转目标，
+  // 到达（原始目标或中转皆同）即结束本轮并排下个周期——「回 goal 续程」会在凹形障碍上
+  // 打转（海湾近岸 orbiting，实测 400s 净进 0），到点安家即本轮迁徙语义。
+  // 兜底：连续受阻 8 轮选址皆未走通 → 本轮就地放弃重排（必然终止，无永久打转/卡死）。
+  // （bird 目标即远点：air 全地形无阻挡，天然直达；鲸/陆生的搁浅安全网在 update() 上游保留）
+  updateMigration(dt) {
+    const dx = this.migration.x - this.x, dy = this.migration.y - this.y;
+    const d = Math.hypot(dx, dy);
+    const step = CREATURE_META[this.type].speed * dt;
+    const endMigration = () => {
+      this.migration = null;
+      this.migSide = null;
+      this.migBlock = 0;
+      this.migNext = world.time + randRange(SIM.MIGRATION_PERIOD_MIN, SIM.MIGRATION_PERIOD_MAX);
+    };
+    if (d <= step) {
+      this.x = this.migration.x; this.y = this.migration.y;
+      endMigration();
+      return;
+    }
+    this.target = this.migration;   // 哨兵：moveBy 被挡时置空 target，借以检测本帧受阻
+    this.stepToward(this.migration, step);
+    if (this.target === null && this.migration) {
+      if ((this.migBlock || 0) >= 8) { endMigration(); return; }   // 受阻预算耗尽：就地放弃
+      this.migBlock = (this.migBlock || 0) + 1;
+      const td = d || 1;
+      let side = this.migSide || (rand() < 0.5 ? 1 : -1);
+      for (let attempt = 0; attempt < 2; attempt++, side = -side) {
+        const px = -dy / td * side, py = dx / td * side;   // ±90° 切向单位向量
+        for (let i = 0; i < 10; i++) {
+          const r = randRange(5, 10);
+          const wx = Math.round(this.x + px * r), wy = Math.round(this.y + py * r);
+          if (habitatOk(this, wx, wy)) {
+            this.migSide = side;
+            this.migration = { x: wx + 0.5, y: wy + 0.5 };
+            return;
+          }
+        }
+      }
+    }
+  }
+
   // 狗：认定了固定主人就一生跟随（主人去世后才重新认主）
   // 驯化（v0.5.0 泛化）：野生个体需要被靠近驯化——有人停留累计驯化进度，成功后认定固定主人；
-  // tamable 物种共用本路径（狗 / 独角兽），驯化成功的喜悦按 meta.tameJoy 回馈驯服者
+  // tamable 物种共用本路径（狗 / 独角兽 / 马），驯化成功的喜悦按 meta.tameJoy 回馈驯服者
   updateDog(dt) {
     if (!this.tamed || !this.owner || this.owner.dead) {
       // 未驯化（或主人去世重新待驯）：游荡 + 驯化检测
@@ -2041,6 +2283,9 @@ class Creature {
   // 水生 4 格（仍被栖息地拦在水域内，鱼出不了水是既有语义）；离牧场中心 >6 格的陆生牲畜
   // 下一目标改为确定性回栏（朝中心方向 min(d,5)，不掷随机角度）；moveBy 对圈养动物放行
   // GATE 闸门，野生生物的栖息地语义一个字不改；繁殖受育龄（breedAgeOk）约束。
+  // v0.6.8：确定性回栏被山/树挡住时会无限顶墙（moveBy 置空 target→下轮重选同一目标）——
+  // 受阻退避：回栏位移 <1 格计一次失败，连败 2 次本轮退回随机游走；陆生目标校验统一走
+  // pasturePassable（栖息地 + 门 + 栏内），与 moveBy 圈养放行分支同源。
   updatePasture(dt) {
     const waterBound = CREATURE_META[this.type].habitat === "water" || CREATURE_META[this.type].habitat === "deep";
     this.moveCd -= dt;
@@ -2048,12 +2293,26 @@ class Creature {
       this.moveCd = 1.5 + rand() * 2;
       const pcx = this.pasture.x + 0.5, pcy = this.pasture.y + 0.5;
       const dCenter = Math.hypot(this.x - pcx, this.y - pcy);
-      let tx, ty;
+      let tx, ty, useRet = false;
       if (!waterBound && dCenter > 6) {
+        // 受阻评估：上轮选的是回栏目标且此后位移 <1 格 → 记一次失败；否则归 0
+        // （retMark 只在回栏分支产出候选时记录，非回栏选路即清空——保证「上轮是回栏」判定准确）
+        if (this.retMark && Math.hypot(this.x - this.retMark.x, this.y - this.retMark.y) < 1) {
+          this.retFail = (this.retFail || 0) + 1;
+        } else {
+          this.retFail = 0;
+        }
+        useRet = this.retFail < 2;
+        if (!useRet) this.retMark = null;
+      } else {
+        this.retFail = 0; this.retMark = null;   // 离栏心 ≤6（或水生）：清受阻状态
+      }
+      if (useRet) {
         // 回栏偏置（v0.6.2，确定性）：离群过远则朝牧场中心走 min(d,5)，不消耗随机角度
         const d = Math.min(dCenter, 5);
         tx = this.x + (pcx - this.x) / dCenter * d;
         ty = this.y + (pcy - this.y) / dCenter * d;
+        this.retMark = { x: this.x, y: this.y };
       } else {
         const a = rand() * Math.PI * 2;
         const roam = waterBound ? 4 : 11;   // 陆生散养半径 10~12（取 11，经门外出），水生仍在水域内
@@ -2061,7 +2320,7 @@ class Creature {
       }
       const ok = waterBound
         ? habitatOk(this, Math.floor(tx), Math.floor(ty))
-        : walkable(Math.floor(tx), Math.floor(ty));
+        : pasturePassable(this, Math.floor(tx), Math.floor(ty));
       if (ok) this.target = { x: tx, y: ty };
     }
     if (this.target) this.stepToward(this.target, this.speed * dt);
@@ -2078,7 +2337,14 @@ class Creature {
       const pen = creatures.filter(c => c.pasture && !c.dead && c.type === this.type &&
         Math.abs(c.x - this.pasture.x) + Math.abs(c.y - this.pasture.y) < 6);
       // v0.6.2：亲代须在育龄内（幼年不能生、老年停育）
-      if (pen.length < SIM.PASTURE_CAP && rand() < SIM.BREED_CHANCE && breedAgeOk(this)) {
+      // v0.6.15 收口：圈养繁殖同受全局 SPECIES_CAP 约束（与岛屿散布 underCap 同口径）——
+      // 单栏 PASTURE_CAP 只限一栏，多栏围捕可把全局种群顶破上限表（species 上限守卫实测 21/20）
+      // v0.6.18 接缝修复：cap 查表对齐 wildBreedTick 折算口径（turtle/whale 专键）——生态普查实测
+      // 圈养海龟无键放行 → 26/12 破顶（海龟寿命 30 游戏年几乎不老死，圈养池只进不出）
+      const capAll = SIM.SPECIES_CAP[this.type] !== undefined ? SIM.SPECIES_CAP[this.type]
+        : this.type === "turtle" ? SIM.TURTLE_CAP : this.type === "whale" ? SIM.WHALE_CAP : Infinity;
+      if (pen.length < SIM.PASTURE_CAP && rand() < SIM.BREED_CHANCE && breedAgeOk(this) &&
+          creatures.filter(c => c.type === this.type && !c.dead).length < capAll) {
         spawnCreature(this.pasture.x, this.pasture.y, this.type, true);
       }
     }
@@ -2107,10 +2373,9 @@ class Creature {
     const nx = this.x + mx, ny = this.y + my;
     // v0.6.2 散养通行：圈养动物（this.pasture 非空）放行牧场门 GATE 与栏内地板 PASTURE——
     // 圈养牲畜生在栏心 PASTURE tile 上，其栖息地（GRASS/SAND）不含栏心，不放行则永远钉死在
-    // 栏心一格（v0.5.3「出门溜达」对陆生牲畜实际从未生效的根因）；野生生物栖息地语义不变
-    const ft = tileAt(Math.floor(nx), Math.floor(ny));
-    const ok = habitatOk(this, Math.floor(nx), Math.floor(ny)) ||
-      (this.pasture && (ft === T.GATE || ft === T.PASTURE));
+    // 栏心一格（v0.5.3「出门溜达」对陆生牲畜实际从未生效的根因）；野生生物栖息地语义不变。
+    // v0.6.8：放行分支统一收敛到 pasturePassable——非圈养生物即 habitatOk，语义逐位不变
+    const ok = pasturePassable(this, Math.floor(nx), Math.floor(ny));
     if (ok) { this.x = nx; this.y = ny; }
     else this.target = null;
   }
@@ -2136,10 +2401,18 @@ function populateIslandCreatures(bx, by, r) {
   }
   let n = 0;
   if (grass < 12) return 0;
+  // 上限守卫（v0.6.17 接缝修复）：underCap 原先只护「新物种散布」段，旧生态段（牲畜兽群/鹿/
+  // 野猪/狼/海龟）漏护——探索点亮新岛时种群随岛屿数无界增长（生态普查实测 goat 53/40、
+  // turtle 20/12）。生成侧统一对齐 SPECIES_CAP 语义；cow 无专键由 Infinity 兜底（护栏另管）。
+  // capOf 折算 turtle/whale 专键——与 wildBreedTick/updatePasture 同口径（探针实测无键放行 13~20/12）
+  const capOf = type => SIM.SPECIES_CAP[type] !== undefined ? SIM.SPECIES_CAP[type]
+    : type === "turtle" ? SIM.TURTLE_CAP : type === "whale" ? SIM.WHALE_CAP : Infinity;
+  const underCap = type => creatures.filter(c => c.type === type && !c.dead).length < capOf(type);
   // 牲畜兽群
   const herds = 1 + Math.floor(grass / 60);
   for (let h = 0; h < herds; h++) {
     const type = rand() < 0.5 ? "cow" : "goat";
+    if (!underCap(type)) continue;
     const cnt = type === "cow" ? 3 + randInt(0, 3) : 4 + randInt(0, 4);
     const cx = bx + randInt(-r + 3, r - 3), cy = by + randInt(-r + 3, r - 3);
     for (let i = 0; i < cnt; i++) {
@@ -2149,23 +2422,23 @@ function populateIslandCreatures(bx, by, r) {
   }
   // 野生鹿群（草地）
   const deerCnt = 2 + randInt(0, 3);
-  for (let i = 0; i < deerCnt; i++) {
+  for (let i = 0; i < deerCnt && underCap("deer"); i++) {
     const s = findSpot(bx, by, 3, r, T.GRASS);
     if (s) { spawnCreature(s.x, s.y, "deer"); n++; }
   }
   // 野猪与狼（林地边缘）
   if (forestEdge > 6) {
-    for (let i = 0; i < 2 + randInt(0, 2); i++) {
+    for (let i = 0; i < 2 + randInt(0, 2) && underCap("boar"); i++) {
       const s = findSpot(bx, by, 2, r, T.GRASS, [T.BERRY, T.FRUIT]);
       if (s) { spawnCreature(s.x, s.y, "boar"); n++; }
     }
-    if (rand() < 0.5) {
+    if (rand() < 0.5 && underCap("wolf")) {
       const s = findSpot(bx, by, 2, r, T.GRASS);
       if (s) { spawnCreature(s.x, s.y, "wolf"); n++; }
     }
   }
   // 海龟（浅水）
-  for (let i = 0; i < 2 && water > 8; i++) {
+  for (let i = 0; i < 2 && water > 8 && underCap("turtle"); i++) {
     for (let tries = 0; tries < 40; tries++) {
       const cx = bx + randInt(-r, r), cy = by + randInt(-r, r);
       if (tileAt(cx, cy) === T.WATER) { spawnCreature(cx, cy, "turtle"); n++; break; }
@@ -2173,8 +2446,7 @@ function populateIslandCreatures(bx, by, r) {
   }
   // ---- 新物种散布（v0.5.0）----
   // 上限守卫：每岛散布不受繁衍上限约束会让种群随岛屿数无界增长（性能与生态双重问题）——
-  // 生成前查全局计数，已达 SIM.SPECIES_CAP 的物种跳过
-  const underCap = type => creatures.filter(c => c.type === type && !c.dead).length < (SIM.SPECIES_CAP[type] || 1e9);
+  // 生成前查全局计数，已达 SIM.SPECIES_CAP 的物种跳过（underCap 定义已上移至函数头，v0.6.17 起全段共用）
   // 沙滩：企鹅与螃蟹混居（沿岸栖息带）
   if (sand > 5 && (underCap("penguin") || underCap("crab"))) {
     for (let i = 0; i < 1 + randInt(0, 2); i++) {
@@ -2212,48 +2484,68 @@ function populateIslandCreatures(bx, by, r) {
   return n;
 }
 
-// 野生总量自然增长（防止猎绝；分栖息地设上限；v0.6.2：亲代须育龄内——上限计数仍按全部个体
-// （收口修正：若连计数也过滤育龄，老幼个体会绕过上限无限累积，species 套件实测 rabbit 38/30 等）
+// 野生总量自然增长（防止猎绝）。v0.6.17 繁衍均衡化：旧版「全局池随机选亲、每 tick 陆生至多 1 只」
+// 结构性追不上死亡率（探针实测 33 游戏年山羊/鹿/兔/野猪/鱼/鲨/熊/蟹灭绝、狐独占 60），重构为
+// 「每物种均衡出生」——期望出生 = 种群 × 120 ÷ 寿命秒 × WILD_BREED_SAFETY（与死亡率同量纲，
+// 替换率留 25% 爬坡余量）；floor + 概率进位取整；超每物种硬上限钳制；选址失败少生不硬造。
+// 计数口径：非死亡、非圈养（pasture 为空），驯服（tamed）个体计入——修马/独角兽被驯化掏空繁衍池；
+// 出生仍落野生（spawnCreature 不带 captured）；亲代育龄内（breedAgeOk），野生优先、无野生取驯服。
+// 上限表：SPECIES_CAP 全键 + 海龟/鲸既有专键折算；无表物种（牛）无专键，由全局护栏兜底。
 function wildBreedTick() {
   if (world.time % 120 > 1) return;
-  // 陆生：可猎物种 + 狼（捕食者种群也需延续，与羊群构成生态闭环）
-  const land = creatures.filter(c => c.isWild() && !c.dead && (CREATURE_META[c.type].hunt || c.type === "wolf"));
-  const landParents = land.filter(c => breedAgeOk(c));
-  if (land.length < SIM.WILD_BREED_CAP && landParents.length >= 4) {
-    const c = landParents[randInt(0, landParents.length - 1)];
-    const p = findSpot(Math.round(c.x), Math.round(c.y), 0, 3, T.GRASS) ||
-              (c.type === "wolf" ? findSpot(Math.round(c.x), Math.round(c.y), 0, 5, T.TREE) : null);   // 森林深处的狼可在林地繁衍
-    if (p) spawnCreature(p.x, p.y, c.type);
-  }
-  // 海龟（浅水繁殖）
-  const turtles = creatures.filter(c => c.isWild() && !c.dead && c.type === "turtle");
-  const turtleParents = turtles.filter(c => breedAgeOk(c));
-  if (turtleParents.length > 0 && turtles.length < SIM.TURTLE_CAP) {
-    const t0 = turtleParents[randInt(0, turtleParents.length - 1)];
-    const ps = findSpot(Math.round(t0.x), Math.round(t0.y), 0, 5, T.WATER);
-    if (ps) spawnCreature(ps.x, ps.y, "turtle");
-  }
-  // 鲸（深海繁殖）
-  const whales = creatures.filter(c => !c.dead && c.type === "whale");
-  const whaleParents = whales.filter(c => breedAgeOk(c));
-  if (whaleParents.length > 0 && whales.length < SIM.WHALE_CAP) {
-    const w0 = whaleParents[randInt(0, whaleParents.length - 1)];
-    const pw = findSpot(Math.round(w0.x), Math.round(w0.y), 0, 8, T.DEEP);
-    if (pw) spawnCreature(pw.x, pw.y, "whale");
-  }
-  // 新物种按上限表繁衍（v0.5.0）：SIM.SPECIES_CAP 驱动，栖息地→tile 映射选址；flier 不在此繁衍
   const habTile = { grass: T.GRASS, forest: T.TREE, sand: T.SAND, water: T.WATER, deep: T.DEEP };
+  // 统一可繁衍物种表：陆生 hunt 系 + 狼 + 海龟 + 鲸 + SPECIES_CAP 全部键（去重；flier 飞行类不在此繁衍）
+  const species = [];
+  const seen = {};
+  for (const type of Object.keys(CREATURE_META)) {
+    if (CREATURE_META[type].hunt || type === "wolf") { species.push(type); seen[type] = true; }
+  }
+  for (const t of ["turtle", "whale"]) if (!seen[t]) { species.push(t); seen[t] = true; }
   for (const type of Object.keys(SIM.SPECIES_CAP || {})) {
-    const cap = SIM.SPECIES_CAP[type];
-    const meta = CREATURE_META[type];
-    if (!meta || meta.flier) continue;
-    const pool = creatures.filter(c => c.isWild() && !c.dead && c.type === type);
-    if (pool.length === 0 || pool.length >= cap) continue;
+    if (seen[type] || !CREATURE_META[type] || CREATURE_META[type].flier) continue;
+    species.push(type); seen[type] = true;
+  }
+  // 全局护栏：陆生系（hunt 系+狼，与旧陆生分支同集）非圈养活体（驯服计入）合计 ≥ WILD_BREED_CAP
+  // → 本 tick 跳过剩余陆生物种（性能护栏，非生态上限）
+  const isLand = type => !!(CREATURE_META[type].hunt || type === "wolf");
+  let landPop = 0;
+  for (const c of creatures) if (!c.dead && !c.pasture && isLand(c.type)) landPop++;
+  let landBorn = 0;   // 本 tick 陆生系已出生数（计入护栏）
+  for (const type of species) {
+    // 每物种硬上限：SPECIES_CAP 专键；海龟/鲸折算既有专键；无表物种兜底 Infinity（护栏兜底）
+    const cap = SIM.SPECIES_CAP[type] !== undefined ? SIM.SPECIES_CAP[type]
+      : type === "turtle" ? SIM.TURTLE_CAP : type === "whale" ? SIM.WHALE_CAP : Infinity;
+    const pool = creatures.filter(c => !c.dead && !c.pasture && c.type === type);   // 驯服计入
+    // 全口径计数（含圈养）：SPECIES_CAP 是物种硬上限——圈养个体不计则野生顶满 cap 后
+    // 总数必然超限（species 套件实测 goat 42/40），与岛屿散布 underCap、updatePasture 三处口径对齐
+    const total = creatures.filter(c => !c.dead && c.type === type).length;
+    if (pool.length === 0 || total >= cap) continue;
     const parents = pool.filter(c => breedAgeOk(c));
     if (parents.length === 0) continue;
-    const p0 = parents[randInt(0, parents.length - 1)];
-    const ps = findSpot(Math.round(p0.x), Math.round(p0.y), 0, 6, habTile[meta.habitat] || T.GRASS);
-    if (ps) spawnCreature(ps.x, ps.y, type);
+    if (isLand(type) && landPop + landBorn >= SIM.WILD_BREED_CAP) continue;
+    const wildParents = parents.filter(c => c.isWild());
+    const chosen = wildParents.length ? wildParents : parents;   // 亲代野生优先、无野生再取驯服
+    // 期望出生：pop×120÷寿命秒×安全系数（寿命秒 = 游戏年×1080）；floor + 概率进位；钳到 cap-总数
+    const spAge = SPECIES_AGE[type];
+    const lifeS = spAge ? spAge.lifespan * SIM.DAY_LEN * SIM.YEAR_DAYS : 12 * SIM.DAY_LEN * SIM.YEAR_DAYS;
+    const expected = pool.length * 120 / lifeS * SIM.WILD_BREED_SAFETY;
+    const fl = Math.floor(expected);
+    let n = fl + (rand() < expected - fl ? 1 : 0);
+    n = Math.min(n, cap - total);
+    for (let i = 0; i < n; i++) {
+      const ref = chosen[randInt(0, chosen.length - 1)];
+      // 选址沿用各栖息地旧 findSpot 半径口径：陆 0~3 / 狼林 0~5 兜底 / 龟水 0~5 / 鲸深 0~8 / SPECIES_CAP 系 0~6
+      const s = type === "wolf" ? (findSpot(Math.round(ref.x), Math.round(ref.y), 0, 3, T.GRASS) ||
+        findSpot(Math.round(ref.x), Math.round(ref.y), 0, 5, T.TREE))
+        : type === "turtle" ? findSpot(Math.round(ref.x), Math.round(ref.y), 0, 5, T.WATER)
+        : type === "whale" ? findSpot(Math.round(ref.x), Math.round(ref.y), 0, 8, T.DEEP)
+        : SIM.SPECIES_CAP[type] !== undefined
+          ? findSpot(Math.round(ref.x), Math.round(ref.y), 0, 6, habTile[CREATURE_META[type].habitat] || T.GRASS)
+          : findSpot(Math.round(ref.x), Math.round(ref.y), 0, 3, T.GRASS);
+      if (!s) break;   // 选址失败少生，不硬造
+      spawnCreature(s.x, s.y, type);
+      if (isLand(type)) landBorn++;
+    }
   }
 }
 // 鲸：深海罕见生物（航海氛围），随深海探索偶现
@@ -2343,6 +2635,9 @@ let _agentIdSeq = 1;
 // 受困动物扫描缓存（decide 2.8 全局 1s 节流，见 decide）
 const _rescueScan = { t: -9, victim: null };
 
+// 主喜好 → 乐事键映射（joyProfile 保底与面板「最爱乐事」共用）：none 无映射即无保底
+const _HOBBY_JOY = { explore: "explore", homebody: "home", animal: "animal", fishing: "fish" };
+
 // 职业表与社会需求比例：探险家看探索欲、工匠看勤劳，其余随机
 const JOBS = {
   farmer:      { name: "农夫",   task: "FARM" },
@@ -2367,28 +2662,33 @@ const _HOBBY_ROLL = () => {
   return r < 0.22 ? "explore" : r < 0.44 ? "homebody" : r < 0.64 ? "animal" : r < 0.84 ? "fishing" : "none";
 };
 
-// ---- 心情与喜好快乐（冻结契约 v0.5.0）----
-// likedJoyOf：小人此刻是否在做「喜好匹配」的事——命中返回 1（每秒回 MOOD_LIKED_JOY，覆盖工作衰减），否则 0。
+// ---- 心情与喜好快乐（冻结契约 v0.5.0；v0.6.7 重构：返回命中的乐事键，配 joyProfile 分档强度）----
+// likedJoyOf：小人此刻是否在做「乐事匹配」的事——命中返回乐事键（"explore"/"fish"/"animal"/
+// "home"/"flower"/"climb"），否则 0；updateMood 按 joyProfile[键] 的倍率回心情。
 // 映射（用户口径逐字落地）：
 //   explore 向往远方 → 航海（voyage）/铺路搭桥（BRIDGE/FILL 工程）/自发探索远行
 //   animal  喜爱牲畜 → 捕获/建牧场任务；idle/walk 时 4 格内有圈养牲畜（牧羊）
 //   fishing 垂钓爱好者 → FISH 捕鱼任务
 //   homebody 恋家 → idle 时守在家里 2.5 格内
 //   none 随遇而安 → 无专属快乐，但心情衰减 ×0.8（看得开，在 updateMood 内实现）
+//   众乐乐（v0.6.7 新增，不限喜好）：idle/walk 时邻近花丛果树（赏花）或山崖（爬山）
 // 判定纯读 agent/creature 状态零副作用；creature.js 在拼接序中先于 agent.js，creatures 可直接引用
 function likedJoyOf(a) {
   if (a.hobby === "explore") {
-    if (a.state === "voyage" || a.exploring) return 1;
-    if (a.state === "work" && a.task && (a.task.type === "BRIDGE" || a.task.type === "FILL")) return 1;
+    if (a.state === "voyage" || a.exploring) return "explore";
+    if (a.state === "work" && a.task && (a.task.type === "BRIDGE" || a.task.type === "FILL")) return "explore";
   }
-  if (a.hobby === "fishing" && a.state === "work" && a.task && a.task.type === "FISH") return 1;
+  if (a.hobby === "fishing" && a.state === "work" && a.task && a.task.type === "FISH") return "fish";
   if (a.hobby === "animal") {
-    if (a.state === "work" && a.task && (a.task.type === "CAPTURE" || a.task.type === "PASTURE")) return 1;
+    if (a.state === "work" && a.task && (a.task.type === "CAPTURE" || a.task.type === "PASTURE")) return "animal";
     // 牧羊邻近判定走 1s 节流缓存（a.pastureNear，update 内扫描）——生物扩容后逐帧全表扫是性能热点
-    if ((a.state === "idle" || a.state === "walk") && a.pastureNear) return 1;
+    if ((a.state === "idle" || a.state === "walk") && a.pastureNear) return "animal";
   }
   if (a.hobby === "homebody" && a.home && (a.state === "idle" || a.state === "walk") &&
-      Math.hypot(a.home.x + 0.5 - a.x, a.home.y + 0.5 - a.y) < 2.5) return 1;
+      Math.hypot(a.home.x + 0.5 - a.x, a.home.y + 0.5 - a.y) < 2.5) return "home";
+  // 赏花/爬山邻近（1s 节流缓存 flowerNear/mountainNear，update 内扫描）：人人可享的乐事
+  if ((a.state === "idle" || a.state === "walk") && a.flowerNear) return "flower";
+  if ((a.state === "idle" || a.state === "walk") && a.mountainNear) return "climb";
   return 0;
 }
 
@@ -2519,6 +2819,16 @@ class Agent {
     this.cheerT = 0;                       // 尽兴而归：游乐园游玩后心情衰减放缓的剩余秒数
     this.drunkT = 0;                       // 醉酒剩余秒数（喝麦酒：移速放缓、饥饿衰减放缓）
     this.coffeeT = 0;                      // 咖啡因剩余秒数（喝咖啡：精力衰减放缓）
+    // 乐事强度画像（v0.6.7）：每项乐事的愉悦倍率（JOY_TIERS 0.4~1.8）——hash2 确定性生成，
+    // 不消耗 rand 流；主喜好键保底 JOY_HOBBY_MIN（none 无保底，衰减 ×0.8 的「看得开」语义不变）
+    this.joyProfile = {};
+    for (const k of SIM.JOY_KEYS) {
+      let tier = SIM.JOY_TIERS[(hash2(this.id, SIM.JOY_SALTS[k]) * 5) | 0];
+      if (k === _HOBBY_JOY[this.hobby]) tier = Math.max(tier, SIM.JOY_HOBBY_MIN);
+      this.joyProfile[k] = tier;
+    }
+    this.mount = null;                     // 坐骑（驯服马；creature.riddenBy 指回自己时坐标由本侧同步）
+    this.mountCd = 0;                      // 上马判定节流
     // 随身背包（冻结契约 v0.4.1）：10 个物理槽位装任意东西（slot = { item, n, haul? }，全空起步）
     this.pack = new Array(10).fill(null);
     this.face = "down";                    // 朝向：up/down/left/right（移动按实际位移更新，开工面向任务格）
@@ -2543,9 +2853,10 @@ class Agent {
     this.age = Math.min(SPECIES_AGE.human.lifespan, this.age + dt / (SIM.DAY_LEN * SIM.YEAR_DAYS));
 
     // 航海中：一切需求冻结（船上有补给），坐标由船携带。
-    // 例外——航海喜悦（v0.5.0）：向往远方的人出海是圆梦，心情照涨（必须在早退之前处理，否则远航心情永远冻结）
+    // 例外——航海喜悦（v0.5.0 起 explore 专属，v0.6.7 放开全民）：出海按各自探险乐事强度回甘
+    // （必须在早退之前处理，否则远航心情永远冻结；voyage 早退期间 likedJoyOf 不会被调，无双重计分）
     if (this.state === "voyage") {
-      if (this.hobby === "explore") this.mood = Math.min(100, this.mood + SIM.MOOD_LIKED_JOY * dt);
+      this.mood = Math.min(100, this.mood + SIM.MOOD_LIKED_JOY * (this.joyProfile.explore || 1) * dt);
       return;
     }
 
@@ -2716,6 +3027,19 @@ class Agent {
       logThrottled(`${this.name} 痊愈了，重新投入生活。`, 20);
     }
 
+    // ---- 骑乘（v0.6.10）：坐骑坐标同步与失效/下马解除（须在移动 step 计算前）----
+    // 马被骑时自主行为冻结（creature.js 侧），坐标由骑手携带；坐骑死亡/易主/未驯化，
+    // 或骑手离开 walk 态（骑乘只服务于赶路，decide 改道/到达转态在此集中解除）→ 下马
+    if (this.mount) {
+      const h = this.mount;
+      if (h.dead || h.riddenBy !== this || !h.tamed || h.owner !== this || this.state !== "walk") {
+        if (h.riddenBy === this) h.riddenBy = null;
+        this.mount = null;
+      } else {
+        h.x = this.x; h.y = this.y;
+      }
+    }
+
     // 需求演化：按状态系数衰减（"run" 判定与渲染同口径：探索冲刺/高速赶路/追猎 且 处于行走态）。
     // 状态系数表在 config.js 的 SIM.STATE_*；eat/drink 等缺省态按 idle 口径兜底
     const stKey = this.state === "walk" &&
@@ -2732,16 +3056,29 @@ class Agent {
     if (this.drunkT > 0) this.drunkT = Math.max(0, this.drunkT - dt);
     if (this.coffeeT > 0) this.coffeeT = Math.max(0, this.coffeeT - dt);
 
-    // 月光花光环 + 牧羊邻近扫描（1s 节流；夜晚花田夜游的浪漫与牧羊的快乐，见 updateMood/likedJoyOf）
+    // 月光花光环 + 赏花/爬山/牧羊邻近扫描（1s 节流；花田夜游/乐事/牧羊的快乐，见 updateMood/likedJoyOf）
     this.bloomCd = (this.bloomCd || 0) - dt;
     if (this.bloomCd <= 0) {
       this.bloomCd = 1;
       this.scanBloom();
+      this.scanFlower();
+      this.scanMountain();
       this.pastureNear = false;
       if (this.hobby === "animal") {
         for (const c of creatures) {
           if (!c.dead && c.pasture && Math.hypot(c.x - this.x, c.y - this.y) < 4) { this.pastureNear = true; break; }
         }
+      }
+      // 台风邻近（1s 节流缓存）：圈内的行人顶风跋涉，stepAlong 移速 ×TYPHOON_MAN
+      this.stormNear = !!(world.storm && Math.hypot(world.storm.x - this.x, world.storm.y - this.y) < SIM.TYPHOON_R);
+      // 上马判定（1s 节流，mountCd）：长途中（剩余路径 > RIDE_MOUNT_DIST）且身旁有自己
+      // 驯服的空载马 → 骑上赶路（零 rand 消耗；短途不骑，骑乘只服务于赶路）
+      if (this.mountCd > 0) this.mountCd -= 1;
+      else if (!this.mount && this.state === "walk" && this.path &&
+               (this.path.length - this.pi) > SIM.RIDE_MOUNT_DIST) {
+        const h = creatures.find(c => !c.dead && c.type === "horse" && c.tamed && c.owner === this &&
+          !c.riddenBy && Math.hypot(c.x - this.x, c.y - this.y) < SIM.RIDE_MOUNT_R);
+        if (h) { this.mount = h; h.riddenBy = this; h.x = this.x; h.y = this.y; this.mountCd = 1; }
       }
     }
 
@@ -2775,7 +3112,7 @@ class Agent {
             packTake(pk, alt, 1);
             this.thirst = Math.min(100, this.thirst + SIM.PACK_RESTORE[alt]);
             if (alt === "juice") this.energy = Math.min(100, this.energy + SIM.PACK_JUICE_ENERGY);
-            else if (alt === "beer") { this.drunkT = SIM.DRUNK_TIME; this.mood = Math.min(100, this.mood + SIM.MOOD_BEER); }
+            else if (alt === "beer") { this.drunkT = SIM.DRUNK_TIME; this.mood = Math.min(100, this.mood + SIM.MOOD_BEER * (this.joyProfile.drink || 1)); }
             else this.coffeeT = SIM.COFFEE_TIME;
           }
         }
@@ -2813,7 +3150,9 @@ class Agent {
             st[this.drinkRes] -= 1;
             this.thirst = Math.min(100, this.thirst + SIM.DRINK_RESTORE[this.drinkRes]);
             // 心情分档回复（v0.5.0）：酒最开心、果汁/咖啡其次、清水只是解渴
-            this.mood = Math.min(100, this.mood + (SIM["MOOD_" + this.drinkRes.toUpperCase()] || 0));
+            //（v0.6.7：麦酒按 joyProfile.drink 分档——千杯少与沾酒眠，果汁/咖啡/清水不分档）
+            this.mood = Math.min(100, this.mood + (SIM["MOOD_" + this.drinkRes.toUpperCase()] || 0) *
+              (this.drinkRes === "beer" ? (this.joyProfile.drink || 1) : 1));
             if (this.drinkRes === "beer") { this.drunkT = SIM.DRUNK_TIME; logThrottled(`${this.name} 畅饮了麦酒，脚步都有点飘了。`, 20); }
             else if (this.drinkRes === "coffee") { this.coffeeT = SIM.COFFEE_TIME; logThrottled(`${this.name} 畅饮了热咖啡，精神抖擞。`, 20); }
             else if (this.drinkRes === "juice") { this.energy = Math.min(100, this.energy + 10); logThrottled(`${this.name} 畅饮了鲜果汁。`, 20); }
@@ -2868,6 +3207,26 @@ class Agent {
     this.bloomNear = near;
   }
 
+  // 赏花/爬山邻近扫描（1s 节流，照 scanBloom 抄 7×7 圈 tileAt 判定）：v0.6.7 乐事画像的
+  // flower/climb 键在 idle/walk 邻近时被动加分（likedJoyOf 读 flowerNear/mountainNear）；
+  // T.BERRY/FRUIT/MOONBLOOM/MOUNTAIN/CLIFF 未接入时容错恒 false
+  _scanNear(tiles, key) {
+    const set = tiles.filter(v => v !== undefined);
+    if (!set.length) { this[key] = false; return; }
+    const bx = Math.round(this.x), by = Math.round(this.y);
+    let near = false;
+    for (let dy = -3; dy <= 3 && !near; dy++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        if (set.includes(tileAt(bx + dx, by + dy))) { near = true; break; }
+      }
+    }
+    this[key] = near;
+  }
+
+  scanFlower() { this._scanNear([T.BERRY, T.FRUIT, T.MOONBLOOM], "flowerNear"); }
+
+  scanMountain() { this._scanNear([T.MOUNTAIN, T.CLIFF], "mountainNear"); }
+
   // 最近娱乐设施（decide 2.95 用，结果缓存 2s 防高频扫描）：
   // 游乐园走 world.parks 注册表（免扫屏）；单格设施（凉亭/戏台/斗兽场）螺旋扫 24 格。
   // mood<50 时优先游乐园（大乐子），否则取最近的任意设施
@@ -2900,6 +3259,44 @@ class Agent {
     return best;
   }
 
+  // 最近乐事景点（decide 2.9 用，结果按 kind 分缓存 2s 防高频扫描；照 nearestFunSpot 的 24 格螺旋口径）：
+  // flower 找浆果丛/果树/月光花（本身可走，站上去即赏花），climb 找山/悬崖的邻近可走格（站山脚望山即爬山）；
+  // 目标 tile 未接入时容错返回 null（结果含 null 也缓存，避免连帧重扫）
+  nearestJoySpot(kind) {
+    const key = kind === "climb" ? "climbCache" : "flowerCache";
+    if (key in this && world.time - (this[key + "T"] || 0) < 2) return this[key];
+    this[key + "T"] = world.time;
+    const set = (kind === "climb" ? [T.MOUNTAIN, T.CLIFF] : [T.BERRY, T.FRUIT, T.MOONBLOOM])
+      .filter(v => v !== undefined);
+    if (!set.length) { this[key] = null; return null; }
+    const cx = Math.round(this.x), cy = Math.round(this.y);
+    const R = 24;
+    for (let r = 1; r <= R; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;   // 只扫当前圈（由近及远）
+          const x = cx + dx, y = cy + dy;
+          if (!set.includes(tileAt(x, y))) continue;
+          // 目标格本身可走就站目标格，不可走（山/悬崖）站邻近可走格
+          const stand = walkable(x, y) ? { x, y } : neighborsOf(x, y).find(p => walkable(p.x, p.y));
+          if (stand) { this[key] = stand; return stand; }
+        }
+      }
+    }
+    this[key] = null;
+    return null;
+  }
+
+  // 去乐事景点赏玩（decide 2.9 用）：走到花丛/山脚即到达（不新增 state），到达后 idle 驻留，
+  // 靠 update 的 1s 邻近扫描（flowerNear/mountainNear）经 likedJoyOf 被动回心情
+  goJoySpot(kind) {
+    const spot = this.nearestJoySpot(kind);
+    if (!spot || !this.goTo(spot.x, spot.y)) return false;
+    this.state = "walk";
+    this.onArrive = () => { this.state = "idle"; };
+    return true;
+  }
+
   // 心情演化（v0.5.0）：基准衰减 × 状态倍率（睡觉不衰减、改按 MOOD_SLEEP_REGEN 回复——
   // 睡一觉约 +30，是不花资源的慢通道自愈）；做喜好匹配的事 → 快乐回复；醉酒微醺持续回甘；
   // 月光花夜间光环；cheerT 余韵（游乐园尽兴而归）期间衰减 ×MOOD_CHEER_FACTOR
@@ -2912,9 +3309,13 @@ class Agent {
     let decay = SIM.MOOD_DECAY * stMul(SIM.STATE_MOOD) * (this.hobby === "none" ? 0.8 : 1);
     if (this.cheerT > 0) decay *= SIM.MOOD_CHEER_FACTOR || 0.35;
     this.mood -= decay * dt;
-    if (likedJoyOf(this) > 0) this.mood = Math.min(100, this.mood + SIM.MOOD_LIKED_JOY * dt);
+    // 乐事回甘（v0.6.7）：命中乐事按各自 joyProfile 强度倍率回（0.4~1.8 档，主喜好保底 1.4）
+    const jk = likedJoyOf(this);
+    if (jk) this.mood = Math.min(100, this.mood + SIM.MOOD_LIKED_JOY * (this.joyProfile[jk] || 1) * dt);
     if (this.drunkT > 0) this.mood = Math.min(100, this.mood + SIM.MOOD_DRUNK_JOY * dt);
     if (this.bloomNear && !isDaytime()) this.mood = Math.min(100, this.mood + 0.5 * dt);
+    // 流星夜（v0.6.14）：肉眼可见的划空乐事，缓慢回心情（病中无暇仰望；睡觉走上方早退路径天然排除）
+    if (world.meteor && !this.sick) this.mood = Math.min(100, this.mood + (SIM.METEOR_MOOD || 0) * dt);
     if (this.mood < 0) this.mood = 0;
   }
 
@@ -2999,12 +3400,29 @@ class Agent {
       }
     }
 
-    // 2.9 心情低落 → 找乐子（v0.5.0）：城库有酒/果汁就先去喝一杯——人不只为解渴而饮，也为开心。
-    //     指定偏好清单（beer>juice），城库无货则放弃（不拿白水糊弄）并冷却 JOY_CD 防连帧重试；
+    // 2.9 心情低落 → 找乐子（v0.5.0 喝一杯；v0.6.7 扩展）：按每人乐事强度加权随机挑去处——
+    //     喝酒（城库有酒/果汁才去，不拿白水糊弄）、赏花（就近花丛/果树）、爬山（就近山脚），
+    //     选中项落地失败（无货/无景点/不可达）依次回退其他候选，全落空冷却 JOY_CD 防连帧重试；
     //     抑郁者跳过（连开心都懒得找，只能靠睡觉与运气自愈）
     if (!this.depressed && this.mood < SIM.MOOD_SEEK &&
         this.hunger >= 30 && this.thirst >= 30 && world.time >= (this.joyUntil || 0)) {
-      if (!this.seekDrink(["beer", "juice"])) this.joyUntil = world.time + SIM.JOY_CD;
+      const cands = [
+        { w: this.joyProfile.drink || 1, act: () => this.seekDrink(["beer", "juice"]) },
+        { w: this.joyProfile.flower || 1, act: () => this.goJoySpot("flower") },
+        { w: this.joyProfile.climb || 1, act: () => this.goJoySpot("climb") },
+      ];
+      // 加权无放回抽样排出尝试顺序（decide 本就是随机路径，允许消耗 rand 流）
+      const order = [];
+      while (cands.length) {
+        let sum = 0;
+        for (const c of cands) sum += c.w;
+        let r = rand() * sum, i = 0;
+        for (; i < cands.length - 1; i++) { r -= cands[i].w; if (r < 0) break; }
+        order.push(cands.splice(i, 1)[0]);
+      }
+      let gone = false;
+      for (const c of order) { if (c.act()) { gone = true; break; } }
+      if (!gone) this.joyUntil = world.time + SIM.JOY_CD;
     }
 
     // 2.95 游玩（v0.5.0 娱乐链）：心情不满且附近有娱乐设施 → 去玩（凉亭/戏台/斗兽场/游乐园）。
@@ -3528,7 +3946,9 @@ class Agent {
     const gx = target.x + 0.5, gy = target.y + 0.5;
     const dx = gx - this.x, dy = gy - this.y;
     const dist = Math.hypot(dx, dy);
-    const step = this.speed * dt * (this.drunkT > 0 ? SIM.DRUNK_SPEED_FACTOR : 1);   // 醉酒移速放缓
+    const step = this.speed * dt * (this.drunkT > 0 ? SIM.DRUNK_SPEED_FACTOR : 1) *
+                 (this.mount ? SIM.RIDE_SPEED_FACTOR : 1) *
+                 (this.stormNear ? SIM.TYPHOON_MAN : 1);   // 醉酒放缓 / 骑马提速 / 台风中顶风跋涉（v0.6.15）
     if (dist <= step) {
       this.x = gx; this.y = gy;
       this.pi++;
@@ -3677,15 +4097,24 @@ function findEscapeSpot(sx, sy) {
 // 螺旋向外找最近的前沿格：可站立陆地且 4 邻含 VOID（探索者的目标点；只扫局部，成本受 maxR 约束）。
 // v0.5.0 性能：内联 4 邻判定（neighborsOf 每格分配数组是扫描热点），调用方另有 2s→8s 节流
 function findFrontier(cx, cy, maxR) {
+  // 逐圈周长直读（v0.6.15 性能收口）：与旧「整方格内圈选 + continue」的访问顺序逐位一致
+  //（上行 → 左右边 → 下行），但省掉每圈 (2r+1)² 的空转迭代——80 格无解扫描从 ~68 万次循环
+  // 降到 ~2.6 万次（此前单次可达 ~100ms，多探索者 8s 节流下仍构成长跑主要开销）
   for (let r = 1; r <= maxR; r++) {
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;   // 只扫当前圈
-        const x = cx + dx, y = cy + dy;
-        if (!walkable(x, y)) continue;
-        if (tileAt(x + 1, y) === T.VOID || tileAt(x - 1, y) === T.VOID ||
-            tileAt(x, y + 1) === T.VOID || tileAt(x, y - 1) === T.VOID) return { x, y };
-      }
+    const yT = cy - r, yB = cy + r, xL = cx - r, xR = cx + r;
+    for (let x = cx - r; x <= cx + r; x++) {
+      if (walkable(x, yT) && (tileAt(x + 1, yT) === T.VOID || tileAt(x - 1, yT) === T.VOID ||
+          tileAt(x, yT + 1) === T.VOID || tileAt(x, yT - 1) === T.VOID)) return { x, y: yT };
+    }
+    for (let y = cy - r + 1; y <= cy + r - 1; y++) {
+      if (walkable(xL, y) && (tileAt(xL + 1, y) === T.VOID || tileAt(xL - 1, y) === T.VOID ||
+          tileAt(xL, y + 1) === T.VOID || tileAt(xL, y - 1) === T.VOID)) return { x: xL, y };
+      if (walkable(xR, y) && (tileAt(xR + 1, y) === T.VOID || tileAt(xR - 1, y) === T.VOID ||
+          tileAt(xR, y + 1) === T.VOID || tileAt(xR, y - 1) === T.VOID)) return { x: xR, y };
+    }
+    for (let x = cx - r; x <= cx + r; x++) {
+      if (walkable(x, yB) && (tileAt(x + 1, yB) === T.VOID || tileAt(x - 1, yB) === T.VOID ||
+          tileAt(x, yB + 1) === T.VOID || tileAt(x, yB - 1) === T.VOID)) return { x, y: yB };
     }
   }
   return null;
@@ -3838,11 +4267,12 @@ function localFacilities(list, settle) {
   return list.filter(o => ownerSettle(o.x, o.y) === settle);
 }
 
-// 新式设施（水井/酒坊/压榨坊/烘焙坊）立项时一律立在各城粮仓周边（半径 ≤8 格），
-// 因此检索不必扫全图：遍历粮仓、扫其 9 格邻域即可覆盖全域（世界对象不设 wells/breweries 平行数组，tile 即真相）
+// 新式设施（水井/酒坊/压榨坊/烘焙坊）立项时一律立在各城粮仓周边（expandSpot 半径 ≤8、
+// findSpot 兜底可到 10 格），因此检索不必扫全图：遍历粮仓、扫其 ±12 邻域即可覆盖全域
+//（v0.6.18 由 ±9 扩到 ±12：兜底选址落 9~10 格的凉亭也能被查重命中，否则同城会立出第二座）
 function facilityNear(cx, cy, type) {
-  for (let dy = -9; dy <= 9; dy++)
-    for (let dx = -9; dx <= 9; dx++)
+  for (let dy = -12; dy <= 12; dy++)
+    for (let dx = -12; dx <= 12; dx++)
       if (tileAt(cx + dx, cy + dy) === type) return { x: cx + dx, y: cy + dy };
   return null;
 }
@@ -3914,7 +4344,10 @@ function plannerTick() {
 
   // 2. 粮食压力 → 多渠道补粮：农田 / 浆果采集 / 狩猎 / 畜牧（城邦解锁）
   //    选址偏好：同聚落内农田连片（新田挨着已有农田 3 格内，田可紧贴成片），跨聚落不要求
-  if (foodFarms * 6 < pop + 8 && tasksPending("FARM", true).length < 2) {
+  //    v0.6.18 接缝修复：立项门 ×6<pop+8 比出生线 ×5≥pop+4 松一档，f≥5 时存在 (5f-4, 6f-8] 死带
+  //    （生育与补田同时关闭→人口/发展全局冻结，era2 永不可达，三 seed 探针实测卡 62 人 30000s）。
+  //    门改 ×5<pop+6：补田领先出生线一步，兑现本分支「田先于人到位」的既有注释承诺
+  if (foodFarms * 5 < pop + 6 && tasksPending("FARM", true).length < 2) {
     let s = null;
     for (const st of world.settlements) {
       if (!st.zones) continue;
@@ -3990,10 +4423,15 @@ function plannerTick() {
       }
     }
   }
-  // 2c. 狩猎：附近有野生牛羊 → 猎队（立项前确认动物存活，且未被捕获任务占用）
+  // 狩猎保护线（v0.6.17）：目标物种非圈养活体（驯服计入）≤ ECO_FLOOR → 该物种不立项
+  //（在办任务照常完成——只在候选过滤层拦截新立项，不动 worker 侧）
+  const ecoCount = {};
+  for (const c of creatures) if (!c.dead && !c.pasture) ecoCount[c.type] = (ecoCount[c.type] || 0) + 1;
+  const ecoOk = type => (ecoCount[type] || 0) > SIM.ECO_FLOOR;
+  // 2c. 狩猎：附近有野生牛羊 → 猎队（立项前确认动物存活，且未被捕获任务占用；物种过保护线不立项）
   if (totalFood() < 60 + pop * 3 && tasksPending("HUNT", true).length < 1) {
     const a = pickAnchor();
-    const wild = creatures.filter(c => c.isWild() && !c.dead && CREATURE_META[c.type].hunt &&
+    const wild = creatures.filter(c => c.isWild() && !c.dead && CREATURE_META[c.type].hunt && ecoOk(c.type) &&
       Math.abs(c.x - a.x) + Math.abs(c.y - a.y) < 30 && !tasks.list.some(k => k.creature === c && !k.done));
     if (wild.length) {
       const c = wild[0];
@@ -4018,7 +4456,7 @@ function plannerTick() {
       const pas = world.pastures[0];
       // v0.5.3：陆上牧场只圈陆生牲畜——水生动物（鱼群/海龟/鲸）不入陆栏（脚下不是水会搁浅），
       // 它们的圈养走 2d2 渔场路径（水上渔场/池塘 dest）
-      const cap = creatures.filter(c => c.isWild() && !c.dead &&
+      const cap = creatures.filter(c => c.isWild() && !c.dead && ecoOk(c.type) &&
         Math.hypot(c.x - pas.x, c.y - pas.y) < 40 && c.type !== "dog" &&
         CREATURE_META[c.type].habitat !== "water" && CREATURE_META[c.type].habitat !== "deep" &&
         creatures.filter(k => k.pasture && k.type === c.type).length < SIM.PASTURE_CAP);
@@ -4035,7 +4473,7 @@ function plannerTick() {
   if (tasksPending("CAPTURE", true).length < 1 &&
       creatures.filter(c => c.pasture && c.type === "fish" && !c.dead).length < SIM.PASTURE_CAP) {
     const a = pickAnchor();
-    const wild = creatures.filter(c => c.isWild() && !c.dead && c.type === "fish" &&
+    const wild = creatures.filter(c => c.isWild() && !c.dead && c.type === "fish" && ecoOk(c.type) &&
       !tasks.list.some(k => k.creature === c && !k.done));
     let placed = false;
     // ① 原地圈养
@@ -4349,7 +4787,10 @@ function plannerTick() {
   if (world.era >= 2 && world.time - _interBridgeCd > 30 && tasksPending("BRIDGE", true).length < 30) {
     _interBridgeCd = world.time;
     const named = world.islands.filter(o => o.name && o.r >= 3);
-    let best = null, bestD = Infinity;
+    // v0.6.18 接缝修复：旧逻辑只取「最近一对」尝试，最近对的首海格若被既有普通桥 6 格邻域拦下
+    // （nearAny BRIDGE 6），break 后其余合格对永远轮不到——岛际大桥被单对永久饿死（era 解锁后实测
+    // 12000s 仍 0 立项，诊断显示 5 对完全合格）。改为按距离升序逐对查首海格资格，首个合格者立项
+    const pairs = [];
     for (let i = 0; i < named.length; i++) for (let j = i + 1; j < named.length; j++) {
       const a = named[i], b = named[j];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
@@ -4357,10 +4798,10 @@ function plannerTick() {
       const kAB = a.x + "," + a.y + "|" + b.x + "," + b.y;
       const kBA = b.x + "," + b.y + "|" + a.x + "," + a.y;
       if (world.interBridges && (world.interBridges.has(kAB) || world.interBridges.has(kBA))) continue;
-      if (d < bestD) { bestD = d; best = [a, b, kAB]; }
+      pairs.push({ a, b, kAB, d });
     }
-    if (best) {
-      const [a, b, pairKey] = best;
+    pairs.sort((p, q) => p.d - q.d);
+    for (const { a, b, kAB } of pairs) {
       const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
       const dist = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
       // 沿 A→B 直线找第一个海上格：其前驱或任一邻格可站立（工人必可达）才立项首格，链式生长接力
@@ -4371,11 +4812,12 @@ function plannerTick() {
         const startOk = walkable(x - dx, y - dy) || neighborsOf(x, y).some(p => walkable(p.x, p.y));
         if (startOk && !tasks.list.some(tk => !tk.done && tk.x === x && tk.y === y) && !nearAny(x, y, [T.BRIDGE], 6)) {
           tasksAdd({ type: "BRIDGE", x, y, corridor: { dx, dy, remain: dist - k } });
-          world.interBridges.add(pairKey);
+          world.interBridges.add(kAB);
           logMsg(`工匠们着手在「${a.name}」与「${b.name}」之间修一条跨海大桥。`);
         }
-        break;   // 只看第一个海上格（不可达则 30s 后重查，等周边地形解锁）
+        break;   // 只看第一个海上格（不可达则 30s 后重查，等周边地形解锁）；本对被拦则顺延下一对
       }
+      if (world.interBridges.has(kAB)) break;   // 每周期至多立项一条
     }
   }
   // 2g. 浆果可持续：丛数低于人口需求（且有丛可采种）→ 培育新丛
@@ -4496,8 +4938,8 @@ function plannerTick() {
     }
   }
 
-  // 5. 疆土随人口生长：每增长约 25 人，规划署主动开辟一片新疆土（无人口上限）
-  if (pop >= (world.expansions + 1) * 20) {   // 每 20 人生长一次疆土
+  // 5. 疆土随人口生长：每增长 30 人，规划署主动开辟一片新疆土（无人口上限）
+  if (pop >= (world.expansions + 1) * SIM.EXPAND_EVERY) {   // 每 30 人生长一次疆土（v0.6.18：20→EXPAND_EVERY，与聚落升级线 [12,36,90] 配套）
     expand();
   }
 
@@ -4694,7 +5136,9 @@ function farmTick(dt) {
       if (was && !f.irrigated) logThrottled("一片农田失去了灌溉水源，收成停滞了。", 60);
     }
     if (!f.irrigated) continue;   // 缺水：停止生长（不倒退，等水来了继续）
-    f.grow += dt;
+    // 气候因子（v0.6.15）：雪原寒缓（×SNOW_FARM）、旱带干渴（×DROUGHT_FARM）；coffee 田同乘
+    const cl = climateAt(f.x, f.y);
+    f.grow += dt * (cl === "snow" ? SIM.CLIMATE.SNOW_FARM : cl === "drought" ? SIM.CLIMATE.DROUGHT_FARM : 1);
     // 咖啡田走独立成熟周期与产出：产咖啡豆（不产粮，不进粮食产能口径）
     if (f.grow >= (f.crop === "coffee" ? SIM.COFFEE_MATURITY : SIM.FARM_MATURITY)) {
       f.grow = 0;
@@ -4709,6 +5153,42 @@ function farmTick(dt) {
   }
 }
 
+// ---- 天象与天气（v0.6.14/15）：流星调度 + 台风生成/漂移（掷骰每 sim 秒一窗）----
+// 契约：world.meteor = null | { t0, dur }；world.storm = null | { x, y, dx, dy, born, life, r }
+let _skySec = -1;
+function weatherTick(dt) {
+  // 台风：逐帧漂移（0.5 格/秒），生命到点即消散（出界/靠岸不硬检）
+  if (world.storm) {
+    const st = world.storm;
+    if (world.time > st.born + st.life) { world.storm = null; logMsg("台风在海面上消散了。"); }
+    else { st.x += st.dx * 0.5 * dt; st.y += st.dy * 0.5 * dt; }
+  }
+  const sec = Math.floor(world.time);
+  if (sec === _skySec) return;   // 掷骰窗口：每 sim 秒一次
+  _skySec = sec;
+  // 流星：夜间偶现（上颗过期 → 清空并进入 2~4 游戏夜冷却；先到点先掷骰）
+  if (world.meteor && world.time > world.meteor.t0 + world.meteor.dur) {
+    world.meteor = null;
+    world.meteorNext = world.time + randRange(SIM.METEOR_GAP_MIN, SIM.METEOR_GAP_MAX);
+  }
+  if (!world.meteor && !isDaytime() && world.time >= (world.meteorNext || 0) && rand() < 0.02) {
+    world.meteor = { t0: world.time, dur: SIM.METEOR_DUR };
+  }
+  // 台风：偶起于主仓 40~90 格外的深海格（方向随机单位向量，寿命 60~120 秒）
+  if (!world.storm && rand() < SIM.TYPHOON_CHANCE) {
+    for (let i = 0; i < 30; i++) {
+      const a = rand() * Math.PI * 2, d = randRange(40, 90);
+      const x = Math.round(world.store.x + Math.cos(a) * d), y = Math.round(world.store.y + Math.sin(a) * d);
+      if (tileAt(x, y) !== T.DEEP) continue;
+      const ang = rand() * Math.PI * 2;
+      world.storm = { x: x + 0.5, y: y + 0.5, dx: Math.cos(ang), dy: Math.sin(ang),
+        born: world.time, life: randRange(SIM.TYPHOON_LIFE_MIN, SIM.TYPHOON_LIFE_MAX), r: SIM.TYPHOON_R };
+      logMsg("远处海面起了台风，浪头翻滚。");
+      break;
+    }
+  }
+}
+
 // ---- 模拟主步进 ----
 let _plannerCd = SIM.PLANNER_INTERVAL;
 let _lastFeast = -999;
@@ -4719,6 +5199,7 @@ let _frontierCd = -999;
 function simUpdate(dt) {
   world.time += dt;
   world.timeOfDay = (world.time % SIM.DAY_LEN) / SIM.DAY_LEN;
+  weatherTick(dt);
 
   for (const a of agents) a.update(dt);
   for (const c of creatures) c.update(dt);

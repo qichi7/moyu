@@ -138,7 +138,9 @@ if (!fw) { assert(false, "场景F：测试环境需要水域"); } else {
   for (let i = 0; i < 1200; i++) farmFish.update(STEP);   // 120s：至少产一轮粮
   const food1 = st0 ? ensureStock(st0).food : 0;
   assert(food1 >= food0 + SIM.PASTURE_YIELD, "场景F：圈养鱼群定期产粮（+" + (food1 - food0) + "）");
-  assert(habitatOk(farmFish, Math.round(farmFish.x), Math.round(farmFish.y)), "场景F：圈养鱼在水中游荡（不搁浅）");
+  // 取整契约（死锁表 #14）：生物位置判定一律 Math.floor（round 在 ±0.5 行边界会误判搁浅；
+  // v0.6.14 构造器 migNext randRange 的 rand 消耗漂移了游荡路径，此边界案例首次暴露）
+  assert(habitatOk(farmFish, Math.floor(farmFish.x), Math.floor(farmFish.y)), "场景F：圈养鱼在水中游荡（不搁浅）");
 }
 
 // ---- 场景 G：渔船闭环（出港 → 捕捞 → 满舱返航卸货）----
@@ -282,7 +284,9 @@ if (!drySpot || nearAny(drySpot.x, drySpot.y, [T.WATER, T.DEEP], 5)) {
   if (wet) {
     setTile(wet.x, wet.y, T.WATER);
     dryFarm.waterCd = 0;
-    for (let i = 0; i < 600; i++) simUpdate(STEP);
+    // farmTick 直驱（v0.6.18 接缝）：补粮门修复后世界显著繁荣，60s simUpdate 演化中填海/选址
+    // 可能改写刚铺的水格致灌溉复检翻假（实测 grow 卡 0.40）——单元考察只驱动 farmTick 本身
+    for (let i = 0; i < 600; i++) farmTick(STEP);
     assert(dryFarm.grow > 1, "场景K：通水后恢复生长（grow=" + dryFarm.grow.toFixed(2) + "）");
   }
 }
@@ -446,9 +450,504 @@ assert(hunted.dead && hunted.deathReason === "被狩猎", "场景P：狩猎结�
 const kW = findSpot(world.store.x, world.store.y, 2, 12, T.WATER);
 if (!kW) { assert(true, "场景P：无水域（钓起探针跳过）"); } else {
   const koi = spawnCreature(kW.x, kW.y, "koi");
+  // 清走 kW 1.5 格内旁站的其他珍稀鱼（v0.6.18 接缝：世界随机流漂移后初始 moonfish 可能恰好
+  // 落在选中的水格旁——tasksFinish 的 rare 扫描按 creatures 顺序取第一个命中者，koi 会被截胡）
+  for (const c of creatures) {
+    if (!c.dead && c !== koi && CREATURE_META[c.type].rare && CREATURE_META[c.type].fishJoy &&
+        Math.hypot(c.x - kW.x - 0.5, c.y - kW.y - 0.5) < 1.5) c.dead = true;
+  }
   const fisher = agents.find(a => !a.dead);
   tasksFinish({ type: "FISH", x: kW.x, y: kW.y, fishX: kW.x, fishY: kW.y, need: 1, workers: new Set() }, fisher, null);
   assert(koi.dead && koi.deathReason === "被钓起", "场景P：珍稀渔获标注 deathReason=被钓起");
+}
+// ---- 场景 Q：马驯化（v0.6.10 tamable 马）——贴近累积 tameness → tamed/owner；isWild 口径翻转；爱牲畜 ×2 速率 ----
+simInit(42);
+const qSpot = (function () {
+  for (let r = 0; r <= 8; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    if (habitatOk({ type: "horse" }, 4 + dx, 4 + dy)) return { x: 4 + dx, y: 4 + dy };
+  }
+  return { x: 4, y: 4 };
+})();
+const qHorse = spawnCreature(qSpot.x, qSpot.y, "horse");
+assert(qHorse.isWild() === true, "场景Q：野马初始算野生动物（isWild 含未驯化 tamable）");
+const qTamer = agents.find(a => !a.dead);
+qTamer.hobby = "animal"; qTamer.mood = 50;
+qTamer.x = qSpot.x + 0.5; qTamer.y = qSpot.y + 0.9;   // 0.4 格：驯化半径 1.5 内
+for (const a of agents) if (a !== qTamer && Math.hypot(a.x - qHorse.x, a.y - qHorse.y) < 4) { a.x += 12; a.y += 12; }
+let qSteps = -1;
+for (let i = 0; i < 200 && qSteps < 0; i++) {
+  qHorse.update(STEP);
+  qHorse.x = qSpot.x + 0.5; qHorse.y = qSpot.y + 0.5;   // 钉住游荡：单变量考察驯化累积
+  if (qHorse.tamed) qSteps = i + 1;
+}
+assert(qSteps > 0 && qHorse.owner === qTamer, "场景Q：贴近野马驯化成立（tamed 且 owner 回指）");
+assert(qSteps >= 13 && qSteps <= 22, "场景Q：爱牲畜者驯化速率 ×2（3/(0.1×2)=15 步，实测 " + qSteps + "）");
+assert(Math.abs(qTamer.mood - 70) < 0.01, "场景Q：驯化喜悦 tameJoy=20 入账（mood 50→" + qTamer.mood + "）");
+assert(qHorse.isWild() === false, "场景Q：驯化认主后不再算野生动物（v0.6.10 isWild 口径）");
+// 对照：非爱牲畜者速率 ×1（30 步）
+let qSpot2 = null;
+for (let dy = 4; dy <= 10 && !qSpot2; dy++) if (habitatOk({ type: "horse" }, qSpot.x, qSpot.y + dy)) qSpot2 = { x: qSpot.x, y: qSpot.y + dy };
+if (!qSpot2) qSpot2 = { x: qSpot.x + 4, y: qSpot.y };
+const qHorse2 = spawnCreature(qSpot2.x, qSpot2.y, "horse");
+const qOther = agents.find(a => !a.dead && a !== qTamer);
+qOther.hobby = "none";
+qOther.x = qSpot2.x + 0.5; qOther.y = qSpot2.y + 0.9;
+for (const a of agents) if (a !== qOther && a !== qTamer && Math.hypot(a.x - qHorse2.x, a.y - qHorse2.y) < 4) { a.x += 12; a.y += 12; }
+let qSteps2 = -1;
+for (let i = 0; i < 400 && qSteps2 < 0; i++) {
+  qHorse2.update(STEP);
+  qHorse2.x = qSpot2.x + 0.5; qHorse2.y = qSpot2.y + 0.5;
+  if (qHorse2.tamed) qSteps2 = i + 1;
+}
+assert(qSteps2 >= 26 && qSteps2 <= 40, "场景Q：对照非爱牲畜者 3/(0.1×1)=30 步（实测 " + qSteps2 + "）");
+
+// ---- 场景 R：骑乘冻结（v0.6.10）——riddenBy 中坐标不改、老死骰不掷；骑手死亡解除并恢复老死 ----
+simInit(42);
+const rSpot = (function () {
+  for (let r = 0; r <= 8; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    if (habitatOk({ type: "horse" }, 4 + dx, 4 + dy)) return { x: 4 + dx, y: 4 + dy };
+  }
+  return { x: 4, y: 4 };
+})();
+const rHorse = spawnCreature(rSpot.x, rSpot.y, "horse");
+const rRider = agents.find(a => !a.dead);
+rHorse.tamed = true; rHorse.owner = rRider;
+rHorse.riddenBy = rRider;
+rHorse.age = SPECIES_AGE.horse.lifespan;   // 寿命拉满
+const rx0 = rHorse.x, ry0 = rHorse.y;
+let rDied = false;
+for (let i = 0; i < 3000; i++) {   // 300s >> 平均 3 天老死窗（180s）：骑乘冻结下必不死
+  rHorse.update(STEP);
+  if (rHorse.dead) { rDied = true; break; }
+}
+assert(!rDied, "场景R：骑乘中老死骰不掷（寿命拉满 300s 仍存活）");
+assert(rHorse.x === rx0 && rHorse.y === ry0, "场景R：骑乘中坐标不被生物自身改动（由骑手同步）");
+rRider.dead = true;
+rHorse.update(STEP);
+assert(rHorse.riddenBy === null, "场景R：骑手死亡 → riddenBy 解除");
+let rDied2 = false;
+for (let i = 0; i < 20 && !rDied2; i++) {   // dt=DAY_LEN → 每步老死概率 1/3（照场景 P 口径）
+  rHorse.update(SIM.DAY_LEN);
+  if (rHorse.dead) rDied2 = true;
+}
+assert(rDied2 && rHorse.deathReason === "寿终正寝", "场景R：解除后恢复常规老死（寿终正寝）");
+
+// ---- 场景 S：回栏受阻退避（v0.6.8）——离栏 >6 且山墙阻隔 → 退避随机游走，不再无限顶墙 ----
+simInit(42);
+let sSpot = null, sOpen = -1;
+for (let r = 3; r <= 16; r++) {
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    const x = world.store.x + dx, y = world.store.y + dy;
+    if (tileAt(x, y) !== T.GRASS || nearAny(x, y, [T.HOUSE, T.FARM, T.WATER, T.DEEP], 2)) continue;
+    let open = 0;
+    for (let yy = y - 7; yy <= y + 7; yy++) for (let xx = x - 7; xx <= x + 7; xx++) {
+      const tt = tileAt(xx, yy);
+      if (tt === T.GRASS || tt === T.SAND) open++;
+    }
+    if (open > sOpen) { sOpen = open; sSpot = { x, y }; }
+  }
+}
+if (!sSpot || sOpen < 150) {
+  assert(true, "场景S：无开阔构造点（跳过，最大开敞度 " + sOpen + "/225）");
+} else {
+  tasksAdd({ type: "PASTURE", x: sSpot.x, y: sSpot.y, need: 1 });
+  const sT = tasks.list[tasks.list.length - 1];
+  sT.progress = sT.need;
+  tasksFinish(sT);
+  const sCow = spawnCreature(sSpot.x, sSpot.y, "cow", true);
+  sCow.age = 1.5;   // 幼年：关闭繁殖，单头确定性观测
+  const sFar = { x: sSpot.x, y: sSpot.y + 10 };       // 远置 10 格（>6 触发确定性回栏）
+  setTile(sFar.x, sFar.y, T.GRASS);
+  for (let dx = -4; dx <= 4; dx++) setTile(sSpot.x + dx, sSpot.y + 5, T.MOUNTAIN);   // 拦死回栏直线
+  sCow.x = sFar.x + 0.5; sCow.y = sFar.y + 0.5;
+  const scx = sSpot.x + 0.5, scy = sSpot.y + 0.5;
+  const sd0 = Math.hypot(sCow.x - scx, sCow.y - scy);
+  const seen = new Set();
+  let sMinD = sd0, sCum = 0, sAlive = true, sPrev = { x: sCow.x, y: sCow.y };
+  for (let i = 0; i < 6000; i++) {   // 600s：退避后数十次 roam 重选（对照旧行为原地卡死）
+    sCow.update(STEP);
+    sCum += Math.hypot(sCow.x - sPrev.x, sCow.y - sPrev.y);
+    sPrev = { x: sCow.x, y: sCow.y };
+    seen.add(Math.round(sCow.x * 2) + "," + Math.round(sCow.y * 2));
+    const d = Math.hypot(sCow.x - scx, sCow.y - scy);
+    if (d < sMinD) sMinD = d;
+    if (sCow.dead) { sAlive = false; break; }
+  }
+  assert(sAlive, "场景S：受阻退避牛全程存活");
+  assert(seen.size >= 8 || sCum >= 20 || sMinD < sd0 - 2,
+    "场景S：山墙阻隔不再无限顶墙（位置多样性 " + seen.size + " / 累计位移 " + sCum.toFixed(1) +
+    " / 最近距栏 " + sMinD.toFixed(1) + "，对照旧行为卡死在墙前）");
+}
+
+// ---- 场景 T：pasturePassable 单元探针（v0.6.8）——圈养放行口径统一 ----
+simInit(42);
+{
+  const bx = world.store.x + 40;
+  setTile(bx, 0, T.GRASS); setTile(bx + 1, 0, T.GATE); setTile(bx + 2, 0, T.PASTURE);
+  setTile(bx + 3, 0, T.MOUNTAIN); setTile(bx + 4, 0, T.WATER);
+  const pCow = { type: "cow", pasture: { x: 0, y: 0 } };
+  const wCow = { type: "cow" };
+  const pFish = { type: "fish", pasture: { x: 0, y: 0 } };
+  assert(pasturePassable(pCow, bx, 0) === true, "场景T：圈养牛 GRASS 真（栖息地同源）");
+  assert(pasturePassable(pCow, bx + 1, 0) === true, "场景T：圈养牛 GATE 真（门放行）");
+  assert(pasturePassable(pCow, bx + 2, 0) === true, "场景T：圈养牛 PASTURE 真（栏内放行）");
+  assert(pasturePassable(pCow, bx + 3, 0) === false, "场景T：圈养牛 MOUNTAIN 假");
+  assert(pasturePassable(pCow, bx + 4, 0) === false, "场景T：圈养牛 WATER 假");
+  assert(pasturePassable(wCow, bx, 0) === true, "场景T：非圈养牛 GRASS 真（栖息地不变）");
+  assert(pasturePassable(wCow, bx + 1, 0) === false, "场景T：非圈养生物 GATE 假（野生语义零改动）");
+  assert(pasturePassable(wCow, bx + 2, 0) === false, "场景T：非圈养生物 PASTURE 假");
+  assert(pasturePassable(pFish, bx + 4, 0) === true, "场景T：圈养鱼 WATER 真（栖息地同源）");
+}
+
+// ---- 场景 U：迁徙（v0.6.14）——migNext 到期触发 / 朝目标位移 / 被挡绕行 / 到达重排 ----
+// U1 触发与目标成立：migNext 置过期，逐步强制重掷（tryMigrate 0.5 概率弃权，200 步内必触发）
+simInit(42);
+const uSpot = (function () {
+  for (let r = 0; r <= 8; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    if (habitatOk({ type: "deer" }, 4 + dx, 4 + dy)) return { x: 4 + dx, y: 4 + dy };
+  }
+  return { x: 4, y: 4 };
+})();
+const uDeer = spawnCreature(uSpot.x, uSpot.y, "deer");
+assert(uDeer.migEligible() === true, "场景U：野生鹿具备迁徙资格（物种表 + 非圈养 + 未驯化）");
+assert(uDeer.migration === null && uDeer.migNext > world.time, "场景U：初始定居态（migration 空 / migNext 在未来）");
+let uRolls = 0;
+while (!uDeer.migration && uRolls < 200) {
+  uDeer.migNext = world.time - 1;   // 强制到期（tryMigrate 内先重排周期再掷 0.5 弃权）
+  uDeer.update(STEP);
+  uRolls++;
+}
+assert(!!uDeer.migration, "场景U：migNext 到期触发迁徙（目标已立，" + uRolls + " 步内掷中）");
+const uDist = Math.hypot(uDeer.migration.x - uDeer.x, uDeer.migration.y - uDeer.y);
+assert(uDist >= SIM.MIGRATION_DIST_MIN - 5 && uDist <= SIM.MIGRATION_DIST_MAX + 5,
+  "场景U：迁徙目标距离在 30~80 格口径内（实测 " + uDist.toFixed(1) + "）");
+// U2 朝目标位移 + 必然终止：迁徙朝目标逼近（30~80 格直奔段），且每轮必然结束
+//（到达 / 中转安家 / 受阻放弃三出口——400s 窗内每轮 migration 必清空，无永久打转）。
+// 受阻就地放弃是合法出口（v0.6.14 兜底设计），可能单轮仅挪 2~3 格——累计位移 ≤5 时强制再行
+//（真实迁徙单轮即 30+ 格；3 轮仍 ≤5 才是死锁信号），逼近口径取各轮迁徙目标的最优逼近
+const uD0 = uDist;
+let uMin = Infinity, uCum = 0, uPrev = { x: uDeer.x, y: uDeer.y };
+let uRounds = 0;
+while (uCum <= 5 && uRounds < 3) {
+  uRounds++;
+  let uGuard = 0;
+  while (!uDeer.migration && uGuard++ < 200) { uDeer.migNext = world.time - 1; uDeer.update(STEP); }   // 成行（0.5 弃权逐步重掷）
+  const uTgt2 = { x: uDeer.migration.x, y: uDeer.migration.y };
+  let uMin2 = Math.hypot(uTgt2.x - uDeer.x, uTgt2.y - uDeer.y);
+  for (let i = 0; i < 4000 && uDeer.migration; i++) {
+    uDeer.update(STEP);
+    uCum += Math.hypot(uDeer.x - uPrev.x, uDeer.y - uPrev.y);
+    uPrev = { x: uDeer.x, y: uDeer.y };
+    if (uDeer.migration) uMin2 = Math.min(uMin2, Math.hypot(uTgt2.x - uDeer.x, uTgt2.y - uDeer.y));
+  }
+  uMin = Math.min(uMin, uMin2);
+}
+for (let i = 0; i < 4000 && uDeer.migration; i++) uDeer.update(STEP);   // 收尾：在途轮次必然终止
+assert(!uDeer.dead, "场景U：迁徙全程存活");
+assert(uCum > 5,
+  "场景U：迁徙真实发生（累计位移 " + uCum.toFixed(1) + " 格 > 5，" + uRounds + " 轮内；受阻放弃合法，死锁信号是 ≈0 位移且永不终止）");
+assert(uMin < uD0 - 1,
+  "场景U：朝目标位移（各轮迁徙目标最近逼近 " + (uD0 - uMin).toFixed(1) + " 格）");
+assert(!uDeer.migration, "场景U：本轮迁徙必然终止（migration 已清空，无永久打转）");
+if (!uDeer.migration) {
+  assert(uDeer.migNext > world.time, "场景U：结束后 migNext 重排到未来周期");
+}
+// U3 被挡绕行：山墙拦死直线路径 → 切向中转点绕行/安家——不死锁（有位移有落脚多样性）且必然终止
+simInit(42);
+let uSpot2 = null, uOpen = -1;
+for (let r = 6; r <= 16; r++) {
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    const x = world.store.x + dx, y = world.store.y + dy;
+    if (tileAt(x, y) !== T.GRASS || nearAny(x, y, [T.HOUSE, T.FARM, T.WATER, T.DEEP], 2)) continue;
+    let open = 0;
+    for (let yy = y - 8; yy <= y + 8; yy++) for (let xx = x - 8; xx <= x + 8; xx++) {
+      const tt = tileAt(xx, yy);
+      if (tt === T.GRASS || tt === T.SAND) open++;
+    }
+    if (open > uOpen) { uOpen = open; uSpot2 = { x, y }; }
+  }
+}
+if (!uSpot2 || uOpen < 180) {
+  assert(true, "场景U-绕行：无开阔构造点（跳过，最大开敞度 " + uOpen + "/289）");
+} else {
+  const wx = uSpot2.x + 3;
+  setTile(uSpot2.x, uSpot2.y, T.GRASS); setTile(uSpot2.x + 6, uSpot2.y, T.GRASS);
+  for (let dy = -7; dy <= 7; dy++) setTile(wx, uSpot2.y + dy, T.MOUNTAIN);   // 拦死直线
+  const uDeer2 = spawnCreature(uSpot2.x + 0.5, uSpot2.y + 0.5, "deer");
+  uDeer2.migration = { x: uSpot2.x + 6.5, y: uSpot2.y + 0.5 };   // 直达目标在墙另一侧
+  const uT2 = { x: uSpot2.x + 6.5, y: uSpot2.y + 0.5 };
+  const uD2 = Math.hypot(uT2.x - uDeer2.x, uT2.y - uDeer2.y);
+  const seen2 = new Set();
+  let uCum2 = 0, uRetgt = 0, uPrev2 = { x: uDeer2.x, y: uDeer2.y };
+  for (let i = 0; i < 4000 && uDeer2.migration; i++) {
+    uDeer2.update(STEP);
+    uCum2 += Math.hypot(uDeer2.x - uPrev2.x, uDeer2.y - uPrev2.y);
+    uPrev2 = { x: uDeer2.x, y: uDeer2.y };
+    seen2.add(Math.round(uDeer2.x * 2) + "," + Math.round(uDeer2.y * 2));
+    if (uDeer2.migration && Math.hypot(uDeer2.migration.x - uT2.x, uDeer2.migration.y - uT2.y) > 1) uRetgt++;
+  }
+  const uD3 = Math.hypot(uT2.x - uDeer2.x, uT2.y - uDeer2.y);
+  assert(!uDeer2.dead, "场景U-绕行：山墙阻隔下全程存活");
+  assert(uCum2 > 5 && seen2.size >= 5,
+    "场景U-绕行：不死锁（累计位移 " + uCum2.toFixed(1) + " / 位置多样性 " + seen2.size + "；真死锁信号是 ≈0 位移+原地钉死）");
+  assert(uRetgt >= 1 || uD3 < uD2 - 2,
+    "场景U-绕行：切向中转重排或绕行推进（重排 " + uRetgt + " 次 / 剩余 " + uD3.toFixed(1) + "，初距 " + uD2.toFixed(1) + "）");
+  assert(!uDeer2.migration, "场景U-绕行：山墙下本轮迁徙必然终止（无永久打转）");
+}
+// U4 到达结算：近距直达目标 → migration 清空 + migNext 重排 + 落点贴合
+simInit(42);
+// 注：carveRiver 走 rand()（非 hash）——simInit 的流位随前序场景漂移，重生成世界的地形与 U1 不同，
+// 不可复用 uSpot 坐标（曾漂成水面格 → 鹿出生即搁浅、strand「原地等待」挡死迁徙分支）。现场重扫：
+const uSpot3 = (function () {
+  for (let r = 0; r <= 10; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    // 直线上 4 格全栖息地可达：保证 3 格直奔无阻（中转安家会让「落点贴合」失真）
+    let ok = true;
+    for (let k = 0; k <= 3 && ok; k++) if (!habitatOk({ type: "deer" }, 4 + dx + k, 4 + dy)) ok = false;
+    if (ok) return { x: 4 + dx, y: 4 + dy };
+  }
+  return null;
+})();
+if (!uSpot3) { assert(true, "场景U-到达：无 3 格连通草地（地理罕见，跳过）"); } else {
+const uDeer3 = spawnCreature(uSpot3.x, uSpot3.y, "deer");
+setTile(uSpot3.x + 3, uSpot3.y, T.GRASS);
+uDeer3.migration = { x: uSpot3.x + 3.5, y: uSpot3.y + 0.5 };
+for (let i = 0; i < 300 && uDeer3.migration; i++) uDeer3.update(STEP);
+assert(!uDeer3.migration, "场景U：3 格近距目标到达后 migration 清空");
+assert(Math.hypot(uDeer3.x - (uSpot3.x + 3.5), uDeer3.y - (uSpot3.y + 0.5)) < 0.6,
+  "场景U：到达落点贴合目标（偏移 " + Math.hypot(uDeer3.x - (uSpot3.x + 3.5), uDeer3.y - (uSpot3.y + 0.5)).toFixed(2) + "）");
+assert(uDeer3.migNext > world.time, "场景U：到达后 migNext 重排到下个迁徙周期");
+}
+
+// ---- 场景 V：migEligible 资格口径（v0.6.14）——驯化/圈养/非迁徙物种排除，bird 走物种表不走 isWild ----
+simInit(42);
+{
+  const vDeer = spawnCreature(uSpot.x, uSpot.y, "deer");
+  const vHorse = spawnCreature(uSpot.x, uSpot.y, "horse");
+  assert(vDeer.migEligible() && vDeer.isWild(), "场景V：野生鹿 eligible+isWild 双真");
+  assert(vHorse.migEligible() && vHorse.isWild(), "场景V：未驯化马 eligible+isWild 双真（驯化前仍是野生动物）");
+  vHorse.tamed = true; vHorse.owner = agents[0];
+  assert(!vHorse.migEligible() && !vHorse.isWild(), "场景V：驯化认主的马永不迁徙（tamed 排除）");
+  const vDog = spawnCreature(uSpot.x, uSpot.y, "dog");
+  vDog.tamed = true; vDog.owner = agents[0];
+  assert(!vDog.migEligible(), "场景V：驯化狗不迁徙（物种表外 + tamed 双排除）");
+  const vCow = spawnCreature(uSpot.x, uSpot.y, "cow", true);
+  assert(vCow.pasture && !vCow.migEligible(), "场景V：圈养牛不迁徙（pasture 排除）");
+  const vFish = spawnCreature(uSpot.x, uSpot.y, "fish");
+  const vTurtle = spawnCreature(uSpot.x, uSpot.y, "turtle");
+  assert(!vFish.migEligible() && !vTurtle.migEligible(), "场景V：鱼群/海龟不迁徙（物种表外，永不）");
+  const vWhale = spawnCreature(3, 3, "whale");
+  assert(vWhale.migEligible() && vWhale.isWild(), "场景V：深海鲸 eligible+isWild 双真");
+  const vBird = spawnCreature(uSpot.x, uSpot.y, "bird");
+  assert(vBird.migEligible() === true, "场景V：候鸟具备迁徙资格（物种表内）");
+  assert(vBird.isWild() === false, "场景V：bird 不走 isWild 口径（恒排除）——资格只按物种表判定（结构性差异）");
+}
+
+// ---- 场景 W0：均衡公式单 tick 直驱（v0.6.17）——expected = pop×120÷寿命秒×WILD_BREED_SAFETY。
+// 压缩时钟（寿命 0.5 游戏年 = 540s）把单 tick 出生量放大到可断言粒度：
+// floor + 概率进位取整 → 出生 ∈ {floor(exp), floor(exp)+1}（cap/护栏预置不钳、选址充足不 break）
+simInit(42);
+{
+  const __w0fAge = SPECIES_AGE.fish, __w0fCap = SIM.SPECIES_CAP.fish;
+  SPECIES_AGE.fish = { name: "鱼群", lifespan: 0.5, stages: [0.05, 0.15, 0.45] };   // 寿命秒 = 0.5×90×12 = 540
+  SIM.SPECIES_CAP.fish = 120;   // 同 W1：初始 60=cap 会钳死一切出生（生产路径初始必低于 cap，不构造该病态）
+  const w0w = findSpot(world.store.x, world.store.y, 5, 40, T.WATER);
+  if (!w0w) { assert(true, "场景W0：无水域（地理罕见，跳过）"); } else {
+    let w0g = 0;
+    while (creatures.filter(c => c.type === "fish" && !c.dead).length < 60 && w0g++ < 300) {
+      const p = findSpot(w0w.x, w0w.y, 0, 8, T.WATER);
+      if (!p) break;
+      spawnCreature(p.x, p.y, "fish").age = 0.2;   // 全员育龄中段（breedAgeOk 命中）
+    }
+    const w0n = creatures.filter(c => c.type === "fish" && !c.dead).length;
+    world.time = 240;   // 落进 wildBreedTick 的 120s 窗口门（time%120≤1）
+    wildBreedTick();
+    const w0Born = creatures.filter(c => c.type === "fish" && !c.dead).length - w0n;
+    const w0Exp = w0n * 120 / 540 * SIM.WILD_BREED_SAFETY;   // 60 鱼期望 ≈16.67
+    assert(w0Born >= Math.floor(w0Exp) && w0Born <= Math.floor(w0Exp) + 1,
+      "场景W0：鱼均衡公式单 tick 直驱——floor(pop×120÷540×1.25)=" + Math.floor(w0Exp) +
+      "±概率进位（期望 " + w0Exp.toFixed(2) + "，实测出生 " + w0Born + "）");
+  }
+  SIM.SPECIES_CAP.fish = __w0fCap; SPECIES_AGE.fish = __w0fAge;
+  // 山羊同法（land 系物种：顺带验证 WILD_BREED_CAP 护栏不误拦——40+12 << 120）
+  const __w0gAge = SPECIES_AGE.goat, __w0gCap = SIM.SPECIES_CAP.goat;
+  SPECIES_AGE.goat = { name: "羊", lifespan: 0.5, stages: [0.05, 0.15, 0.45] };
+  SIM.SPECIES_CAP.goat = 60;   // 上调防钳（生产路径初始必低于 cap）
+  const w0s = findSpot(world.store.x, world.store.y, 3, 14, T.GRASS);
+  if (!w0s) { assert(true, "场景W0：无草地构造点（地理罕见，跳过）"); } else {
+    let w0g2 = 0;
+    while (creatures.filter(c => c.type === "goat" && !c.dead).length < 40 && w0g2++ < 300) {
+      const p = findSpot(w0s.x, w0s.y, 0, 10, T.GRASS);
+      if (!p) break;
+      spawnCreature(p.x, p.y, "goat").age = 0.2;
+    }
+    const w0n2 = creatures.filter(c => c.type === "goat" && !c.dead).length;
+    world.time = 480;   // 新的 120s 窗口（与上一 tick 分离）
+    wildBreedTick();
+    const w0Born2 = creatures.filter(c => c.type === "goat" && !c.dead).length - w0n2;
+    const w0Exp2 = w0n2 * 120 / 540 * SIM.WILD_BREED_SAFETY;   // 40 羊期望 ≈11.11
+    assert(w0Born2 >= Math.floor(w0Exp2) && w0Born2 <= Math.floor(w0Exp2) + 1,
+      "场景W0：山羊均衡公式单 tick 直驱——floor(pop×120÷540×1.25)=" + Math.floor(w0Exp2) +
+      "±概率进位（期望 " + w0Exp2.toFixed(2) + "，实测出生 " + w0Born2 + "，护栏不误拦）");
+  }
+  SPECIES_AGE.goat = __w0gAge; SIM.SPECIES_CAP.goat = __w0gCap;
+}
+
+// ---- 场景 W1：鱼群均衡（v0.6.17）——压缩时钟（寿命 5 游戏年 → 0.5 年 = 540s），
+// 60 鱼跑 2500s ≈ 4.6 个世代：旧版结构必崩（全局池抽亲追不上死亡率），新版种群应稳在 cap ±40% 带内
+simInit(42);
+const __w1FishAge = SPECIES_AGE.fish, __w1Cap = SIM.SPECIES_CAP.fish;
+SPECIES_AGE.fish = { name: "鱼群", lifespan: 0.5, stages: [0.05, 0.15, 0.45] };   // 540s 寿命 / 54~486s 育龄窗
+SIM.SPECIES_CAP.fish = 120;   // cap 上调留出生余量：初始 60 = cap 时钳制会禁一切出生→同龄群同步老化塌陷（生产路径初始必低于 cap，不会构造该病态）
+const w1w = findSpot(world.store.x, world.store.y, 5, 40, T.WATER);
+if (!w1w) { assert(true, "场景W1：无水域（地理罕见，跳过）"); SIM.SPECIES_CAP.fish = __w1Cap; SPECIES_AGE.fish = __w1FishAge; } else {
+  let w1Guard = 0;
+  while (creatures.filter(c => c.type === "fish" && !c.dead).length < 60 && w1Guard++ < 300) {
+    const p = findSpot(w1w.x, w1w.y, 0, 8, T.WATER);
+    if (!p) break;
+    const f = spawnCreature(p.x, p.y, "fish");
+    f.age = rand() * 0.36;   // 初始世代错峰（防同龄同死瞬灭）
+  }
+  const w1N = () => creatures.filter(c => c.type === "fish" && !c.dead).length;
+  let w1Min = w1N();
+  for (let i = 0; i < 25000; i++) {   // 2500s
+    world.time += STEP;
+    for (const c of creatures) if (c.type === "fish") c.update(STEP);
+    wildBreedTick();   // 生产口径逐帧调用（120s 窗口门在函数内）
+    if (i % 600 === 0) { const n = w1N(); if (n < w1Min) w1Min = n; }
+  }
+  const w1End = w1N();
+  assert(w1End >= 36 && w1End <= 122,
+    "场景W1：鱼群 2500s（4.6 代）种群维持（末值 " + w1End + " / 初值 60——历史旧版崩溃至 ≈0）");
+  assert(w1Min >= 36, "场景W1：全程采样低谷 ≥36（初值 ±40% 带宽，实测低谷 " + w1Min + "）");
+  SIM.SPECIES_CAP.fish = __w1Cap;
+  SPECIES_AGE.fish = __w1FishAge;
+}
+
+// ---- 场景 W2：山羊/鹿同口径短验（压缩时钟 1500s ≈ 2.8 代）----
+simInit(42);
+const __w2Goat = SPECIES_AGE.goat, __w2Deer = SPECIES_AGE.deer;
+const __w2GoatCap = SIM.SPECIES_CAP.goat, __w2DeerCap = SIM.SPECIES_CAP.deer;
+SPECIES_AGE.goat = { name: "羊", lifespan: 0.5, stages: [0.05, 0.15, 0.45] };
+SPECIES_AGE.deer = { name: "鹿", lifespan: 0.5, stages: [0.05, 0.15, 0.45] };
+SIM.SPECIES_CAP.goat = 60; SIM.SPECIES_CAP.deer = 30;   // cap 上调留出生余量（同 W1：初始即 cap 会钳死出生→同龄塌陷）
+const w2s = findSpot(world.store.x, world.store.y, 3, 14, T.GRASS);
+if (!w2s) { assert(true, "场景W2：无草地构造点（地理罕见，跳过）");
+  SIM.SPECIES_CAP.goat = __w2GoatCap; SIM.SPECIES_CAP.deer = __w2DeerCap; } else {
+  for (const c of creatures) if (!c.dead && c.type !== "goat" && c.type !== "deer") c.dead = true;   // 清场：隔离山/鹿与护栏计数
+  let w2Guard = 0;
+  while (creatures.filter(c => c.type === "goat" && !c.dead).length < 40 && w2Guard++ < 300) {
+    const p = findSpot(w2s.x, w2s.y, 0, 10, T.GRASS);
+    if (!p) break;
+    const g = spawnCreature(p.x, p.y, "goat");
+    g.age = rand() * 0.36;
+  }
+  w2Guard = 0;
+  while (creatures.filter(c => c.type === "deer" && !c.dead).length < 20 && w2Guard++ < 300) {
+    const p = findSpot(w2s.x, w2s.y, 0, 10, T.GRASS);
+    if (!p) break;
+    const d = spawnCreature(p.x, p.y, "deer");
+    d.age = rand() * 0.36;
+  }
+  for (const c of creatures) if (!c.dead && (c.type === "goat" || c.type === "deer") && c.age > 0.4) c.age = 0.2;
+  let w2gMin = Infinity, w2dMin = Infinity;
+  for (let i = 0; i < 15000; i++) {   // 1500s
+    world.time += STEP;
+    for (const c of creatures) if (!c.dead && (c.type === "goat" || c.type === "deer")) c.update(STEP);
+    wildBreedTick();
+    if (i % 300 === 0) {
+      const ng = creatures.filter(c => c.type === "goat" && !c.dead).length;
+      const nd = creatures.filter(c => c.type === "deer" && !c.dead).length;
+      if (ng < w2gMin) w2gMin = ng;
+      if (nd < w2dMin) w2dMin = nd;
+    }
+  }
+  const w2gEnd = creatures.filter(c => c.type === "goat" && !c.dead).length;
+  const w2dEnd = creatures.filter(c => c.type === "deer" && !c.dead).length;
+  assert(w2gEnd >= 24 && w2gMin >= 24,
+    "场景W2：山羊 1500s 维持（末 " + w2gEnd + " 谷 " + w2gMin + " / 初值 40 的 ±40% 带 ≥24）");
+  assert(w2dEnd >= 12 && w2dMin >= 12,
+    "场景W2：鹿 1500s 维持（末 " + w2dEnd + " 谷 " + w2dMin + " / 初值 20 的 ±40% 带 ≥12）");
+  SIM.SPECIES_CAP.goat = __w2GoatCap;
+  SIM.SPECIES_CAP.deer = __w2DeerCap;
+}
+SPECIES_AGE.goat = __w2Goat;
+SPECIES_AGE.deer = __w2Deer;
+
+// ---- 场景 W3：ECO_FLOOR 狩猎保护线——物种 ≤4 不立项新 HUNT/CAPTURE，>4 恢复 ----
+simInit(42);
+for (let i = 0; i < 3000; i++) simUpdate(STEP);   // 300s：任务队列消化到稳态
+const __w3Anchor = pickAnchor;
+pickAnchor = function () { return world.store; };   // 锚点钉死主仓（猎物必在 30 格搜索圈内）
+for (const c of creatures) if (!c.dead) c.dead = true;   // 清场：全部标死（搜索圈只剩受控鹿）
+// 死对象/无对象在办 HUNT/CAPTURE 立即确定性全摘——清场后任何在办狩猎都是污染源（对象已死
+// 或引用为空的僵尸任务会占住 tasksPending 门挡新立项，随机流漂移下摘除轮数不可控）
+for (const k of tasks.list) if (k.type === "HUNT" || k.type === "CAPTURE") k.done = true;
+const w3s = findSpot(world.store.x, world.store.y, 3, 8, T.GRASS);
+if (!w3s) { assert(true, "场景W3：无草地构造点（地理罕见，跳过）"); pickAnchor = __w3Anchor; } else {
+  for (let i = 0; i < 4; i++) spawnCreature(w3s.x, w3s.y, "deer");
+  world.settlements.forEach(function (s) { ensureStock(s).food = 0; });   // 粮食压力拉满（狩猎立项前置）
+  jointStockDirty();
+  for (let i = 0; i < 3; i++) plannerTick();   // 兜底清理：消化死猎物在办任务 + 温和立项尝试
+  const w3Before = tasks.list.filter(t => t.type === "HUNT" || t.type === "CAPTURE").length;
+  for (let i = 0; i < 20; i++) plannerTick();
+  const w3Mid = tasks.list.filter(t => t.type === "HUNT" || t.type === "CAPTURE").length;
+  assert(w3Mid === w3Before,
+    "场景W3：物种 4 ≤ ECO_FLOOR → 无新 HUNT/CAPTURE 立项（在办 " + w3Before + "，20 轮规划后 " + w3Mid + "）");
+  spawnCreature(w3s.x, w3s.y, "deer");   // 第 5 只：越线
+  for (let i = 0; i < 20; i++) plannerTick();
+  const w3After = tasks.list.filter(t => t.type === "HUNT" || t.type === "CAPTURE").length;
+  assert(w3After > w3Mid,
+    "场景W3：物种 5 > ECO_FLOOR → 狩猎立项恢复（" + w3Mid + " → " + w3After + "）");
+  pickAnchor = __w3Anchor;
+}
+
+// ---- 场景 W4：驯服计入繁衍池——全群驯服的马仍繁衍，新崽落野生（驯化不再掏空野生种群）----
+simInit(42);
+const __w4Horse = SPECIES_AGE.horse;
+SPECIES_AGE.horse = { name: "马", lifespan: 0.5, stages: [0.05, 0.15, 0.45] };
+const w4s = findSpot(world.store.x, world.store.y, 3, 12, T.GRASS);
+if (!w4s) { assert(true, "场景W4：无草地构造点（地理罕见，跳过）"); SPECIES_AGE.horse = __w4Horse; } else {
+  const w4Owner = agents.find(a => !a.dead);
+  const w4Horses = [];
+  for (let i = 0; i < 6; i++) {
+    const p = findSpot(w4s.x, w4s.y, 0, 6, T.GRASS) || w4s;
+    const h = spawnCreature(p.x, p.y, "horse");
+    h.tamed = true; h.owner = w4Owner; h.tameness = 3;
+    h.age = rand() * 0.4;
+    w4Horses.push(h);
+  }
+  assert(w4Horses.every(h => !h.isWild()),
+    "场景W4：全群驯服 → isWild 全假（旧版此口径下繁衍池为空、种群必死）");
+  for (let i = 0; i < 15000; i++) {   // 1500s：均衡出生应照常发生
+    world.time += STEP;
+    for (const h of w4Horses) h.update(STEP);
+    wildBreedTick();
+  }
+  const w4Total = creatures.filter(c => c.type === "horse" && !c.dead).length;
+  const w4Wild = creatures.filter(c => c.type === "horse" && !c.dead && c.isWild()).length;
+  assert(w4Total > 6, "场景W4：驯服马种群仍繁衍（6 → " + w4Total + "，tamed 计入繁衍池）");
+  assert(w4Wild > 0, "场景W4：新崽落野生（野生马 " + w4Wild + " 只）");
+  SPECIES_AGE.horse = __w4Horse;
+}
+
+// ---- 场景 W5：迁徙周期口径（v0.6.17 修正 4~6 游戏月 = 360~540s）----
+simInit(42);
+const w5s = findSpot(world.store.x, world.store.y, 3, 12, T.GRASS);
+if (w5s) {
+  const w5Deer = spawnCreature(w5s.x, w5s.y, "deer");
+  const w5T0 = world.time;
+  w5Deer.migNext = w5T0;      // 强制到期
+  w5Deer.tryMigrate();         // 重排在 50% 掷骰之前——未成行也完成重排
+  const w5Gap = w5Deer.migNext - w5T0;
+  assert(w5Gap >= SIM.MIGRATION_PERIOD_MIN - 0.01 && w5Gap <= SIM.MIGRATION_PERIOD_MAX + 0.01,
+    "场景W5：迁徙重排间隔 ∈ [360,540]s（实测 " + w5Gap.toFixed(1) + "s ≈ " + (w5Gap / 90).toFixed(1) + " 游戏月）");
+  assert(w5Deer.migNext > world.time, "场景W5：重排后 migNext 在未来（下个周期再掷）");
 }
 `;
 

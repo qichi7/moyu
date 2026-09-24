@@ -111,11 +111,12 @@ function localFacilities(list, settle) {
   return list.filter(o => ownerSettle(o.x, o.y) === settle);
 }
 
-// 新式设施（水井/酒坊/压榨坊/烘焙坊）立项时一律立在各城粮仓周边（半径 ≤8 格），
-// 因此检索不必扫全图：遍历粮仓、扫其 9 格邻域即可覆盖全域（世界对象不设 wells/breweries 平行数组，tile 即真相）
+// 新式设施（水井/酒坊/压榨坊/烘焙坊）立项时一律立在各城粮仓周边（expandSpot 半径 ≤8、
+// findSpot 兜底可到 10 格），因此检索不必扫全图：遍历粮仓、扫其 ±12 邻域即可覆盖全域
+//（v0.6.18 由 ±9 扩到 ±12：兜底选址落 9~10 格的凉亭也能被查重命中，否则同城会立出第二座）
 function facilityNear(cx, cy, type) {
-  for (let dy = -9; dy <= 9; dy++)
-    for (let dx = -9; dx <= 9; dx++)
+  for (let dy = -12; dy <= 12; dy++)
+    for (let dx = -12; dx <= 12; dx++)
       if (tileAt(cx + dx, cy + dy) === type) return { x: cx + dx, y: cy + dy };
   return null;
 }
@@ -187,7 +188,10 @@ function plannerTick() {
 
   // 2. 粮食压力 → 多渠道补粮：农田 / 浆果采集 / 狩猎 / 畜牧（城邦解锁）
   //    选址偏好：同聚落内农田连片（新田挨着已有农田 3 格内，田可紧贴成片），跨聚落不要求
-  if (foodFarms * 6 < pop + 8 && tasksPending("FARM", true).length < 2) {
+  //    v0.6.18 接缝修复：立项门 ×6<pop+8 比出生线 ×5≥pop+4 松一档，f≥5 时存在 (5f-4, 6f-8] 死带
+  //    （生育与补田同时关闭→人口/发展全局冻结，era2 永不可达，三 seed 探针实测卡 62 人 30000s）。
+  //    门改 ×5<pop+6：补田领先出生线一步，兑现本分支「田先于人到位」的既有注释承诺
+  if (foodFarms * 5 < pop + 6 && tasksPending("FARM", true).length < 2) {
     let s = null;
     for (const st of world.settlements) {
       if (!st.zones) continue;
@@ -263,10 +267,15 @@ function plannerTick() {
       }
     }
   }
-  // 2c. 狩猎：附近有野生牛羊 → 猎队（立项前确认动物存活，且未被捕获任务占用）
+  // 狩猎保护线（v0.6.17）：目标物种非圈养活体（驯服计入）≤ ECO_FLOOR → 该物种不立项
+  //（在办任务照常完成——只在候选过滤层拦截新立项，不动 worker 侧）
+  const ecoCount = {};
+  for (const c of creatures) if (!c.dead && !c.pasture) ecoCount[c.type] = (ecoCount[c.type] || 0) + 1;
+  const ecoOk = type => (ecoCount[type] || 0) > SIM.ECO_FLOOR;
+  // 2c. 狩猎：附近有野生牛羊 → 猎队（立项前确认动物存活，且未被捕获任务占用；物种过保护线不立项）
   if (totalFood() < 60 + pop * 3 && tasksPending("HUNT", true).length < 1) {
     const a = pickAnchor();
-    const wild = creatures.filter(c => c.isWild() && !c.dead && CREATURE_META[c.type].hunt &&
+    const wild = creatures.filter(c => c.isWild() && !c.dead && CREATURE_META[c.type].hunt && ecoOk(c.type) &&
       Math.abs(c.x - a.x) + Math.abs(c.y - a.y) < 30 && !tasks.list.some(k => k.creature === c && !k.done));
     if (wild.length) {
       const c = wild[0];
@@ -291,7 +300,7 @@ function plannerTick() {
       const pas = world.pastures[0];
       // v0.5.3：陆上牧场只圈陆生牲畜——水生动物（鱼群/海龟/鲸）不入陆栏（脚下不是水会搁浅），
       // 它们的圈养走 2d2 渔场路径（水上渔场/池塘 dest）
-      const cap = creatures.filter(c => c.isWild() && !c.dead &&
+      const cap = creatures.filter(c => c.isWild() && !c.dead && ecoOk(c.type) &&
         Math.hypot(c.x - pas.x, c.y - pas.y) < 40 && c.type !== "dog" &&
         CREATURE_META[c.type].habitat !== "water" && CREATURE_META[c.type].habitat !== "deep" &&
         creatures.filter(k => k.pasture && k.type === c.type).length < SIM.PASTURE_CAP);
@@ -308,7 +317,7 @@ function plannerTick() {
   if (tasksPending("CAPTURE", true).length < 1 &&
       creatures.filter(c => c.pasture && c.type === "fish" && !c.dead).length < SIM.PASTURE_CAP) {
     const a = pickAnchor();
-    const wild = creatures.filter(c => c.isWild() && !c.dead && c.type === "fish" &&
+    const wild = creatures.filter(c => c.isWild() && !c.dead && c.type === "fish" && ecoOk(c.type) &&
       !tasks.list.some(k => k.creature === c && !k.done));
     let placed = false;
     // ① 原地圈养
@@ -622,7 +631,10 @@ function plannerTick() {
   if (world.era >= 2 && world.time - _interBridgeCd > 30 && tasksPending("BRIDGE", true).length < 30) {
     _interBridgeCd = world.time;
     const named = world.islands.filter(o => o.name && o.r >= 3);
-    let best = null, bestD = Infinity;
+    // v0.6.18 接缝修复：旧逻辑只取「最近一对」尝试，最近对的首海格若被既有普通桥 6 格邻域拦下
+    // （nearAny BRIDGE 6），break 后其余合格对永远轮不到——岛际大桥被单对永久饿死（era 解锁后实测
+    // 12000s 仍 0 立项，诊断显示 5 对完全合格）。改为按距离升序逐对查首海格资格，首个合格者立项
+    const pairs = [];
     for (let i = 0; i < named.length; i++) for (let j = i + 1; j < named.length; j++) {
       const a = named[i], b = named[j];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
@@ -630,10 +642,10 @@ function plannerTick() {
       const kAB = a.x + "," + a.y + "|" + b.x + "," + b.y;
       const kBA = b.x + "," + b.y + "|" + a.x + "," + a.y;
       if (world.interBridges && (world.interBridges.has(kAB) || world.interBridges.has(kBA))) continue;
-      if (d < bestD) { bestD = d; best = [a, b, kAB]; }
+      pairs.push({ a, b, kAB, d });
     }
-    if (best) {
-      const [a, b, pairKey] = best;
+    pairs.sort((p, q) => p.d - q.d);
+    for (const { a, b, kAB } of pairs) {
       const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
       const dist = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
       // 沿 A→B 直线找第一个海上格：其前驱或任一邻格可站立（工人必可达）才立项首格，链式生长接力
@@ -644,11 +656,12 @@ function plannerTick() {
         const startOk = walkable(x - dx, y - dy) || neighborsOf(x, y).some(p => walkable(p.x, p.y));
         if (startOk && !tasks.list.some(tk => !tk.done && tk.x === x && tk.y === y) && !nearAny(x, y, [T.BRIDGE], 6)) {
           tasksAdd({ type: "BRIDGE", x, y, corridor: { dx, dy, remain: dist - k } });
-          world.interBridges.add(pairKey);
+          world.interBridges.add(kAB);
           logMsg(`工匠们着手在「${a.name}」与「${b.name}」之间修一条跨海大桥。`);
         }
-        break;   // 只看第一个海上格（不可达则 30s 后重查，等周边地形解锁）
+        break;   // 只看第一个海上格（不可达则 30s 后重查，等周边地形解锁）；本对被拦则顺延下一对
       }
+      if (world.interBridges.has(kAB)) break;   // 每周期至多立项一条
     }
   }
   // 2g. 浆果可持续：丛数低于人口需求（且有丛可采种）→ 培育新丛
@@ -769,8 +782,8 @@ function plannerTick() {
     }
   }
 
-  // 5. 疆土随人口生长：每增长约 25 人，规划署主动开辟一片新疆土（无人口上限）
-  if (pop >= (world.expansions + 1) * 20) {   // 每 20 人生长一次疆土
+  // 5. 疆土随人口生长：每增长 30 人，规划署主动开辟一片新疆土（无人口上限）
+  if (pop >= (world.expansions + 1) * SIM.EXPAND_EVERY) {   // 每 30 人生长一次疆土（v0.6.18：20→EXPAND_EVERY，与聚落升级线 [12,36,90] 配套）
     expand();
   }
 
@@ -967,7 +980,9 @@ function farmTick(dt) {
       if (was && !f.irrigated) logThrottled("一片农田失去了灌溉水源，收成停滞了。", 60);
     }
     if (!f.irrigated) continue;   // 缺水：停止生长（不倒退，等水来了继续）
-    f.grow += dt;
+    // 气候因子（v0.6.15）：雪原寒缓（×SNOW_FARM）、旱带干渴（×DROUGHT_FARM）；coffee 田同乘
+    const cl = climateAt(f.x, f.y);
+    f.grow += dt * (cl === "snow" ? SIM.CLIMATE.SNOW_FARM : cl === "drought" ? SIM.CLIMATE.DROUGHT_FARM : 1);
     // 咖啡田走独立成熟周期与产出：产咖啡豆（不产粮，不进粮食产能口径）
     if (f.grow >= (f.crop === "coffee" ? SIM.COFFEE_MATURITY : SIM.FARM_MATURITY)) {
       f.grow = 0;
@@ -982,6 +997,42 @@ function farmTick(dt) {
   }
 }
 
+// ---- 天象与天气（v0.6.14/15）：流星调度 + 台风生成/漂移（掷骰每 sim 秒一窗）----
+// 契约：world.meteor = null | { t0, dur }；world.storm = null | { x, y, dx, dy, born, life, r }
+let _skySec = -1;
+function weatherTick(dt) {
+  // 台风：逐帧漂移（0.5 格/秒），生命到点即消散（出界/靠岸不硬检）
+  if (world.storm) {
+    const st = world.storm;
+    if (world.time > st.born + st.life) { world.storm = null; logMsg("台风在海面上消散了。"); }
+    else { st.x += st.dx * 0.5 * dt; st.y += st.dy * 0.5 * dt; }
+  }
+  const sec = Math.floor(world.time);
+  if (sec === _skySec) return;   // 掷骰窗口：每 sim 秒一次
+  _skySec = sec;
+  // 流星：夜间偶现（上颗过期 → 清空并进入 2~4 游戏夜冷却；先到点先掷骰）
+  if (world.meteor && world.time > world.meteor.t0 + world.meteor.dur) {
+    world.meteor = null;
+    world.meteorNext = world.time + randRange(SIM.METEOR_GAP_MIN, SIM.METEOR_GAP_MAX);
+  }
+  if (!world.meteor && !isDaytime() && world.time >= (world.meteorNext || 0) && rand() < 0.02) {
+    world.meteor = { t0: world.time, dur: SIM.METEOR_DUR };
+  }
+  // 台风：偶起于主仓 40~90 格外的深海格（方向随机单位向量，寿命 60~120 秒）
+  if (!world.storm && rand() < SIM.TYPHOON_CHANCE) {
+    for (let i = 0; i < 30; i++) {
+      const a = rand() * Math.PI * 2, d = randRange(40, 90);
+      const x = Math.round(world.store.x + Math.cos(a) * d), y = Math.round(world.store.y + Math.sin(a) * d);
+      if (tileAt(x, y) !== T.DEEP) continue;
+      const ang = rand() * Math.PI * 2;
+      world.storm = { x: x + 0.5, y: y + 0.5, dx: Math.cos(ang), dy: Math.sin(ang),
+        born: world.time, life: randRange(SIM.TYPHOON_LIFE_MIN, SIM.TYPHOON_LIFE_MAX), r: SIM.TYPHOON_R };
+      logMsg("远处海面起了台风，浪头翻滚。");
+      break;
+    }
+  }
+}
+
 // ---- 模拟主步进 ----
 let _plannerCd = SIM.PLANNER_INTERVAL;
 let _lastFeast = -999;
@@ -992,6 +1043,7 @@ let _frontierCd = -999;
 function simUpdate(dt) {
   world.time += dt;
   world.timeOfDay = (world.time % SIM.DAY_LEN) / SIM.DAY_LEN;
+  weatherTick(dt);
 
   for (const a of agents) a.update(dt);
   for (const c of creatures) c.update(dt);

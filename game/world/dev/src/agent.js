@@ -65,6 +65,9 @@ let _agentIdSeq = 1;
 // 受困动物扫描缓存（decide 2.8 全局 1s 节流，见 decide）
 const _rescueScan = { t: -9, victim: null };
 
+// 主喜好 → 乐事键映射（joyProfile 保底与面板「最爱乐事」共用）：none 无映射即无保底
+const _HOBBY_JOY = { explore: "explore", homebody: "home", animal: "animal", fishing: "fish" };
+
 // 职业表与社会需求比例：探险家看探索欲、工匠看勤劳，其余随机
 const JOBS = {
   farmer:      { name: "农夫",   task: "FARM" },
@@ -89,28 +92,33 @@ const _HOBBY_ROLL = () => {
   return r < 0.22 ? "explore" : r < 0.44 ? "homebody" : r < 0.64 ? "animal" : r < 0.84 ? "fishing" : "none";
 };
 
-// ---- 心情与喜好快乐（冻结契约 v0.5.0）----
-// likedJoyOf：小人此刻是否在做「喜好匹配」的事——命中返回 1（每秒回 MOOD_LIKED_JOY，覆盖工作衰减），否则 0。
+// ---- 心情与喜好快乐（冻结契约 v0.5.0；v0.6.7 重构：返回命中的乐事键，配 joyProfile 分档强度）----
+// likedJoyOf：小人此刻是否在做「乐事匹配」的事——命中返回乐事键（"explore"/"fish"/"animal"/
+// "home"/"flower"/"climb"），否则 0；updateMood 按 joyProfile[键] 的倍率回心情。
 // 映射（用户口径逐字落地）：
 //   explore 向往远方 → 航海（voyage）/铺路搭桥（BRIDGE/FILL 工程）/自发探索远行
 //   animal  喜爱牲畜 → 捕获/建牧场任务；idle/walk 时 4 格内有圈养牲畜（牧羊）
 //   fishing 垂钓爱好者 → FISH 捕鱼任务
 //   homebody 恋家 → idle 时守在家里 2.5 格内
 //   none 随遇而安 → 无专属快乐，但心情衰减 ×0.8（看得开，在 updateMood 内实现）
+//   众乐乐（v0.6.7 新增，不限喜好）：idle/walk 时邻近花丛果树（赏花）或山崖（爬山）
 // 判定纯读 agent/creature 状态零副作用；creature.js 在拼接序中先于 agent.js，creatures 可直接引用
 function likedJoyOf(a) {
   if (a.hobby === "explore") {
-    if (a.state === "voyage" || a.exploring) return 1;
-    if (a.state === "work" && a.task && (a.task.type === "BRIDGE" || a.task.type === "FILL")) return 1;
+    if (a.state === "voyage" || a.exploring) return "explore";
+    if (a.state === "work" && a.task && (a.task.type === "BRIDGE" || a.task.type === "FILL")) return "explore";
   }
-  if (a.hobby === "fishing" && a.state === "work" && a.task && a.task.type === "FISH") return 1;
+  if (a.hobby === "fishing" && a.state === "work" && a.task && a.task.type === "FISH") return "fish";
   if (a.hobby === "animal") {
-    if (a.state === "work" && a.task && (a.task.type === "CAPTURE" || a.task.type === "PASTURE")) return 1;
+    if (a.state === "work" && a.task && (a.task.type === "CAPTURE" || a.task.type === "PASTURE")) return "animal";
     // 牧羊邻近判定走 1s 节流缓存（a.pastureNear，update 内扫描）——生物扩容后逐帧全表扫是性能热点
-    if ((a.state === "idle" || a.state === "walk") && a.pastureNear) return 1;
+    if ((a.state === "idle" || a.state === "walk") && a.pastureNear) return "animal";
   }
   if (a.hobby === "homebody" && a.home && (a.state === "idle" || a.state === "walk") &&
-      Math.hypot(a.home.x + 0.5 - a.x, a.home.y + 0.5 - a.y) < 2.5) return 1;
+      Math.hypot(a.home.x + 0.5 - a.x, a.home.y + 0.5 - a.y) < 2.5) return "home";
+  // 赏花/爬山邻近（1s 节流缓存 flowerNear/mountainNear，update 内扫描）：人人可享的乐事
+  if ((a.state === "idle" || a.state === "walk") && a.flowerNear) return "flower";
+  if ((a.state === "idle" || a.state === "walk") && a.mountainNear) return "climb";
   return 0;
 }
 
@@ -241,6 +249,16 @@ class Agent {
     this.cheerT = 0;                       // 尽兴而归：游乐园游玩后心情衰减放缓的剩余秒数
     this.drunkT = 0;                       // 醉酒剩余秒数（喝麦酒：移速放缓、饥饿衰减放缓）
     this.coffeeT = 0;                      // 咖啡因剩余秒数（喝咖啡：精力衰减放缓）
+    // 乐事强度画像（v0.6.7）：每项乐事的愉悦倍率（JOY_TIERS 0.4~1.8）——hash2 确定性生成，
+    // 不消耗 rand 流；主喜好键保底 JOY_HOBBY_MIN（none 无保底，衰减 ×0.8 的「看得开」语义不变）
+    this.joyProfile = {};
+    for (const k of SIM.JOY_KEYS) {
+      let tier = SIM.JOY_TIERS[(hash2(this.id, SIM.JOY_SALTS[k]) * 5) | 0];
+      if (k === _HOBBY_JOY[this.hobby]) tier = Math.max(tier, SIM.JOY_HOBBY_MIN);
+      this.joyProfile[k] = tier;
+    }
+    this.mount = null;                     // 坐骑（驯服马；creature.riddenBy 指回自己时坐标由本侧同步）
+    this.mountCd = 0;                      // 上马判定节流
     // 随身背包（冻结契约 v0.4.1）：10 个物理槽位装任意东西（slot = { item, n, haul? }，全空起步）
     this.pack = new Array(10).fill(null);
     this.face = "down";                    // 朝向：up/down/left/right（移动按实际位移更新，开工面向任务格）
@@ -265,9 +283,10 @@ class Agent {
     this.age = Math.min(SPECIES_AGE.human.lifespan, this.age + dt / (SIM.DAY_LEN * SIM.YEAR_DAYS));
 
     // 航海中：一切需求冻结（船上有补给），坐标由船携带。
-    // 例外——航海喜悦（v0.5.0）：向往远方的人出海是圆梦，心情照涨（必须在早退之前处理，否则远航心情永远冻结）
+    // 例外——航海喜悦（v0.5.0 起 explore 专属，v0.6.7 放开全民）：出海按各自探险乐事强度回甘
+    // （必须在早退之前处理，否则远航心情永远冻结；voyage 早退期间 likedJoyOf 不会被调，无双重计分）
     if (this.state === "voyage") {
-      if (this.hobby === "explore") this.mood = Math.min(100, this.mood + SIM.MOOD_LIKED_JOY * dt);
+      this.mood = Math.min(100, this.mood + SIM.MOOD_LIKED_JOY * (this.joyProfile.explore || 1) * dt);
       return;
     }
 
@@ -438,6 +457,19 @@ class Agent {
       logThrottled(`${this.name} 痊愈了，重新投入生活。`, 20);
     }
 
+    // ---- 骑乘（v0.6.10）：坐骑坐标同步与失效/下马解除（须在移动 step 计算前）----
+    // 马被骑时自主行为冻结（creature.js 侧），坐标由骑手携带；坐骑死亡/易主/未驯化，
+    // 或骑手离开 walk 态（骑乘只服务于赶路，decide 改道/到达转态在此集中解除）→ 下马
+    if (this.mount) {
+      const h = this.mount;
+      if (h.dead || h.riddenBy !== this || !h.tamed || h.owner !== this || this.state !== "walk") {
+        if (h.riddenBy === this) h.riddenBy = null;
+        this.mount = null;
+      } else {
+        h.x = this.x; h.y = this.y;
+      }
+    }
+
     // 需求演化：按状态系数衰减（"run" 判定与渲染同口径：探索冲刺/高速赶路/追猎 且 处于行走态）。
     // 状态系数表在 config.js 的 SIM.STATE_*；eat/drink 等缺省态按 idle 口径兜底
     const stKey = this.state === "walk" &&
@@ -454,16 +486,29 @@ class Agent {
     if (this.drunkT > 0) this.drunkT = Math.max(0, this.drunkT - dt);
     if (this.coffeeT > 0) this.coffeeT = Math.max(0, this.coffeeT - dt);
 
-    // 月光花光环 + 牧羊邻近扫描（1s 节流；夜晚花田夜游的浪漫与牧羊的快乐，见 updateMood/likedJoyOf）
+    // 月光花光环 + 赏花/爬山/牧羊邻近扫描（1s 节流；花田夜游/乐事/牧羊的快乐，见 updateMood/likedJoyOf）
     this.bloomCd = (this.bloomCd || 0) - dt;
     if (this.bloomCd <= 0) {
       this.bloomCd = 1;
       this.scanBloom();
+      this.scanFlower();
+      this.scanMountain();
       this.pastureNear = false;
       if (this.hobby === "animal") {
         for (const c of creatures) {
           if (!c.dead && c.pasture && Math.hypot(c.x - this.x, c.y - this.y) < 4) { this.pastureNear = true; break; }
         }
+      }
+      // 台风邻近（1s 节流缓存）：圈内的行人顶风跋涉，stepAlong 移速 ×TYPHOON_MAN
+      this.stormNear = !!(world.storm && Math.hypot(world.storm.x - this.x, world.storm.y - this.y) < SIM.TYPHOON_R);
+      // 上马判定（1s 节流，mountCd）：长途中（剩余路径 > RIDE_MOUNT_DIST）且身旁有自己
+      // 驯服的空载马 → 骑上赶路（零 rand 消耗；短途不骑，骑乘只服务于赶路）
+      if (this.mountCd > 0) this.mountCd -= 1;
+      else if (!this.mount && this.state === "walk" && this.path &&
+               (this.path.length - this.pi) > SIM.RIDE_MOUNT_DIST) {
+        const h = creatures.find(c => !c.dead && c.type === "horse" && c.tamed && c.owner === this &&
+          !c.riddenBy && Math.hypot(c.x - this.x, c.y - this.y) < SIM.RIDE_MOUNT_R);
+        if (h) { this.mount = h; h.riddenBy = this; h.x = this.x; h.y = this.y; this.mountCd = 1; }
       }
     }
 
@@ -497,7 +542,7 @@ class Agent {
             packTake(pk, alt, 1);
             this.thirst = Math.min(100, this.thirst + SIM.PACK_RESTORE[alt]);
             if (alt === "juice") this.energy = Math.min(100, this.energy + SIM.PACK_JUICE_ENERGY);
-            else if (alt === "beer") { this.drunkT = SIM.DRUNK_TIME; this.mood = Math.min(100, this.mood + SIM.MOOD_BEER); }
+            else if (alt === "beer") { this.drunkT = SIM.DRUNK_TIME; this.mood = Math.min(100, this.mood + SIM.MOOD_BEER * (this.joyProfile.drink || 1)); }
             else this.coffeeT = SIM.COFFEE_TIME;
           }
         }
@@ -535,7 +580,9 @@ class Agent {
             st[this.drinkRes] -= 1;
             this.thirst = Math.min(100, this.thirst + SIM.DRINK_RESTORE[this.drinkRes]);
             // 心情分档回复（v0.5.0）：酒最开心、果汁/咖啡其次、清水只是解渴
-            this.mood = Math.min(100, this.mood + (SIM["MOOD_" + this.drinkRes.toUpperCase()] || 0));
+            //（v0.6.7：麦酒按 joyProfile.drink 分档——千杯少与沾酒眠，果汁/咖啡/清水不分档）
+            this.mood = Math.min(100, this.mood + (SIM["MOOD_" + this.drinkRes.toUpperCase()] || 0) *
+              (this.drinkRes === "beer" ? (this.joyProfile.drink || 1) : 1));
             if (this.drinkRes === "beer") { this.drunkT = SIM.DRUNK_TIME; logThrottled(`${this.name} 畅饮了麦酒，脚步都有点飘了。`, 20); }
             else if (this.drinkRes === "coffee") { this.coffeeT = SIM.COFFEE_TIME; logThrottled(`${this.name} 畅饮了热咖啡，精神抖擞。`, 20); }
             else if (this.drinkRes === "juice") { this.energy = Math.min(100, this.energy + 10); logThrottled(`${this.name} 畅饮了鲜果汁。`, 20); }
@@ -590,6 +637,26 @@ class Agent {
     this.bloomNear = near;
   }
 
+  // 赏花/爬山邻近扫描（1s 节流，照 scanBloom 抄 7×7 圈 tileAt 判定）：v0.6.7 乐事画像的
+  // flower/climb 键在 idle/walk 邻近时被动加分（likedJoyOf 读 flowerNear/mountainNear）；
+  // T.BERRY/FRUIT/MOONBLOOM/MOUNTAIN/CLIFF 未接入时容错恒 false
+  _scanNear(tiles, key) {
+    const set = tiles.filter(v => v !== undefined);
+    if (!set.length) { this[key] = false; return; }
+    const bx = Math.round(this.x), by = Math.round(this.y);
+    let near = false;
+    for (let dy = -3; dy <= 3 && !near; dy++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        if (set.includes(tileAt(bx + dx, by + dy))) { near = true; break; }
+      }
+    }
+    this[key] = near;
+  }
+
+  scanFlower() { this._scanNear([T.BERRY, T.FRUIT, T.MOONBLOOM], "flowerNear"); }
+
+  scanMountain() { this._scanNear([T.MOUNTAIN, T.CLIFF], "mountainNear"); }
+
   // 最近娱乐设施（decide 2.95 用，结果缓存 2s 防高频扫描）：
   // 游乐园走 world.parks 注册表（免扫屏）；单格设施（凉亭/戏台/斗兽场）螺旋扫 24 格。
   // mood<50 时优先游乐园（大乐子），否则取最近的任意设施
@@ -622,6 +689,44 @@ class Agent {
     return best;
   }
 
+  // 最近乐事景点（decide 2.9 用，结果按 kind 分缓存 2s 防高频扫描；照 nearestFunSpot 的 24 格螺旋口径）：
+  // flower 找浆果丛/果树/月光花（本身可走，站上去即赏花），climb 找山/悬崖的邻近可走格（站山脚望山即爬山）；
+  // 目标 tile 未接入时容错返回 null（结果含 null 也缓存，避免连帧重扫）
+  nearestJoySpot(kind) {
+    const key = kind === "climb" ? "climbCache" : "flowerCache";
+    if (key in this && world.time - (this[key + "T"] || 0) < 2) return this[key];
+    this[key + "T"] = world.time;
+    const set = (kind === "climb" ? [T.MOUNTAIN, T.CLIFF] : [T.BERRY, T.FRUIT, T.MOONBLOOM])
+      .filter(v => v !== undefined);
+    if (!set.length) { this[key] = null; return null; }
+    const cx = Math.round(this.x), cy = Math.round(this.y);
+    const R = 24;
+    for (let r = 1; r <= R; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;   // 只扫当前圈（由近及远）
+          const x = cx + dx, y = cy + dy;
+          if (!set.includes(tileAt(x, y))) continue;
+          // 目标格本身可走就站目标格，不可走（山/悬崖）站邻近可走格
+          const stand = walkable(x, y) ? { x, y } : neighborsOf(x, y).find(p => walkable(p.x, p.y));
+          if (stand) { this[key] = stand; return stand; }
+        }
+      }
+    }
+    this[key] = null;
+    return null;
+  }
+
+  // 去乐事景点赏玩（decide 2.9 用）：走到花丛/山脚即到达（不新增 state），到达后 idle 驻留，
+  // 靠 update 的 1s 邻近扫描（flowerNear/mountainNear）经 likedJoyOf 被动回心情
+  goJoySpot(kind) {
+    const spot = this.nearestJoySpot(kind);
+    if (!spot || !this.goTo(spot.x, spot.y)) return false;
+    this.state = "walk";
+    this.onArrive = () => { this.state = "idle"; };
+    return true;
+  }
+
   // 心情演化（v0.5.0）：基准衰减 × 状态倍率（睡觉不衰减、改按 MOOD_SLEEP_REGEN 回复——
   // 睡一觉约 +30，是不花资源的慢通道自愈）；做喜好匹配的事 → 快乐回复；醉酒微醺持续回甘；
   // 月光花夜间光环；cheerT 余韵（游乐园尽兴而归）期间衰减 ×MOOD_CHEER_FACTOR
@@ -634,9 +739,13 @@ class Agent {
     let decay = SIM.MOOD_DECAY * stMul(SIM.STATE_MOOD) * (this.hobby === "none" ? 0.8 : 1);
     if (this.cheerT > 0) decay *= SIM.MOOD_CHEER_FACTOR || 0.35;
     this.mood -= decay * dt;
-    if (likedJoyOf(this) > 0) this.mood = Math.min(100, this.mood + SIM.MOOD_LIKED_JOY * dt);
+    // 乐事回甘（v0.6.7）：命中乐事按各自 joyProfile 强度倍率回（0.4~1.8 档，主喜好保底 1.4）
+    const jk = likedJoyOf(this);
+    if (jk) this.mood = Math.min(100, this.mood + SIM.MOOD_LIKED_JOY * (this.joyProfile[jk] || 1) * dt);
     if (this.drunkT > 0) this.mood = Math.min(100, this.mood + SIM.MOOD_DRUNK_JOY * dt);
     if (this.bloomNear && !isDaytime()) this.mood = Math.min(100, this.mood + 0.5 * dt);
+    // 流星夜（v0.6.14）：肉眼可见的划空乐事，缓慢回心情（病中无暇仰望；睡觉走上方早退路径天然排除）
+    if (world.meteor && !this.sick) this.mood = Math.min(100, this.mood + (SIM.METEOR_MOOD || 0) * dt);
     if (this.mood < 0) this.mood = 0;
   }
 
@@ -721,12 +830,29 @@ class Agent {
       }
     }
 
-    // 2.9 心情低落 → 找乐子（v0.5.0）：城库有酒/果汁就先去喝一杯——人不只为解渴而饮，也为开心。
-    //     指定偏好清单（beer>juice），城库无货则放弃（不拿白水糊弄）并冷却 JOY_CD 防连帧重试；
+    // 2.9 心情低落 → 找乐子（v0.5.0 喝一杯；v0.6.7 扩展）：按每人乐事强度加权随机挑去处——
+    //     喝酒（城库有酒/果汁才去，不拿白水糊弄）、赏花（就近花丛/果树）、爬山（就近山脚），
+    //     选中项落地失败（无货/无景点/不可达）依次回退其他候选，全落空冷却 JOY_CD 防连帧重试；
     //     抑郁者跳过（连开心都懒得找，只能靠睡觉与运气自愈）
     if (!this.depressed && this.mood < SIM.MOOD_SEEK &&
         this.hunger >= 30 && this.thirst >= 30 && world.time >= (this.joyUntil || 0)) {
-      if (!this.seekDrink(["beer", "juice"])) this.joyUntil = world.time + SIM.JOY_CD;
+      const cands = [
+        { w: this.joyProfile.drink || 1, act: () => this.seekDrink(["beer", "juice"]) },
+        { w: this.joyProfile.flower || 1, act: () => this.goJoySpot("flower") },
+        { w: this.joyProfile.climb || 1, act: () => this.goJoySpot("climb") },
+      ];
+      // 加权无放回抽样排出尝试顺序（decide 本就是随机路径，允许消耗 rand 流）
+      const order = [];
+      while (cands.length) {
+        let sum = 0;
+        for (const c of cands) sum += c.w;
+        let r = rand() * sum, i = 0;
+        for (; i < cands.length - 1; i++) { r -= cands[i].w; if (r < 0) break; }
+        order.push(cands.splice(i, 1)[0]);
+      }
+      let gone = false;
+      for (const c of order) { if (c.act()) { gone = true; break; } }
+      if (!gone) this.joyUntil = world.time + SIM.JOY_CD;
     }
 
     // 2.95 游玩（v0.5.0 娱乐链）：心情不满且附近有娱乐设施 → 去玩（凉亭/戏台/斗兽场/游乐园）。
@@ -1250,7 +1376,9 @@ class Agent {
     const gx = target.x + 0.5, gy = target.y + 0.5;
     const dx = gx - this.x, dy = gy - this.y;
     const dist = Math.hypot(dx, dy);
-    const step = this.speed * dt * (this.drunkT > 0 ? SIM.DRUNK_SPEED_FACTOR : 1);   // 醉酒移速放缓
+    const step = this.speed * dt * (this.drunkT > 0 ? SIM.DRUNK_SPEED_FACTOR : 1) *
+                 (this.mount ? SIM.RIDE_SPEED_FACTOR : 1) *
+                 (this.stormNear ? SIM.TYPHOON_MAN : 1);   // 醉酒放缓 / 骑马提速 / 台风中顶风跋涉（v0.6.15）
     if (dist <= step) {
       this.x = gx; this.y = gy;
       this.pi++;
@@ -1399,15 +1527,24 @@ function findEscapeSpot(sx, sy) {
 // 螺旋向外找最近的前沿格：可站立陆地且 4 邻含 VOID（探索者的目标点；只扫局部，成本受 maxR 约束）。
 // v0.5.0 性能：内联 4 邻判定（neighborsOf 每格分配数组是扫描热点），调用方另有 2s→8s 节流
 function findFrontier(cx, cy, maxR) {
+  // 逐圈周长直读（v0.6.15 性能收口）：与旧「整方格内圈选 + continue」的访问顺序逐位一致
+  //（上行 → 左右边 → 下行），但省掉每圈 (2r+1)² 的空转迭代——80 格无解扫描从 ~68 万次循环
+  // 降到 ~2.6 万次（此前单次可达 ~100ms，多探索者 8s 节流下仍构成长跑主要开销）
   for (let r = 1; r <= maxR; r++) {
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;   // 只扫当前圈
-        const x = cx + dx, y = cy + dy;
-        if (!walkable(x, y)) continue;
-        if (tileAt(x + 1, y) === T.VOID || tileAt(x - 1, y) === T.VOID ||
-            tileAt(x, y + 1) === T.VOID || tileAt(x, y - 1) === T.VOID) return { x, y };
-      }
+    const yT = cy - r, yB = cy + r, xL = cx - r, xR = cx + r;
+    for (let x = cx - r; x <= cx + r; x++) {
+      if (walkable(x, yT) && (tileAt(x + 1, yT) === T.VOID || tileAt(x - 1, yT) === T.VOID ||
+          tileAt(x, yT + 1) === T.VOID || tileAt(x, yT - 1) === T.VOID)) return { x, y: yT };
+    }
+    for (let y = cy - r + 1; y <= cy + r - 1; y++) {
+      if (walkable(xL, y) && (tileAt(xL + 1, y) === T.VOID || tileAt(xL - 1, y) === T.VOID ||
+          tileAt(xL, y + 1) === T.VOID || tileAt(xL, y - 1) === T.VOID)) return { x: xL, y };
+      if (walkable(xR, y) && (tileAt(xR + 1, y) === T.VOID || tileAt(xR - 1, y) === T.VOID ||
+          tileAt(xR, y + 1) === T.VOID || tileAt(xR, y - 1) === T.VOID)) return { x: xR, y };
+    }
+    for (let x = cx - r; x <= cx + r; x++) {
+      if (walkable(x, yB) && (tileAt(x + 1, yB) === T.VOID || tileAt(x - 1, yB) === T.VOID ||
+          tileAt(x, yB + 1) === T.VOID || tileAt(x, yB - 1) === T.VOID)) return { x, y: yB };
     }
   }
   return null;

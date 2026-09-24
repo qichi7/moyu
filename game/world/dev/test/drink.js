@@ -216,7 +216,9 @@ bd.stepToward({ x: bd.x, y: bd.y + 2 }, 0.4);
 assert(bd.face === "down", "生物向下移动 face=down");
 
 // ===== 10b. 野生四足兽游荡 face：update() 直接坐标变异路径也要更新朝向（不可恒为 down）=====
-const cow = creatures.find(c => !c.dead && c.type === "cow" && c.isWild());
+const cow = creatures.find(c => !c.dead && c.type === "cow" && c.isWild() && !c.carriedBy);
+  // 口径：排除搬运中的牛（carriedBy 非空时 update 首帧即被吸到搬运者坐标，可控 target 场景失效；
+  // v0.6.14 rand 漂移后捕获链恰在此刻有牛在途，属样本污染非机制回归）
 if (cow) {
   // 找一条远离小人的横向纯草地走廊（牛栖息地=grass）：无威胁触发逃跑、路径不被栖息地截断，保证确定性
   let runC = null;

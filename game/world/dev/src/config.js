@@ -1,6 +1,6 @@
 "use strict";
 // ============ 全局配置 ============
-const BUILD_ID = "v0.6.5";
+const BUILD_ID = "v0.6.18";
 
 // tile 类型
 const T = {
@@ -71,7 +71,8 @@ const SIM = {
   FARM_YIELD: 4,        // 每次成熟产粮
   BIRTH_CHECK: 0.05,    // 出生概率（规划器内按 4 秒窗口换算）
   // EXPAND_POP_CAP 已废弃：人口不设上限，扩张由住房饱和与选址失败驱动
-  SETTLEMENT_SCORE: [12, 60, 140],   // 聚落升级分数线：村庄/城镇/城市
+  SETTLEMENT_SCORE: [12, 36, 90],    // 聚落升级分数线：村庄/城镇/城市（v0.6.18 调低：era2 城镇 ≈ 8 房+6 田/辖区，人口 35~45 时主聚落自然达成；era3 城市 80~100 人可达）
+  EXPAND_EVERY: 30,                  // 疆土生长阈值（v0.6.18）：人口每增 30 人规划署开辟一片新疆土
   SETTLEMENT_RADIUS: 14,             // 聚落繁荣度统计半径
   BRIDGE_HP: 3,         // 架一座桥所需工时（比填海快得多）
   EXPLORE_CHANCE: 0.06, // 探索欲 1.0 的小人每次决策触发探索的概率
@@ -86,12 +87,16 @@ const SIM = {
   PASTURE_YIELD: 2,     // 每次产粮
   PASTURE_CAP: 6,       // 单牧场圈养上限
   BREED_CHANCE: 0.1,    // 繁殖概率（每 120 秒判定）
-  WILD_BREED_CAP: 60,   // 野生可猎动物总量上限
+  WILD_BREED_CAP: 120,  // 陆生系野生总量护栏（v0.6.17 降级为全局性能护栏：繁衍均衡化后每物种各有硬上限，此值只防陆生系实体总量失控，超护栏当 tick 跳过陆生繁衍）
+  WILD_BREED_SAFETY: 1.25,  // 均衡出生安全系数：期望出生 = 种群×tick÷寿命秒×此值（替换率 1.0 留 25% 爬坡余量，种群向物种上限缓慢恢复）
   TURTLE_CAP: 12,       // 海龟总量上限
   WHALE_CAP: 5,         // 鲸总量上限
   // ---- 物种扩充（v0.5.0）：新物种繁衍上限（珍稀物种种群小而延续；flier 飞行类不在此繁衍）----
+  // v0.6.17 补：goat/deer/boar/wolf（旧版无专键 → 无每物种上限，wildBreedTick 全局池随机选亲致种群失衡灭绝）
   SPECIES_CAP: { fish: 60, rabbit: 30, fox: 16, bear: 8, horse: 14, penguin: 20, crab: 26,
-    dolphin: 14, shark: 8, unicorn: 6, moonfish: 10, koi: 12, mermaid: 6 },
+    dolphin: 14, shark: 8, unicorn: 6, moonfish: 10, koi: 12, mermaid: 6,
+    goat: 40, deer: 20, boar: 16, wolf: 6 },
+  ECO_FLOOR: 4,         // 狩猎/捕获保护线（v0.6.17）：目标物种非圈养活体（驯服计入）≤ 此值 → 该物种不立项（在办任务照常完成）
   ANIMAL_STRAND_DEATH: 180, // 动物被困（脚下不再是栖息地）坚持时长（秒），超时死亡——给救援留足窗口
   // ---- 航海 ----
   SHIP_COST: 10,        // 造一艘远航船耗木材（联合库存）
@@ -146,6 +151,12 @@ const SIM = {
   MOOD_RECOVER_TIME: 20,
   MOOD_SICK_TIME: 300,        // 抑郁累计此时长 → 郁结成疾病倒（sickSource="mood"，走不出则不治）
   JOY_CD: 60,                 // 找乐子失败冷却（城库无酒时防连帧重试）
+  // ---- 乐事强度画像（v0.6.7）：每人每项乐事的愉悦倍率（hash2 确定性分档；调档值/盐值来这里）----
+  JOY_KEYS: ["flower", "drink", "explore", "climb", "fish", "animal", "home"],
+  JOY_NAMES: { flower: "赏花", drink: "喝酒", explore: "探险", climb: "爬山", fish: "垂钓", animal: "牧畜", home: "恋家" },
+  JOY_TIERS: [0.4, 0.7, 1.0, 1.4, 1.8],
+  JOY_SALTS: { flower: 7101, drink: 7103, explore: 7107, climb: 7111, fish: 7121, animal: 7127, home: 7133 },
+  JOY_HOBBY_MIN: 1.4,          // 主喜好键保底档
   // ---- 意外死亡（v0.6.0 config 化：每秒掷骰概率，测试可临时调 1 强制触发）----
   ACCIDENT: { cliff: 1 / 20000, shark: 1 / 15000, choke: 1 / 6000 },
   // ---- 娱乐链与游乐园（v0.5.0）----
@@ -159,11 +170,38 @@ const SIM = {
   PLAY_CD: 120,               // 玩过一次的冷却（防一直赖在游乐设施里）
   CHEER_TIME: 300,            // 尽兴而归：游乐园余韵时长（期间心情衰减 ×CHEER）
   MOOD_CHEER_FACTOR: 0.35,    // 余韵期间心情衰减倍率（「开心值很持久」的机制落点）
+  // ---- 骑乘（v0.6.10）：驯服马可骑，长途赶路提速 ----
+  RIDE_SPEED_FACTOR: 1.8,     // 骑乘移速倍率
+  RIDE_MOUNT_DIST: 8,         // 剩余路径超过此格数才找马代步（短途不值得）
+  RIDE_MOUNT_R: 1.5,          // 上马判定半径（格）
   // ---- 咖啡田 ----
   COFFEE_MATURITY: 90,        // 咖啡田成熟秒数（粮食田用 FARM_MATURITY）
   COFFEE_YIELD: 2,            // 咖啡田每次成熟产豆量
   // ---- 历法与年龄 ----
   YEAR_DAYS: 12,        // 1 昼夜 = 1 个月，12 昼夜 = 1 年（1 岁）
+  // ---- 动物迁徙（v0.6.14）：兽群/候鸟/鲸群按周期远行 ----
+  MIGRATION_PERIOD_MIN: 4 * 90,   // 迁徙间隔下限（sim 秒，4 游戏月；1 游戏月 = DAY_LEN = 90s；v0.6.17 修正旧版 ×30 的单位错误）
+  MIGRATION_PERIOD_MAX: 6 * 90,   // 迁徙间隔上限（sim 秒，6 游戏月）
+  MIGRATION_DIST_MIN: 30,     // 单次迁徙距离下限（格）
+  MIGRATION_DIST_MAX: 80,     // 单次迁徙距离上限（格）
+  // ---- 流星（v0.6.14）：夜间偶现，划空 3 秒；上颗之后 2~4 游戏夜冷却 ----
+  METEOR_GAP_MIN: 90 * 2,
+  METEOR_GAP_MAX: 90 * 4,
+  METEOR_DUR: 3,
+  METEOR_MOOD: 0.3,           // 目睹流星的心情回复/秒
+  // ---- 气候与洋流（v0.6.15 定居区北缘雪原/南缘旱带+顺逆流航速+台风；v0.6.16 边界噪声曲线化+连续强度场+浮冰船速）----
+  CLIMATE: { EDGE_INSET: 10, SNOW_FARM: 0.85, SNOW_BERRY: 0.8, DROUGHT_FARM: 0.8, DROUGHT_BERRY: 0.7,
+    WOBBLE: 20, FADE: 30,                    // 雪线/旱线噪声扰动幅度（±格）/ 强度场爬坡带宽（格）
+    ICE_P: 0.55, SNOW_P: 0.5, DRY_P: 0.5,    // 贴花概率基准：浮冰/积雪/干裂贴花出现概率（表现层按概率消费，非强度阈值）
+    ICE_SHIP: 0.85 },                        // 浮冰海面船速倍率（水面且 climateIntensity≥0.5）
+  CURRENT_SHIP_FAST: 1.15,    // 顺流航速倍率
+  CURRENT_SHIP_SLOW: 0.9,     // 逆流航速倍率
+  TYPHOON_R: 12,              // 台风影响半径（格）
+  TYPHOON_SHIP: 0.6,          // 台风圈内船速倍率
+  TYPHOON_MAN: 0.85,          // 台风圈内行人移速倍率
+  TYPHOON_CHANCE: 1 / 20000,  // 每秒窗口生成概率
+  TYPHOON_LIFE_MIN: 60,       // 台风寿命下限（秒）
+  TYPHOON_LIFE_MAX: 120,      // 台风寿命上限（秒）
 };
 
 // 高倍速模拟调度：decide 每帧预算（main.js 按倍速写入，agent 消费；headless 测试默认不限）

@@ -84,6 +84,9 @@ function makeCanvas() {
     beginPath() {}, moveTo() {}, lineTo() {}, arc() {}, ellipse() {}, closePath() {},
     quadraticCurveTo() {}, fill() {}, stroke() {}, fillText() {},
     measureText: t => ({ width: String(t).length * 7 }),
+    // v0.6.15 台风暗圈用径向渐变：stub 返回空梯度（fillStyle 置入后 parseColor→null，fillRect 自然跳过）
+    createRadialGradient() { return { addColorStop() {} }; },
+    createLinearGradient() { return { addColorStop() {} }; },
   });
   return cv;
 }
@@ -108,6 +111,11 @@ const sandbox = {
   },
   __freshCtx() { lastCv = makeCanvas(); lastCv.width = 1280; lastCv.height = 800; return lastCv.getContext(); },
   __statsLast() { return sandbox.sprStats(lastCv); },
+  __keyLast() {   // 整帧缓冲指纹（v0.6.11 双帧对比用；__bufKey 在 vm 内定义，此处供其读 lastCv）
+    let s = ""; const b = lastCv._buf;
+    for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+    return s;
+  },
   __mainCv: mainCv,
   __greenPx() {
     let n = 0;
@@ -342,6 +350,180 @@ try {
   vm.runInContext("drawAt(6, 0, 0, true)", ctx);
   assert(true, "放大档（zoom 6）执行无异常");
 } catch (e) { assert(false, "放大档抛异常: " + e.message); }
+
+// ---- 4. v0.6.10 骑手 sprite 与骑乘渲染分支 + v0.6.6 娱乐建筑草底分支 ----
+assert(vm.runInContext(`
+  (() => {
+    const r0 = sprStats(riderSprite(0)), r1 = sprStats(riderSprite(1));
+    return r0.opaque >= 40 && r0.colors >= 3 && r1.opaque >= 40 && r1.colors >= 3;
+  })()
+`, ctx), "riderSprite 两帧（16×24 骑手+马）全部非空（≥40px）");
+assert(vm.runInContext(`__differs(riderSprite(0), riderSprite(1))`, ctx),
+  "riderSprite 两帧逐像素不同（马步对角相位 + 骑手 1px 起伏）");
+try {
+  vm.runInContext(`
+    (() => {
+      const a0 = agents.find(a => !a.dead);
+      const h = spawnCreature(Math.round(a0.x), Math.round(a0.y), "horse");
+      h.tamed = true; h.owner = a0; h.riddenBy = a0; a0.mount = h;
+      a0.face = "right";
+      drawAt(4, a0.x, a0.y, true);   // 正常路径：riderSprite 替代分层
+      a0.face = "left";
+      drawAt(4, a0.x, a0.y, true);   // 镜像路径：translate+scale(-1,1)
+      a0.mount = null; h.riddenBy = null;
+    })()
+  `, ctx);
+  assert(true, "骑乘渲染分支（含 left 镜像回退路径）执行无异常");
+} catch (e) { assert(false, "骑乘渲染分支抛异常: " + e.message); }
+try {
+  vm.runInContext(`
+    (() => {
+      const a0 = agents.find(a => !a.dead);
+      const bx = Math.round(a0.x) + 1, by = Math.round(a0.y);
+      setTile(bx, by, T.PAVILION);   // 娱乐建筑分支：v0.6.6 草底打底 + buildingSprite 叠加
+      drawAt(6, bx + 0.5, by + 0.5, true);
+    })()
+  `, ctx);
+  assert(true, "娱乐建筑渲染分支（tileSprite 草底打底 + buildingSprite 叠加）执行无异常");
+} catch (e) { assert(false, "娱乐建筑渲染分支抛异常: " + e.message); }
+
+// ---- 4b. v0.6.11 水上园区设施底图走水色（结构断言）：注册假 water park 驱动 drawScene ----
+// 原理：同一静止世界连续两帧（render.js 无 rand()，drawScene 确定性），仅 world.parks 的
+// water 标记不同 → 帧差异只能来自该格底图（tileSprite 草底 ↔ waterSprite 水色底）；草底像素
+// 绿主导、水底像素蓝主导，故蓝像素净增 + 指纹不同即可证明底图走水色（buildingSprite 叠加不变）
+const waterParkRes = vm.runInContext(`
+  (() => {
+    let tx = -1, ty = -1;
+    outer:
+    for (let r = 3; r <= 90; r++) {
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const x = world.store.x + dx, y = world.store.y + dy;
+        if (tileAt(x, y) !== T.GRASS) continue;
+        if (world.parks.some(p => x >= p.x0 - 1 && x <= p.x1 + 1 && y >= p.y0 - 1 && y <= p.y1 + 1)) continue;
+        if (tasks.list.some(k => !k.done && Math.abs(k.x - x) + Math.abs(k.y - y) < 3)) continue;
+        tx = x; ty = y; break outer;
+      }
+    }
+    if (tx < 0) return { skip: "找不到无园区干扰的纯草地格（地理罕见）" };
+    setTile(tx, ty, T.PAVILION);
+    drawAt(6, tx + 0.5, ty + 0.5, true);
+    const grassKey = __keyLast(), grassBlue = __bluePx();
+    world.parks.push({ x: tx, y: ty, x0: tx, y0: ty, x1: tx, y1: ty, water: true });
+    drawAt(6, tx + 0.5, ty + 0.5, true);
+    const waterKey = __keyLast(), waterBlue = __bluePx();
+    world.parks.pop();
+    setTile(tx, ty, T.GRASS);
+    return { tx, ty, diff: grassKey !== waterKey, dBlue: waterBlue - grassBlue };
+  })()
+`, ctx);
+if (waterParkRes.skip) {
+  console.log("SKIP", waterParkRes.skip + "，水上园区水色底人工验收");
+} else {
+  assert(waterParkRes.diff, `水上园区设施底图与草底逐帧不同（假 water park @${waterParkRes.tx},${waterParkRes.ty}）`);
+  assert(waterParkRes.dBlue > 0, `水上园区设施底图走水色：水色帧蓝像素净增 ${waterParkRes.dBlue}（v0.6.11）`);
+}
+
+// ---- 5. v0.6.14/15 天象层（结构断言）：注入 meteor/storm 驱动 drawScene 不抛错且天象绘制调用落地 ----
+// 探针口径：stub 的 stroke()/fill() 不光栅化（指纹法对矢量层失明），故用方法调用计数差分——
+// 同一静止世界两帧仅天象态不同，计数差只能来自 meteor/storm 分支（拖尾 stroke/头部 arc/台风 grad+弧扇）
+const skyRes = vm.runInContext(`
+  (() => {
+    const probe = (tod) => {
+      camera.zoom = 1.6; camera.x = world.store.x; camera.y = world.store.y;
+      const c = __freshCtx();
+      const counts = { stroke: 0, fill: 0, arc: 0, grad: 0 };
+      const wrapped = new Proxy(c, {
+        get(t, k) {
+          if (k === "stroke") return (...a) => { counts.stroke++; return t.stroke(...a); };
+          if (k === "fill") return (...a) => { counts.fill++; return t.fill(...a); };
+          if (k === "arc") return (...a) => { counts.arc++; return t.arc(...a); };
+          if (k === "createRadialGradient") return (...a) => { counts.grad++; return t.createRadialGradient(...a); };
+          const v = t[k];
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+      drawScene(wrapped, 1280, 800, null, null, tod, 1.234);
+      return counts;
+    };
+    const savedMeteor = world.meteor, savedStorm = world.storm;
+    const out = { threw: false };
+    try {
+      const base = probe(0.9);   // 夜景（tod 0.9 > NIGHT_START 0.82 → night>0.15，流星可见窗）
+      world.meteor = { t0: world.time - 1, dur: 3 };   // k=1/3 落在划空窗内（hash2(t0,911) 轨迹恒定）
+      const m = probe(0.9);
+      world.meteor = savedMeteor;
+      world.storm = { x: world.store.x, y: world.store.y, dx: 0.6, dy: 0.8, born: world.time - 50, life: 1000, r: 12 };
+      const s = probe(0.9);
+      world.storm = savedStorm;
+      out.meteorDelta = { stroke: m.stroke - base.stroke, arc: m.arc - base.arc, fill: m.fill - base.fill };
+      out.stormDelta = { stroke: s.stroke - base.stroke, arc: s.arc - base.arc, grad: s.grad - base.grad };
+    } catch (e) { out.threw = true; out.err = e.message; world.meteor = savedMeteor; world.storm = savedStorm; }
+    return out;
+  })()
+`, ctx);
+if (skyRes.threw) {
+  assert(false, "天象层 drawScene 抛异常: " + skyRes.err);
+} else {
+  assert(skyRes.meteorDelta.stroke >= 1 && skyRes.meteorDelta.arc >= 2 && skyRes.meteorDelta.fill >= 2,
+    "天象层：world.meteor 驱动流星拖尾（stroke +" + skyRes.meteorDelta.stroke + "）与头部光点（arc +" +
+    skyRes.meteorDelta.arc + " / fill +" + skyRes.meteorDelta.fill + "）且 drawScene 无异常（v0.6.14）");
+  assert(skyRes.stormDelta.grad >= 1 && skyRes.stormDelta.arc >= 3 && skyRes.stormDelta.stroke >= 1,
+    "天象层：world.storm 驱动台风暗圈（grad +" + skyRes.stormDelta.grad + "）三层螺旋弧扇（arc +" +
+    skyRes.stormDelta.arc + "）与雨丝（stroke +" + skyRes.stormDelta.stroke + "）（v0.6.15）");
+}
+// ---- 5b. 气候贴花（v0.6.16 结构断言）：整格 tint 已删，气候视觉 = 强度场驱动的四类 sticker + 粒子带 ----
+// 探针口径：spy climateIntensity（强度场 0 / 0.5 / 1 三档）+ climateAt（恒 snow）→
+// ① 强度 1 帧与 0 帧指纹不同（贴花+飘雪粒子生效）；② 0.5 帧与两端皆不同（贴花概率随强度缩放）；
+// ③ 强度 0 时无论 climateAt 返回什么都不画（守卫：无强度即无气候残留——旧整格 tint 已根除的回归证明）
+const climRes = vm.runInContext(`
+  (() => {
+    const drawDay = () => {
+      camera.zoom = 1.6; camera.x = world.store.x; camera.y = world.store.y;
+      const c = __freshCtx();
+      drawScene(c, 1280, 800, null, null, 0.5, 1.234);
+      return __keyLast();
+    };
+    let calls = 0;
+    const oAt = climateAt, oIt = climateIntensity;
+    climateAt = function (x, y) { return "snow"; };
+    climateIntensity = function (x, y) { calls++; return 0; };
+    const off = drawDay();
+    const callsOff = calls; calls = 0;
+    climateIntensity = function (x, y) { calls++; return 0.5; };
+    const half = drawDay();
+    climateIntensity = function (x, y) { calls++; return 1; };
+    const full = drawDay();
+    const callsFull = calls; calls = 0;
+    climateIntensity = oIt; climateAt = oAt;
+    return { callsOff, callsFull, offVsFull: off !== full, halfVsOff: half !== off, halfVsFull: half !== full };
+  })()
+`, ctx);
+assert(climRes.offVsFull && climRes.callsFull > 0,
+  "气候贴花：强度场 0→1 整帧指纹变化（浮冰/积雪/雪帽贴花 + 飘雪粒子生效，强度场调用 " +
+  climRes.callsFull + " 次；v0.6.16 整格 tint 已删，视觉全走贴花）");
+assert(climRes.halfVsOff && climRes.halfVsFull,
+  "气候贴花：强度 0.5 帧与 0/1 两端皆不同（贴花密度随强度场线性缩放，hash 概率掷骰生效）");
+assert(climRes.callsOff > 0,
+  "气候贴花：强度 0 时逐候选格仍询强度场（门控在 climateItOf，无气候时逐格短路不画）");
+
+// ---- 5c. 四类气候贴花 sprite（v0.6.16）：非空 + 3 变体互异 ----
+assert(vm.runInContext(`
+  [0,1,2].every(v => sprStats(iceSprite(v)).opaque > 0) &&
+  new Set([0,1,2].map(v => __bufKey(iceSprite(v)))).size === 3
+`, ctx), "贴花：浮冰 iceSprite 3 变体非空且互异（v2 为 v0 镜像）");
+assert(vm.runInContext(`
+  [0,1,2].every(v => sprStats(snowPatchSprite(v)).opaque > 0) &&
+  new Set([0,1,2].map(v => __bufKey(snowPatchSprite(v)))).size === 3
+`, ctx), "贴花：积雪斑 snowPatchSprite 3 变体非空且互异");
+assert(vm.runInContext(`
+  [0,1,2].every(v => sprStats(dryPatchSprite(v)).opaque > 0) &&
+  new Set([0,1,2].map(v => __bufKey(dryPatchSprite(v)))).size === 3
+`, ctx), "贴花：枯草斑 dryPatchSprite 3 变体非空且互异");
+assert(vm.runInContext(`
+  [0,1,2].every(v => sprStats(snowCapSprite(v)).opaque > 0) &&
+  new Set([0,1,2].map(v => __bufKey(snowCapSprite(v)))).size === 3
+`, ctx), "贴花：山树雪帽 snowCapSprite 3 变体非空且互异");
 
 console.log(failed ? "\n== 渲染冒烟存在失败 ==" : "\n== 渲染冒烟全部通过 ==");
 process.exitCode = failed ? 1 : 0;

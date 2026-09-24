@@ -1,6 +1,6 @@
 {
   "name": "tiny-world",
-  "version": "0.6.5",
+  "version": "0.6.18",
   "private": true,
   "scripts": {
     "build": "node build.js",

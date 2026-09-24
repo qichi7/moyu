@@ -1119,6 +1119,45 @@ function bakeUnicorn() {
   for (const lx of [4, 8, 13, 17]) rectF(g, lx, 11, 1.6, 5, "#d8d0e4");
   return outlineSprite(cv, "#8a80a0");
 }
+
+// v0.6.10：骑手 sprite（马 + 背上骑手，侧视 16×24 底行锚定；left 由渲染层镜像、up/down 复用 side——与船内划手同口径）
+function bakeRiderSide(frame) {
+  const { cv, g } = sprCtx(16, 24);
+  const bob = frame === 1 ? 1 : 0;                       // 骑手随步伐 1px 起伏
+  fillEllipseF(g, 1.5, 15.5, 1.8, 2.4, "#4a3220");       // 尾
+  // 四腿对角相位交换（gallop 两帧）：[x, 蹄底y]，近侧踏底行、远侧抬起 1px
+  const legs = frame === 0
+    ? [[12, 23], [14, 22], [4, 23], [2, 22]]             // 伸展：前腿前伸、后腿后蹬
+    : [[10, 23], [12, 22], [5, 23], [3, 22]];            // 收拢：换相
+  for (const [lx, hy] of legs) {
+    rectF(g, lx, 18, 1.4, hy - 18, shadeHex("#8a6238", 0.85));
+    pxF(g, lx, hy, "#2a1a10");                           // 蹄
+  }
+  fillEllipseF(g, 7, 16.5, 5.5, 3.1, "#8a6238");         // 躯干（配色对齐 QUAD_VIEW.horse）
+  rectF(g, 10, 12, 2, 5, "#8a6238");                     // 颈
+  rectF(g, 11, 9, 4, 3, "#8a6238");                      // 头
+  rectF(g, 14, 10, 2, 1, "#6a4a28");                     // 吻
+  pxF(g, 12, 9, "#111111");                              // 眼
+  rectF(g, 10, 8, 1, 4, "#4a3220");                      // 鬃毛
+  // —— 骑手（坐姿前倾，随 bob 整体 1px 起伏）——
+  rectF(g, 6, 11.5 + bob, 4, 1.6, "#4a3520");            // 臀/大腿贴背前伸（裤）
+  rectF(g, 9, 13 + bob, 1.5, 3.5, "#4a3520");            // 小腿下垂
+  pxF(g, 9, 16 + bob, "#241a10");                        // 靴
+  rectF(g, 6.5, 6.5 + bob, 2.5, 5.5, "#b0554a");         // 躯干前倾（衣）
+  pxF(g, 9, 7 + bob, "#b0554a");                         // 前倾肩
+  pxF(g, 10, 8 + bob, "#d9a878");                        // 手（伸向马首）
+  pxF(g, 11, 8 + bob, "#4a3220");                        // 缰绳 1px 连到马首
+  rectF(g, 8, 4 + bob, 2, 2, "#d9a878");                 // 头（肤）
+  rectF(g, 8, 3 + bob, 2, 1, "#3a2416");                 // 发顶（深色）
+  pxF(g, 8, 5 + bob, "#3a2416");                         // 发后
+  pxF(g, 9, 4 + bob, "#111111");                         // 眼
+  return outlineSprite(cv, "#2a1a10");
+}
+// 契约 API（S5 → 渲染层消费）：frame∈{0,1} 马步腿两帧；缓存键 rider{frame}
+function riderSprite(frame) {
+  const f = frame === 1 ? 1 : 0;
+  return sprGet(`rider${f}`, () => bakeRiderSide(f));
+}
 function bakePenguin() {
   const { cv, g } = sprCtx(11, 13);
   fillEllipseF(g, 5, 7.5, 3.6, 4.8, "#2c3440");          // 直立身体
@@ -1619,6 +1658,102 @@ function ditherSprite(dir) { // 沙滩格靠草一侧撒上草色碎点（dir = 
       const y = dir === 0 ? off : dir === 1 ? 15 - off : t;
       pxF(g, x, y, "#5e8c4f");
     }
+    return cv;
+  });
+}
+
+// ============================================================
+// 气候要素贴花（v0.6.16）：取代整格 tint——浮冰/积雪斑/雪帽/枯草斑四类 sticker。
+// 透明底、惰性烘焙、每类 3 个 hash 变体；render.js 按强度场概率撒点
+// （深处浓密、交界犬牙稀疏）。固定调色板参照 foam/dither 先例，shade 只喂 hex。
+// ============================================================
+const ICE_SHAPES = [
+  [   // 浮冰 v0：圆棱冰盘，左上受光白、右下厚度缘，斜向裂纹
+    "....WWWWW.....",
+    "..WWWWWWWWB...",
+    ".WWWWWWWCWWD..",
+    ".WWWWWWCCWWD..",
+    "WWWWWWCWWWWWD.",
+    "WWWWWCWWWWWWD.",
+    ".WWWCCWWWWWDD.",
+    "..BBWCWWWDDDD.",
+    "...BBCBBDDDD..",
+    ".....DDDDD....",
+  ],
+  [   // 浮冰 v1：狭长碎冰排，反斜裂纹
+    "...WWWWW......",
+    ".WWWWWWWWWD...",
+    ".WCWWWWWWWWD..",
+    "WWCWWWWWWWWWD.",
+    ".WCWWWWWWWWDD.",
+    ".BWCWWWWWWWDD.",
+    "..BCWWWWWWDDD.",
+    "...BBWCWWDDDD.",
+    "....BBCCBDDD..",
+    "......DDDD....",
+  ],
+];
+const ICE_PAL = { W: "#f2f8fd", B: "#cfe4f2", D: "#a9c9de", C: "#7fa8c4" };
+function iceSprite(v) {   // 浮冰：水面不规则冰块（v2 = v0 镜像），透明底
+  return sprGet(`ice${v}`, () => {
+    const { cv, g } = sprCtx(SPR, SPR);
+    const rows = v === 2 ? mirrorRows(ICE_SHAPES[0]) : ICE_SHAPES[v % 2];
+    stampArt(g, rows, ICE_PAL, 1, 1, 2);
+    return cv;
+  });
+}
+
+function snowPatchSprite(v) {   // 草地积雪斑：白斑 + 淡蓝底影 + 露草点
+  return sprGet(`sp${v}`, () => {
+    const { cv, g } = sprCtx(SPR, SPR);
+    const P = [[6.4, 3.4, 7.5, 7.5], [5.6, 4.1, 8, 7], [6.8, 3.1, 8, 8.5]][v % 3];
+    fillEllipseF(g, P[2], P[3] + 1.2, P[0], P[1], "#c9dcea");                                  // 淡蓝底影
+    fillEllipseF(g, P[2], P[3], P[0], P[1], "#eef5fb");                                        // 积雪斑
+    fillEllipseF(g, P[2] - P[0] * 0.3, P[3] - P[1] * 0.35, P[0] * 0.5, P[1] * 0.45, "#fbfdff");// 受光高光
+    for (let i = 0; i < 3; i++) {   // 斑缘露草 2~3 点（草尖顶破雪层）
+      const ang = hash2(v * 17 + i * 31, v * 29 + i * 7) * 6.283;
+      pxF(g, Math.round(P[2] + Math.cos(ang) * P[0] * (0.72 + hash2(v + i, i * 13) * 0.36)),
+               Math.round(P[3] + Math.sin(ang) * P[1] * (0.72 + hash2(i * 5, v + i) * 0.36)),
+          i === 2 ? "#4d7842" : "#5e8c4f");
+    }
+    pxF(g, Math.round(P[2] + (hash2(v, 99) - 0.5) * P[0]), Math.round(P[3] + (hash2(99, v) - 0.5) * P[1]), "#3f6838");
+    return cv;
+  });
+}
+
+function dryPatchSprite(v) {    // 枯草斑：枯黄斑 + 裸土点 + 干裂纹 + 枯茎
+  return sprGet(`dp${v}`, () => {
+    const { cv, g } = sprCtx(SPR, SPR);
+    const P = [[6.2, 3.6, 8, 7.5], [5.4, 4.2, 7.5, 8], [6.6, 3.2, 8.5, 7]][v % 3];
+    fillEllipseF(g, P[2], P[3] + 1, P[0], P[1], shade("#a08a3e", 0.85));                       // 落影
+    fillEllipseF(g, P[2], P[3], P[0], P[1], "#c8ae55");                                        // 枯黄斑
+    fillEllipseF(g, P[2] - P[0] * 0.25, P[3] - P[1] * 0.3, P[0] * 0.45, P[1] * 0.4, "#d8c06a");// 亮芯
+    for (let i = 0; i < 3; i++) {   // 裸土点
+      pxF(g, Math.round(P[2] + (hash2(i * 3, v * 11 + i) - 0.5) * 1.6 * P[0]),
+               Math.round(P[3] + (hash2(v * 13 + i * 41, v * 7 + i * 17) - 0.5) * 1.6 * P[1]),
+          i === 1 ? "#8a6b46" : "#9a7b52");
+    }
+    const cx2 = Math.round(P[2] - P[0] * 0.4), cy2 = Math.round(P[3]);
+    rectF(g, cx2, cy2, 3, 1, "#7c6438");                                                       // 干裂纹（两段折线）
+    pxF(g, cx2 + 3, cy2 - 1, "#7c6438");
+    const dx2 = Math.round(P[2] + P[0] * 0.2), dy2 = Math.round(P[3] + P[1] * 0.4);
+    pxF(g, dx2, dy2, "#7c6438"); pxF(g, dx2 + 1, dy2 + 1, "#7c6438"); pxF(g, dx2 + 2, dy2, "#7c6438");
+    const sx2 = Math.round(P[2] + (hash2(v, 57) - 0.5) * P[0]);                                // 枯茎 2 根
+    rectF(g, sx2, Math.round(P[3] - P[1] * 0.6), 1, 3, "#a08a3e");
+    rectF(g, sx2 + 3, Math.round(P[3] - P[1] * 0.3), 1, 3, "#93803a");
+    return cv;
+  });
+}
+
+const CAP_SHAPES = [
+  ["...WWWWWW...", ".WWWWWWWWWW.", "WWWWWWWWWWWW", "BBBWWBBBWWBB"],
+  ["..WWWWWWWW..", ".WWWWWWWWWW.", "WWWWWWWWWWWW", "BWWBBWWBBWWB"],
+  [".WWWWWWWWW..", "WWWWWWWWWWWW", "WWWWWWWWWWWW", "WWBBBWWBBBWW"],
+];
+function snowCapSprite(v) {     // 雪帽：山脊/树顶白帽（上白下沿淡蓝锯齿雪线）
+  return sprGet(`cap${v}`, () => {
+    const { cv, g } = sprCtx(SPR, SPR);
+    stampArt(g, CAP_SHAPES[v % 3], { W: "#f4f9fd", B: "#c9dcea" }, 1, 2, 5);
     return cv;
   });
 }

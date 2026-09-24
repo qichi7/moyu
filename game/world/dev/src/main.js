@@ -400,7 +400,7 @@
     infoBody.innerHTML = `<div class="ip-title">${title}</div>${html}`;
     infoPanel.classList.remove("hidden");
     infoPanel.style.left = Math.min(CW - 230, px + 14) + "px";
-    infoPanel.style.top = Math.max(48, Math.min(CH - 160, py - 20)) + "px";
+    infoPanel.style.top = Math.max(70, Math.min(CH - 160, py - 20)) + "px";
     syncFollowBtn();   // 面板打开时同步跟随按钮（否则死亡清理等残留的 display:none 会带到下一个面板）
   }
 
@@ -530,6 +530,7 @@
       a.depressed ? "抑郁" : "",
       (a.cheerT || 0) > 0 ? "尽兴而归" : "",
       a.rescuing && a.rescuing.carriedBy === a ? (CREATURE_META[a.rescuing.type] ? "搬运" + CREATURE_META[a.rescuing.type].name : "搬运动物") : "",
+      a.mount ? "骑乘中" : "",   // v0.6.10：骑着驯服马赶路（mount 未初始化时 falsy 容错）
     ].filter(Boolean);
     // 四维状态条（v0.5.2 简化：2×2 紧凑网格，一行顶四行）；mood/thirst 未接入时 falsy 容错隐藏
     const bar = (label, val, color) =>
@@ -542,13 +543,23 @@
       `</div>`;
     // 性格合并行：勤劳 · 喜好（探索欲档并入喜好语义——向往远方即探索欲高的直观表达）
     const traits = [diligenceTier(a.diligence), HOBBY_CN[a.hobby] || "随遇而安"].join(" · ");
+    // 最爱乐事（v0.6.7）：joyProfile 最高档键的中文名（并列时优先主喜好映射键）；画像未初始化时不显示
+    let favK = null, favT = -1, favH = false;
+    if (a.joyProfile && SIM.JOY_KEYS) {
+      const hobbyJoy = { explore: "explore", homebody: "home", animal: "animal", fishing: "fish" };
+      for (const k of SIM.JOY_KEYS) {
+        const t = a.joyProfile[k] || 0, isH = hobbyJoy[a.hobby] === k;
+        if (t > favT || (t === favT && isH && !favH)) { favT = t; favK = k; favH = isH; }
+      }
+    }
+    const favJoy = favK && SIM.JOY_NAMES ? ` · 最爱：${SIM.JOY_NAMES[favK]}` : "";
     const parents = (a.father || a.mother)
       ? `<div class="ip-line ip-tag">父母：${[a.father, a.mother].filter(Boolean).join(" · ")}</div>` : "";
     return `<div class="ip-title">${a.name}<span class="ip-sub">${a.sex === "f" ? "女" : "男"} · ${Math.floor(a.age)} 岁 · ${JOBS_CN[a.job] || a.job}</span></div>` +
       `<div class="ip-line">状态：<b>${tags.join(" · ")}</b></div>` +
       bars +
       `<div class="ip-sec">个 性</div>` +
-      `<div class="ip-line">${traits}</div>` +
+      `<div class="ip-line">${traits}${favJoy}</div>` +
       `<div class="ip-line">住所：<b>${home}</b></div>` +
       parents +
       carry +
@@ -602,7 +613,7 @@
       const px = CW / 2 + (a.x - camera.x) * s;
       const py = CH / 2 + (a.y - camera.y) * s;
       infoPanel.style.left = Math.min(CW - 230, px + 16) + "px";
-      infoPanel.style.top = Math.max(48, Math.min(CH - 170, py - 150)) + "px";
+      infoPanel.style.top = Math.max(70, Math.min(CH - 170, py - 150)) + "px";
       infoCd -= realDt;
       if (infoCd <= 0) { infoCd = 0.25; infoBody.innerHTML = `<div class="ip-title">${a.name}</div>` + agentPanelHtml(a); }
       return;
@@ -618,7 +629,7 @@
       const px = CW / 2 + (c.x - camera.x) * s;
       const py = CH / 2 + (c.y - camera.y) * s;
       infoPanel.style.left = Math.min(CW - 230, px + 16) + "px";
-      infoPanel.style.top = Math.max(48, Math.min(CH - 170, py - 130)) + "px";
+      infoPanel.style.top = Math.max(70, Math.min(CH - 170, py - 130)) + "px";
       infoCd -= realDt;
       if (infoCd <= 0) { infoCd = 0.3; infoBody.innerHTML = `<div class="ip-title">${meta2name(c.type)}</div>` + creaturePanelHtml(c); }
     }

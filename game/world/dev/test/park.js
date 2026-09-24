@@ -93,6 +93,37 @@ assert(tileAt(gz.x, gz.y) === T.PAVILION, "凉亭完工：tile 变 T.PAVILION");
 plannerTick();
 assert(!tasks.list.some(t => t.type === "GAZEBO"), "凉亭唯一性：同城不再重复立项");
 
+// ===== 2b. 设施查重覆盖（v0.6.18）：facilityNear ±12 窗——兜底选址落 9~10 格的凉亭也必须被查重命中 =====
+// 隔离口径：先撤掉 2 已建的真实凉亭（tile 还原），整个 2b 只允许合成凉亭参与查重
+{
+  const g0 = world.houses.find(h => h.granary && ownerSettle(h.x, h.y) === s0) || world.store;
+  const gzTile = tileAt(gz.x, gz.y);
+  if (gzTile === T.PAVILION) setTile(gz.x, gz.y, T.GRASS);
+  const probe = (dx, tile, fn) => {
+    const px = g0.x + dx, py = g0.y;
+    const orig = tileAt(px, py);
+    setTile(px, py, tile);
+    fn();
+    setTile(px, py, orig);
+  };
+  probe(10, T.PAVILION, () => {
+    const hit = facilityNear(g0.x, g0.y, T.PAVILION);
+    assert(!!hit && hit.x === g0.x + 10 && !!settlementFacility(s0, T.PAVILION),
+      "凉亭查重：10 格外凉亭被命中（facilityNear ±12 覆盖 findSpot 兜底选址带 9~10 格）");
+    const gzN0 = tasks.list.filter(t => t.type === "GAZEBO").length;
+    plannerTick(); plannerTick();
+    const gzN1 = tasks.list.filter(t => t.type === "GAZEBO").length;
+    assert(gzN1 === gzN0, "凉亭查重：仅剩 10 格外凉亭时本城不再立项 GAZEBO（" + gzN0 + " → " + gzN1 + "）");
+  });
+  probe(12, T.PAVILION, () => {
+    assert(!!facilityNear(g0.x, g0.y, T.PAVILION), "凉亭查重：12 格窗口下界仍命中");
+  });
+  probe(13, T.PAVILION, () => {
+    assert(!facilityNear(g0.x, g0.y, T.PAVILION), "凉亭查重：13 格越界不命中（窗口边界文档化）");
+  });
+  if (gzTile === T.PAVILION) setTile(gz.x, gz.y, gzTile);   // 还原真实凉亭（后续游玩闭环要用）
+}
+
 // ===== 3. 戏台/斗兽场：era2 + pop10 → THEATER + ARENA =====
 padTo(10);
 world.era = 2;
@@ -157,6 +188,10 @@ assert(walkable(wx0, wy0) === true, "浮台可行走（居民能走上园区）"
 
 // ===== 7. 游玩闭环：凉亭旁 mood+12；游乐园 mood+35 且 cheerT=300 =====
 world.parks.length = 0;   // 清场：水上乐园门楼（浮台孤悬海上不可达）会抢走 mood<50 的游园优先权
+// 清场：戏台/斗兽场会以「最近设施」抢走 24 格螺旋扫描（nearestFunSpot）的游玩目标——
+// 本段考察对象是凉亭单设施闭环，临时还原为草地，断言后还原（v0.6.18 随机流漂移下目标竞争显性化）
+const thTile7 = tileAt(th.x, th.y), arTile7 = tileAt(ar.x, ar.y);
+setTile(th.x, th.y, T.GRASS); setTile(ar.x, ar.y, T.GRASS);
 world.settlements.forEach(s => ensureStock(s).food = 500);   // 补粮：粮荒门（totalFood > pop×2）会关闭游玩分支
 const pA = agents[0];
 freeze(pA);
@@ -181,6 +216,7 @@ if (playOk) {
   assert(pA.mood >= m0 + 11, "凉亭结算：mood +12（" + pA.mood.toFixed(1) + "）");
   assert(pA.playCdUntil > world.time - 1, "游玩冷却 PLAY_CD 生效");
 }
+setTile(th.x, th.y, thTile7); setTile(ar.x, ar.y, arTile7);   // 还原戏台/斗兽场
 // 游乐园结算：mood+35 + cheerT
 const pB = agents[1];
 freeze(pB); pB.state = "play"; pB.playKind = "park"; pB.playWait = 0.01; pB.mood = 40;

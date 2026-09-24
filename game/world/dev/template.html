@@ -11,28 +11,42 @@
   #cv { display: block; cursor: grab; touch-action: none; image-rendering: pixelated; }
   #cv:active { cursor: grabbing; }
 
+  /* 顶栏两行（v0.6.12）：上行 #top-info 世界信息、下行 #top-ctl 操作按钮；纯间距 .grp 分组 */
   #ui-top {
-    position: fixed; top: 0; left: 0; right: 0; height: 42px;
-    display: flex; align-items: center; gap: 18px; padding: 0 16px;
+    position: fixed; top: 0; left: 0; right: 0;
+    display: flex; flex-direction: column; gap: 5px; padding: 8px 16px 7px;
     background: rgba(10, 13, 20, 0.82); border-bottom: 1px solid #1c2333;
-    color: #cfd6e4; font-size: 13px; z-index: 10; user-select: none;
+    color: #cfd6e4; font-size: 13px; line-height: 1.5; z-index: 10; user-select: none;
   }
   #ui-top .title { font-weight: 600; color: #e8d9a0; letter-spacing: 1px; }
-  .stat { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+  #top-info { display: flex; align-items: baseline; gap: 18px; }
+  #top-ctl { display: flex; align-items: center; justify-content: flex-end; gap: 18px; }
+  /* .grp：组间 18px（外层 gap）、组内 10px（信息行）/ 5px（操作行） */
+  .grp { display: flex; align-items: baseline; gap: 10px; }
+  #top-ctl .grp { align-items: center; gap: 5px; }
+  .grp-brand { gap: 7px; }
+  .grp-view { margin-right: auto; gap: 8px; }
+  /* .stat 定宽 + nowrap + overflow hidden：数字变长不推挤、不换行 */
+  .stat { display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; flex: 0 0 auto; }
   .stat b { color: #fff; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .stat .lab { color: #6b7688; }
-  #stat-clock { min-width: 58px; }
-  #right-ctl { margin-left: auto; display: flex; align-items: center; gap: 14px; }
-  #speed-ctl { display: flex; gap: 6px; }
+  .stat .lab { color: #6b7688; font-size: 11px; }
+  .w-pop { width: 64px; }
+  .w-food { width: 78px; }
+  .w-house { width: 64px; }
+  .w-date { width: 150px; }
+  .w-era { width: 110px; }
+  #rate-box { width: 110px; }
+  #speed-ctl { display: flex; gap: 5px; }
   #zoom-ctl { display: flex; align-items: center; gap: 8px; color: #6b7688; font-size: 12px; }
   #zoom-ctl b { color: #fff; min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
   #zoom-slider { width: 120px; accent-color: #4a5f8a; cursor: pointer; }
-  #speed-ctl button {
+  /* 顶栏按钮统一规格：高 24px、圆角 4px、字号 12px（hover/active 沿用 v0.6.9 配色） */
+  #top-ctl button {
     background: #161c2a; color: #8f9ab0; border: 1px solid #2a3448;
-    border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px;
+    border-radius: 4px; height: 24px; padding: 0 10px; cursor: pointer; font-size: 12px;
   }
-  #speed-ctl button:hover { color: #dfe5f0; }
-  #speed-ctl button.active { background: #2c3a58; color: #fff; border-color: #4a5f8a; }
+  #top-ctl button:hover { color: #dfe5f0; }
+  #top-ctl button.active { background: #2c3a58; color: #fff; border-color: #4a5f8a; }
 
   #log-panel {
     position: fixed; left: 12px; bottom: 12px; width: 340px; max-height: 200px;
@@ -49,19 +63,23 @@
     position: fixed; right: 12px; bottom: 12px; color: #56617a; font-size: 11px;
     background: rgba(10, 13, 20, 0.6); padding: 4px 10px; border-radius: 4px; z-index: 10;
   }
-  #build-id { color: #56617a; font-size: 11px; }
+  #build-id {
+    border: 1px solid #3a4468; color: #8f9ab0; border-radius: 999px;
+    font-size: 10px; padding: 1px 8px; white-space: nowrap; line-height: 1.4;
+  }
 
-  /* 手机端适配：窄屏两行顶栏、面板收窄、隐藏提示 */
+  /* 手机端适配：两行可换行、组间距收紧、面板下移让位、隐藏提示 */
   @media (max-width: 700px) {
-    #ui-top { flex-wrap: wrap; height: auto; padding: 4px 8px; gap: 8px 12px; font-size: 11px; row-gap: 2px; }
+    #ui-top { padding: 4px 8px; gap: 3px; font-size: 11px; }
+    #top-info, #top-ctl { flex-wrap: wrap; gap: 3px 12px; }
+    .grp { flex-wrap: wrap; gap: 3px 6px; }
     #ui-top .title, #build-id, #hint { display: none; }
     .stat { gap: 3px; }
     #zoom-ctl { gap: 5px; }
     #zoom-slider { width: 72px; }
-    #speed-ctl button { padding: 3px 6px; font-size: 11px; }
-    #right-ctl { gap: 8px; }
-    #roster-panel { left: 6px; top: 92px; width: 46vw; max-height: 38vh; font-size: 11px; }
-    #activity-panel { right: 6px; top: 92px; width: 40vw; max-height: 34vh; font-size: 11px; }
+    #top-ctl button { height: 22px; padding: 0 6px; font-size: 11px; }
+    #roster-panel { left: 6px; top: 112px; width: 46vw; max-height: 38vh; font-size: 11px; }
+    #activity-panel { right: 6px; top: 112px; width: 40vw; max-height: 34vh; font-size: 11px; }
     #log-panel { left: auto; right: 6px; bottom: 8px; width: 52vw; max-height: 18vh; }
     #logs { max-height: 12vh; }
     #info-panel { max-width: 46vw; font-size: 11px; }
@@ -76,7 +94,7 @@
   #info-panel.hidden { display: none; }
 
   #roster-panel {
-    position: fixed; left: 12px; top: 54px; width: 186px; max-height: calc(100vh - 180px);
+    position: fixed; left: 12px; top: 78px; width: 186px; max-height: calc(100vh - 180px);
     background: rgba(10, 13, 20, 0.88); border: 1px solid #1c2333; border-radius: 6px;
     padding: 8px 6px; z-index: 9; overflow-y: auto; font-size: 12px; color: #aeb7c9;
   }
@@ -106,7 +124,7 @@
 
   /* 世界动态面板：与左侧居民名册对称的右侧活动目录（样式沿用名册深色系） */
   #activity-panel {
-    position: fixed; right: 12px; top: 54px; width: 170px; max-height: calc(100vh - 180px);
+    position: fixed; right: 12px; top: 78px; width: 170px; max-height: calc(100vh - 180px);
     background: rgba(10, 13, 20, 0.88); border: 1px solid #1c2333; border-radius: 6px;
     padding: 8px 6px; z-index: 9; overflow-y: auto; font-size: 12px; color: #aeb7c9;
   }
@@ -142,7 +160,7 @@
   #info-panel .ip-bar > div { height: 100%; border-radius: 3px; }
   /* 死亡广播（v0.5.9）：被跟随的小人死亡时全屏横幅昭告——姓名/死因/地点/时间，点击致哀 */
   #death-broadcast {
-    position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 60;
+    position: fixed; top: 84px; left: 50%; transform: translateX(-50%); z-index: 60;
     background: rgba(26,13,15,0.94); border: 1px solid #7a3a3a; border-radius: 8px;
     padding: 14px 28px; text-align: center; box-shadow: 0 4px 24px rgba(0,0,0,0.55);
     cursor: pointer; animation: db-in 0.4s ease; min-width: 240px;
@@ -158,7 +176,7 @@
   .modal { position: fixed; inset: 0; z-index: 70; background: rgba(4,6,12,0.72); display: flex; align-items: center; justify-content: center; }
   .modal.hidden { display: none; }
   .modal-box { background: #121826; border: 1px solid #2a3448; border-radius: 10px; width: min(560px, 92vw); max-height: 84vh; overflow: auto; box-shadow: 0 8px 40px rgba(0,0,0,0.6); }
-  .demo-box { width: min(860px, 96vw); overflow: hidden; }
+  .demo-box { width: min(940px, 96vw); overflow: hidden; }
   .demo-layout { display: flex; gap: 12px; padding: 10px 12px 12px; }
   #demo-list { flex: 0 0 178px; width: 178px; overflow-y: auto; max-height: 68vh; }
   #demo-right { flex: 1; min-width: 0; }
@@ -229,33 +247,51 @@
 <canvas id="cv"></canvas>
 
 <div id="ui-top">
-  <span class="title">小世界</span>
-  <span class="stat"><span class="lab">人口</span><b id="stat-pop">0</b></span>
-  <span class="stat"><span class="lab">存粮</span><b id="stat-food">0</b></span>
-  <span class="stat"><span class="lab">房屋</span><b id="stat-houses">0</b></span>
-  <span class="stat"><span class="lab">历法</span><b id="stat-date">1年1月</b><b id="stat-clock">--:--</b></span>
-      <span class="stat"><span class="lab">时代</span><b id="stat-era">蛮荒时代</b></span>
+  <div id="top-info">
+    <span class="grp grp-brand">
+      <span class="title">小世界</span>
+      <span id="build-id"></span>
+    </span>
+    <span class="grp">
+      <span class="stat w-pop"><span class="lab">人口</span><b id="stat-pop">0</b></span>
+      <span class="stat w-food"><span class="lab">存粮</span><b id="stat-food">0</b></span>
+      <span class="stat w-house"><span class="lab">房屋</span><b id="stat-houses">0</b></span>
+    </span>
+    <span class="grp">
+      <span class="stat w-date"><span class="lab">历法</span><b id="stat-date">1年1月</b><b id="stat-clock">--:--</b></span>
+      <span class="stat w-era"><span class="lab">时代</span><b id="stat-era">蛮荒时代</b></span>
+    </span>
+    <span class="grp">
       <span class="stat" id="rate-box" style="display:none"><span class="lab">实际速率</span><b id="stat-rate">--</b></span>
-  <span id="build-id"></span>
-  <div id="right-ctl">
-    <div id="zoom-ctl">
-      <span class="lab">缩放</span>
-      <input type="range" id="zoom-slider" min="0.1" max="6" step="0.1" value="1.6">
-      <b id="zoom-label">1.6×</b>
-    </div>
-    <div id="speed-ctl">
+    </span>
+  </div>
+  <div id="top-ctl">
+    <span class="grp grp-view">
       <button id="go-home">回原点</button>
-      <button id="pause" data-v="0">⏸ 暂停</button>
-      <button id="s1" data-v="1" class="active">1×</button>
-      <button id="s2" data-v="2">2×</button>
-      <button id="s10" data-v="10">10×</button>
-      <button id="s100" data-v="100">100×</button>
-      <button id="s1000" data-v="1000">1000×</button>
+      <span id="zoom-ctl">
+        <span class="lab">缩放</span>
+        <input type="range" id="zoom-slider" min="0.1" max="6" step="0.1" value="1.6">
+        <b id="zoom-label">1.6×</b>
+      </span>
+    </span>
+    <span class="grp">
+      <span id="speed-ctl">
+        <button id="pause" data-v="0">⏸ 暂停</button>
+        <button id="s1" data-v="1" class="active">1×</button>
+        <button id="s2" data-v="2">2×</button>
+        <button id="s10" data-v="10">10×</button>
+        <button id="s100" data-v="100">100×</button>
+        <button id="s1000" data-v="1000">1000×</button>
+      </span>
+    </span>
+    <span class="grp">
       <button id="sfx-toggle">音效:开</button>
+    </span>
+    <span class="grp">
       <button id="help-btn" title="玩法教程">教程</button>
       <button id="changelog-btn" title="更新日志">日志</button>
       <button id="demo-btn" title="机制演示（会暂停主世界）">▶ 演示</button>
-    </div>
+    </span>
   </div>
 </div>
 
@@ -273,12 +309,35 @@
         <span>查看一切</span><span>点击小人 / 动物 / 地块：信息框显示状态、四维条、背包、地块归属与进度</span>
         <span>视角跟随</span><span>信息框「跟随视角」按钮或 F 键——相机锁定选中生物（v0.5.9：被跟随者去世会全屏讣告）</span>
       </div>
+      <div class="help-sec">顶栏操作</div>
+      <div class="help-grid">
+        <span>两行布局</span><span>上行=世界状态：人口 / 存粮 / 房屋 / 历法（日期+时钟）/ 时代（调试时另有实际速率）；下行=操作：左侧回原点与缩放滑轴 0.1×~6×，右侧变速 / 音效 / 教程 / 日志 / 演示</span>
+        <span>分组徽章</span><span>标题旁是版本徽章；同功能按组就近排列，组与组之间留白分隔</span>
+      </div>
       <div class="help-sec">面板与定位</div>
       <div class="help-grid">
         <span>居民名册</span><span>左栏按地区分组：点名字定位 + 对话框；点 ▸/▾ 折叠；点 ⌖ 飞往地区中心</span>
         <span>定位岛屿</span><span>名册「已命名岛屿 / 未知岛屿」条目或 ⌖ 按钮直接飞到该岛</span>
         <span>世界动态</span><span>右栏实时活动目录（航海/喝酒/游玩/抑郁…），点行随机定位一名参与者并跟随；多人同做一事会轮播</span>
         <span>世界纪事</span><span>左下事件流；三块面板标题都可折叠</span>
+      </div>
+      <div class="help-sec">心情与乐事</div>
+      <div class="help-grid">
+        <span>七类乐事</span><span>赏花 / 喝酒 / 探险 / 爬山 / 垂钓 / 牧畜 / 恋家——每个小人喜好各不同（信息框性格行看「最爱」）</span>
+        <span>自寻乐子</span><span>心情低落会自己挑最爱去找乐子：喝酒、赏花（浆果丛 / 果树 / 月光花旁）、爬山（山崖边）、看戏逛游乐园</span>
+      </div>
+      <div class="help-sec">驯马与骑乘</div>
+      <div class="help-grid">
+        <span>驯化</span><span>靠近野马便积累驯化度，喜爱牲畜的人进度翻倍</span>
+        <span>骑乘</span><span>驯服后出远门自动骑马（移速大增），到达目的地自动下马</span>
+      </div>
+      <div class="help-sec">天象与气候</div>
+      <div class="help-grid">
+        <span>流星夜空</span><span>夜晚偶有流星划过——清醒的人看见了心情微涨</span>
+        <span>迁徙</span><span>兽群、候鸟与鲸群会周期性远行迁徙，来去有时</span>
+        <span>气候带</span><span>北方海面见浮冰、草地有积雪斑、山树戴雪帽；南方草地现枯黄斑——越深入越浓密，无变色分区；农场与采集轻微放缓</span>
+        <span>洋流</span><span>海上洋流顺流提速、逆流减速，出航看流向</span>
+        <span>台风</span><span>小概率台风过境：船速放慢、渔船歇网，风雨过后如常</span>
       </div>
       <div class="help-sec">进阶</div>
       <div class="help-grid">
@@ -318,6 +377,16 @@
       <div class="cl-line"><b>v0.6.3 死亡广播扩展</b>——信息框打开即讣告（无需跟随视角），动物离世也可播报</div>
       <div class="cl-line"><b>v0.6.4 育龄统一</b>——人类不分性别统一 20~60 岁育龄</div>
       <div class="cl-line"><b>v0.6.5 更新日志</b>——本面板上线</div>
+      <div class="cl-line"><b>v0.6.7 心情乐事体系</b>——七类乐事（赏花/喝酒/探险/爬山/垂钓/牧畜/恋家）人人喜好不同：做爱做的事、喝爱喝的酒加心情更多，低落时会自己挑最爱去找乐子</div>
+      <div class="cl-line"><b>v0.6.9 顶栏改版</b>——顶栏分两行：上行世界信息（人口/存粮/历法/时代/实际速率），下行全部操作按钮；各模块定宽，数字变长不再推挤换行</div>
+      <div class="cl-line"><b>v0.6.10 马与骑乘</b>——野马可以驯服（靠近便积累驯化，爱牲畜的人进度加倍）；驯服后远行自动骑马（移速大增），到达/开工自动下马</div>
+      <div class="cl-line"><b>v0.6.12 顶栏美化</b>——信息行与操作行分组重排：品牌版本徽章、纯间距分组、按钮统一规格，窄屏自适应同步</div>
+      <div class="cl-line"><b>v0.6.13 机制演示扩充</b>——沙盘扩容至 26×13 大地图、新增背包/探索迁居/散养育龄/亲子育龄/驯马骑乘五主题、心情/讣告/游乐园口径更新，全 15 主题</div>
+      <div class="cl-line"><b>v0.6.14 天象与迁徙</b>——流星划过夜空（清醒的人看了心情微涨）；兽群候鸟鲸群周期性远行迁徙</div>
+      <div class="cl-line"><b>v0.6.15 气候系统</b>——北缘雪带南缘干旱（农场与采集轻微放缓）、海上洋流顺逆流影响船速、小概率台风过境（船慢渔歇）</div>
+      <div class="cl-line"><b>v0.6.16 气候视觉重做</b>——去掉整格变色：北缘海面浮冰、草地积雪、山树雪帽，南缘枯草斑，密度向深处渐增，随地形犬牙交错无直线分界；浮冰密集海域船速轻微放缓</div>
+      <div class="cl-line"><b>v0.6.17 生态平衡</b>——野生动物繁衍按种群规模与寿命均衡出生（不再随机抽亲代）；物种上限补全（山羊/鹿/野猪/狼）；狩猎保护线：物种仅剩 4 只及以下不再新立狩猎/捕获任务；驯服的动物不再掏空野生种群；迁徙周期修正为 4~6 游戏月</div>
+      <div class="cl-line"><b>v0.6.18 时代提速</b>——聚落升级线下调（城镇 36 / 城市 90 分），疆土每 30 人生长一片——酒坊、岛际大桥与游乐园有望在自然演化中更早出现</div>
     </div>
   </div>
 </div>
@@ -330,7 +399,7 @@
       <div id="demo-list"></div>
       <div id="demo-right">
         <div id="demo-stage">
-          <canvas id="demo-cv" width="440" height="280"></canvas>
+          <canvas id="demo-cv" width="600" height="400"></canvas>
           <div id="demo-welcome">← 点击左侧任意机制开始演示<br>（主世界将暂停，关闭弹窗后恢复）</div>
         </div>
         <div id="demo-caption"></div>

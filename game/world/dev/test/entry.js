@@ -117,6 +117,28 @@ assert(state.time > 0, "模拟时间已开始流动（world.time > 0）");
 // ---- 更新日志弹窗契约（v0.6.5）：构建产物含顶栏按钮与弹窗容器 ----
 assert(html.includes('id="changelog-btn"'), "构建产物含更新日志按钮 #changelog-btn（v0.6.5）");
 assert(html.includes('id="changelog-modal"'), "构建产物含更新日志弹窗 #changelog-modal（v0.6.5）");
+// ---- 顶栏两行布局契约（v0.6.9）：#top-info 信息行 / #top-ctl 操作行 ----
+assert(html.includes('id="top-info"'), "构建产物含顶栏信息行 #top-info（v0.6.9）");
+assert(html.includes('id="top-ctl"'), "构建产物含顶栏操作行 #top-ctl（v0.6.9）");
+// ---- changelog 条目契约（v0.6.7/6.9/6.10/6.12）----
+assert(html.includes("v0.6.10"), "changelog 含 v0.6.10 马与骑乘条目");
+assert(html.includes("v0.6.7"), "changelog 含 v0.6.7 心情乐事体系条目");
+assert(html.includes("v0.6.9"), "changelog 含 v0.6.9 顶栏改版条目");
+// ---- 顶栏分组契约（v0.6.12）：品牌徽章分组 + 本版本 changelog 条目 ----
+assert(html.includes("grp-brand"), "构建产物含品牌徽章分组 .grp-brand（v0.6.12）");
+assert(html.includes("v0.6.12"), "changelog 含 v0.6.12 顶栏美化条目");
+// ---- changelog 三版本条目契约（v0.6.13 演示扩充 / v0.6.14 天象迁徙 / v0.6.15 气候系统）----
+assert(html.includes("v0.6.13") && html.includes("v0.6.14") && html.includes("v0.6.15"),
+  "changelog 含 v0.6.13/14/15 三条版本条目（演示扩充/天象迁徙/气候系统）");
+// ---- changelog 本轮三版本条目契约（v0.6.16 气候视觉 / v0.6.17 生态平衡 / v0.6.18 时代提速）----
+assert(html.includes("v0.6.16") && html.includes("v0.6.17") && html.includes("v0.6.18"),
+  "changelog 含 v0.6.16/17/18 三条版本条目（气候视觉重做/生态平衡/时代提速）");
+assert(html.includes("狩猎保护线") && html.includes("均衡出生") && html.includes("4~6 游戏月"),
+  "changelog v0.6.17 条目含生态机制关键词（保护线/均衡出生/迁徙周期口径）");
+assert(html.includes("v0.6.18") && html.includes("36 / 城市 90") && html.includes("每 30 人生长"),
+  "changelog v0.6.18 条目含时代参数（城镇 36 / 城市 90 分、疆土每 30 人生长）");
+assert(html.includes('id="demo-cv" width="600" height="400"') && html.includes("min(940px"),
+  "构建产物 demo 画布 600×400、demo-box 940px（v0.6.13 沙盘扩容同步）");
 
 // ---- 机制演示契约（v0.6.0）：主题数据完整 + 全部绘制回调在 stub ctx 上无引用错误 ----
 {
@@ -147,7 +169,7 @@ assert(html.includes('id="changelog-modal"'), "构建产物含更新日志弹窗
       const before = demoState.topic.id;
       demoStart("drinks");                           // 打断：点另一个机制立即切换
       const switched = before === "mood" && demoState.topic.id === "drinks" && demoState.t < 0.2;
-      demoState.cv = { width: 440, height: 280 };
+      demoState.cv = { width: 600, height: 400 };   // v0.6.13：沙盘画布 440×280 → 600×400（与 template.html 同步）
       demoState.g = new Proxy({}, { get: (t, k) => (k in t ? t[k] : () => {}), set: () => true });
       for (let i = 0; i < 20; i++) demoTick(0.05);
       drew = switched;
@@ -158,7 +180,7 @@ assert(html.includes('id="changelog-modal"'), "构建产物含更新日志弹窗
     } catch (e) { allOk = false; err = e.message; }
     ({ ok, nTopics, drew, allOk, err });
   `, entryCtx);
-  assert(demoRes.ok && demoRes.nTopics >= 10, "demo 契约：" + demoRes.nTopics + " 个主题数据/画布行宽/时间轴完整");
+  assert(demoRes.ok && demoRes.nTopics >= 15, "demo 契约：" + demoRes.nTopics + " 个主题数据/画布行宽/时间轴完整（v0.6.13 起 15 主题）");
   assert(demoRes.drew, "demo 打断切换：点击另一机制立即重置播放（mood→drinks）");
   assert(demoRes.allOk, "demo 播放：全部主题全时段沙盘绘制扫描无异常" + (demoRes.err ? "（" + demoRes.err + "）" : ""));
 }
