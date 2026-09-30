@@ -62,6 +62,16 @@ function pickNativeName() {
 
 let _agentIdSeq = 1;
 
+// ---- 存档系统入口（v0.7.0）：id 序列与名字唯一池的最小读写包装（save.js 调用）----
+function agentIdSeqGet() { return _agentIdSeq; }
+function agentIdSeqSet(v) { _agentIdSeq = v | 0; }
+function agentNamePoolDump() { return { names: [..._usedNames], native: [..._usedNative] }; }
+function agentNamePoolRestore(pool) {
+  if (!pool) return;
+  if (Array.isArray(pool.names)) { _usedNames.clear(); for (const n of pool.names) _usedNames.add(n); }
+  if (Array.isArray(pool.native)) { _usedNative.clear(); for (const n of pool.native) _usedNative.add(n); }
+}
+
 // 受困动物扫描缓存（decide 2.8 全局 1s 节流，见 decide）
 const _rescueScan = { t: -9, victim: null };
 

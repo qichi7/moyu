@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>小世界 · v0.6.18</title>
+<title>小世界 · v0.7.0</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #07090e; }
@@ -201,6 +201,13 @@
   .modal-body { padding: 10px 14px 14px; color: #aeb6c6; font-size: 12px; }
   /* 更新日志（v0.6.5）：一条 = 版本号+标题（高亮）+ 破折号一句描述 */
   #changelog-modal .cl-line b { color: #d8dee9; font-weight: 600; }
+  /* 读档确认弹窗（v0.7.0）：复用 modal 结构，按钮沿用顶栏深色系 */
+  #confirm-modal .modal-box { width: min(400px, 92vw); }
+  #confirm-modal button {
+    background: #161c2a; border: 1px solid #2a3448; color: #aeb6c6;
+    border-radius: 4px; padding: 4px 16px; cursor: pointer; font-size: 12px;
+  }
+  #confirm-modal button:hover { color: #fff; border-color: #3d4c68; }
   .help-sec { color: #8a93a8; font-size: 10px; letter-spacing: 2px; margin: 10px 0 4px; }
   .help-sec:first-child { margin-top: 0; }
   .help-grid { display: grid; grid-template-columns: 72px 1fr; gap: 5px 10px; }
@@ -288,6 +295,11 @@
       <button id="sfx-toggle">音效:开</button>
     </span>
     <span class="grp">
+      <button id="save-btn" title="导出当前世界（PNG 存档）">存档</button>
+      <button id="load-btn" title="导入世界存档">读档</button>
+      <input type="file" id="load-file" accept="image/png" style="display:none">
+    </span>
+    <span class="grp">
       <button id="help-btn" title="玩法教程">教程</button>
       <button id="changelog-btn" title="更新日志">日志</button>
       <button id="demo-btn" title="机制演示（会暂停主世界）">▶ 演示</button>
@@ -335,9 +347,14 @@
       <div class="help-grid">
         <span>流星夜空</span><span>夜晚偶有流星划过——清醒的人看见了心情微涨</span>
         <span>迁徙</span><span>兽群、候鸟与鲸群会周期性远行迁徙，来去有时</span>
-        <span>气候带</span><span>北方海面见浮冰、草地有积雪斑、山树戴雪帽；南方草地现枯黄斑——越深入越浓密，无变色分区；农场与采集轻微放缓</span>
+        <span>气候带</span><span>定居区北缘越走越冷：草地现细碎雪迹、海面飘薄冰痕、山树与屋顶尖戴雪帽；南缘草地见枯迹——痕迹随深入渐密，无变色分区；农场与采集轻微放缓</span>
         <span>洋流</span><span>海上洋流顺流提速、逆流减速，出航看流向</span>
         <span>台风</span><span>小概率台风过境：船速放慢、渔船歇网，风雨过后如常</span>
+      </div>
+      <div class="help-sec">存档与读档</div>
+      <div class="help-grid">
+        <span>存档</span><span>顶栏「存档」：导出一张 PNG 世界存档——图片本身即已点亮的完整地图，世界状态藏在图片元数据里；文件名形如「小世界存档2026-09-30_1435.png」</span>
+        <span>读档</span><span>顶栏「读档」选择存档 PNG：确认覆盖后，世界（含每个人、每只动物、每项任务与随机序列）完全恢复到存档时刻继续演化</span>
       </div>
       <div class="help-sec">进阶</div>
       <div class="help-grid">
@@ -387,6 +404,8 @@
       <div class="cl-line"><b>v0.6.16 气候视觉重做</b>——去掉整格变色：北缘海面浮冰、草地积雪、山树雪帽，南缘枯草斑，密度向深处渐增，随地形犬牙交错无直线分界；浮冰密集海域船速轻微放缓</div>
       <div class="cl-line"><b>v0.6.17 生态平衡</b>——野生动物繁衍按种群规模与寿命均衡出生（不再随机抽亲代）；物种上限补全（山羊/鹿/野猪/狼）；狩猎保护线：物种仅剩 4 只及以下不再新立狩猎/捕获任务；驯服的动物不再掏空野生种群；迁徙周期修正为 4~6 游戏月</div>
       <div class="cl-line"><b>v0.6.18 时代提速</b>——聚落升级线下调（城镇 36 / 城市 90 分），疆土每 30 人生长一片——酒坊、岛际大桥与游乐园有望在自然演化中更早出现</div>
+      <div class="cl-line"><b>v0.6.19 气候贴花精修</b>——雪迹/冰痕/枯迹更细腻克制（范围收窄、交界干净），新增房顶积雪与山树雪帽点缀边疆</div>
+      <div class="cl-line"><b>v0.7.0 存档与读档</b>——顶栏「存档/读档」：世界状态藏进 PNG 图片元数据（图片即已点亮地图），读档确认覆盖后完整还原进度与随机序列；新版本兼容旧存档</div>
     </div>
   </div>
 </div>
@@ -408,6 +427,20 @@
           <button id="demo-replay">↻ 重播</button>
           <span id="demo-prog"></span>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 读档确认弹窗（v0.7.0）：复用 modal 结构；确定按钮由 main.js 接线，取消走 data-close 委托 -->
+<div id="confirm-modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">读档确认<span class="modal-close" data-close="confirm-modal">×</span></div>
+    <div class="modal-body">
+      <div id="confirm-text" style="line-height:1.8">读档将覆盖当前世界进度，确定？</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+        <button id="confirm-cancel" data-close="confirm-modal">取消</button>
+        <button id="confirm-ok">确定</button>
       </div>
     </div>
   </div>
@@ -456,7 +489,7 @@ function emit(name, data) {
 
 "use strict";
 // ============ 全局配置 ============
-const BUILD_ID = "v0.6.18";
+const BUILD_ID = "v0.7.0";
 
 // tile 类型
 const T = {
@@ -646,9 +679,9 @@ const SIM = {
   METEOR_DUR: 3,
   METEOR_MOOD: 0.3,           // 目睹流星的心情回复/秒
   // ---- 气候与洋流（v0.6.15 定居区北缘雪原/南缘旱带+顺逆流航速+台风；v0.6.16 边界噪声曲线化+连续强度场+浮冰船速）----
-  CLIMATE: { EDGE_INSET: 10, SNOW_FARM: 0.85, SNOW_BERRY: 0.8, DROUGHT_FARM: 0.8, DROUGHT_BERRY: 0.7,
-    WOBBLE: 20, FADE: 30,                    // 雪线/旱线噪声扰动幅度（±格）/ 强度场爬坡带宽（格）
-    ICE_P: 0.55, SNOW_P: 0.5, DRY_P: 0.5,    // 贴花概率基准：浮冰/积雪/干裂贴花出现概率（表现层按概率消费，非强度阈值）
+  CLIMATE: { EDGE_INSET: 4, SNOW_FARM: 0.85, SNOW_BERRY: 0.8, DROUGHT_FARM: 0.8, DROUGHT_BERRY: 0.7,
+    WOBBLE: 20, FADE: 18,                    // 雪线/旱线噪声扰动幅度（±格）/ 强度场爬坡带宽（格）；v0.6.19 收窄：只探入定居区 4 格、总纵深 ~22 格
+    ICE_P: 0.3, SNOW_P: 0.28, DRY_P: 0.3,    // 贴花概率基准（v0.6.19 边疆 fringe：门槛 0.35、深处封顶——强度<0.35 交界带不出现；出现概率 = P × clamp((强度-0.35)/0.65, 0, 1)）
     ICE_SHIP: 0.85 },                        // 浮冰海面船速倍率（水面且 climateIntensity≥0.5）
   CURRENT_SHIP_FAST: 1.15,    // 顺流航速倍率
   CURRENT_SHIP_SLOW: 0.9,     // 逆流航速倍率
@@ -715,11 +748,23 @@ function mulberry32(seed) {
   };
 }
 
-// 全局模拟用 rng（有种子，可复现）
-const rng = mulberry32(20260916);
+// 全局模拟用 rng（有种子，可复现）——状态外置 _rngState（v0.7.0 存档/读档：快照与写回，
+// rand 序列逐位续演）。算术与 mulberry32 完全同款（s 已是 int32，省去入口 |0，逐位等价）
+const _rngState = { s: 20260916 | 0 };
+function rngNext() {
+  _rngState.s = (_rngState.s + 0x6D2B79F5) | 0;
+  let t = Math.imul(_rngState.s ^ (_rngState.s >>> 15), 1 | _rngState.s);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const rng = rngNext;
 const rand = () => rng();
 const randRange = (a, b) => a + rng() * (b - a);
 const randInt = (a, b) => Math.floor(a + rng() * (b - a + 1));
+
+// 存档系统入口（v0.7.0）：全局随机流快照/写回（save.js 调用）
+function rngSnapshot() { return _rngState.s; }
+function rngRestore(s) { _rngState.s = s | 0; }
 
 function makeNoise(seed) {
   const next = mulberry32(seed);
@@ -1549,6 +1594,7 @@ function processExplore(budget) {
 
 // ---- 初始生成：主岛在原点，5 座无人岛环布四周 ----
 function genWorld(seed) {
+  world.seed = seed || 1;   // v0.7.0 存档：记录生成种子（saveExport 序列化，读档经 genWorld(data.seed) 重建骨架）
   world.noise = makeNoise(seed || 1);
   _jsCache.t = -1;   // 新世界：联合库存缓存失效
   world.chunks = new Map();
@@ -1936,6 +1982,10 @@ function workTile(task, amount) {
 // ============ 任务系统：建造 / 开荒 / 移山 / 填海 ============
 
 let _taskId = 1;
+
+// 存档系统入口（v0.7.0）：任务 id 序列快照/写回——读档后新任务不再与存量任务撞号（save.js 调用）
+function taskIdSeqGet() { return _taskId; }
+function taskIdSeqSet(v) { _taskId = v | 0; }
 let _lastPond = null;   // 最近挖的塘（池塘聚簇：下一个塘贴着它挖）
 const tasks = {
   list: [],
@@ -3071,6 +3121,16 @@ function pickNativeName() {
 }
 
 let _agentIdSeq = 1;
+
+// ---- 存档系统入口（v0.7.0）：id 序列与名字唯一池的最小读写包装（save.js 调用）----
+function agentIdSeqGet() { return _agentIdSeq; }
+function agentIdSeqSet(v) { _agentIdSeq = v | 0; }
+function agentNamePoolDump() { return { names: [..._usedNames], native: [..._usedNative] }; }
+function agentNamePoolRestore(pool) {
+  if (!pool) return;
+  if (Array.isArray(pool.names)) { _usedNames.clear(); for (const n of pool.names) _usedNames.add(n); }
+  if (Array.isArray(pool.native)) { _usedNative.clear(); for (const n of pool.native) _usedNative.add(n); }
+}
 
 // 受困动物扫描缓存（decide 2.8 全局 1s 节流，见 decide）
 const _rescueScan = { t: -9, victim: null };
@@ -5613,6 +5673,9 @@ function weatherTick(dt) {
   }
   if (!world.meteor && !isDaytime() && world.time >= (world.meteorNext || 0) && rand() < 0.02) {
     world.meteor = { t0: world.time, dur: SIM.METEOR_DUR };
+    // 纪事播报：三文案 hash 轮换（不耗 rand 流；约每 2~4 游戏夜一颗，一年 3~6 条不刷屏）
+    const _meteorMsgs = ["一颗流星划过夜空。", "流星拖着长尾坠向海平线。", "有人对着流星许了愿。"];
+    logMsg(_meteorMsgs[(hash2(world.meteor.t0, 911) * 3) | 0]);
   }
   // 台风：偶起于主仓 40~90 格外的深海格（方向随机单位向量，寿命 60~120 秒）
   if (!world.storm && rand() < SIM.TYPHOON_CHANCE) {
@@ -5747,6 +5810,466 @@ function simInit(seed) {
     const p = freeNeighbor(world.store.x, world.store.y);
     if (p) spawnCreature(p.x, p.y, "dog");
   }
+}
+
+
+"use strict";
+// ============ 存档与读档（v0.7.0）============
+// 逻辑层纯函数：零 DOM、node 可测（test/save.js）。PNG 注入/提取、deflate 编解码、
+// saveExport（全量状态序列化）与 saveImport（世界重建）都在这里。
+//
+// 载体格式（用户拍板口径）：PNG + tEXt 元数据块——
+//   keyword = "XJSJ_SAVE"，值 = "Z" + base64(deflate-raw(JSON))
+//   （环境缺 CompressionStream/DecompressionStream 时退化为 "P" + base64(JSON)，自描述前缀无损互认）
+// 地图本体 = 已点亮全图 2px/tile 着色（main.js renderMapImage 生成），状态信息附加在图片上。
+// 兼容铁律：历史只加不减——saveVersion 起步 1；hydrate 兜底按构造默认补缺失字段，只保证向后兼容
+// （读未来版本存档明确拒绝）。rand 序列逐位续演：rngSnapshot/rngRestore（noise.js）。
+
+const SAVE_VERSION = 1;
+const SAVE_KEYWORD = "XJSJ_SAVE";
+
+// ---- base64（手写表驱动，不依赖 Buffer/btoa，node 与浏览器同源可用）----
+const _B64T = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+function u8ToB64(u8) {
+  let out = "";
+  const n = u8.length;
+  for (let i = 0; i < n; i += 3) {
+    const a = u8[i], b = i + 1 < n ? u8[i + 1] : 0, c = i + 2 < n ? u8[i + 2] : 0;
+    out += _B64T[a >> 2] + _B64T[((a & 3) << 4) | (b >> 4)];
+    out += i + 1 < n ? _B64T[((b & 15) << 2) | (c >> 6)] : "=";
+    out += i + 2 < n ? _B64T[c & 63] : "=";
+  }
+  return out;
+}
+function b64ToU8(s) {
+  const out = [];
+  let buf = 0, bits = 0;
+  for (let i = 0; i < s.length; i++) {
+    const v = _B64T.indexOf(s[i]);
+    if (v < 0) continue;   // 填充符/意外字符跳过（宽容解码：6bit 累积不满一字节自然丢弃）
+    buf = (buf << 6) | v; bits += 6;
+    if (bits >= 8) { bits -= 8; out.push((buf >> bits) & 255); }
+  }
+  return new Uint8Array(out);
+}
+
+// ---- tile RLE 游程（Uint8Array 1024 → "v:n,v:n" 串；定长格值重复率高，串体极小）----
+function rleEncode(u8) {
+  let out = "", i = 0;
+  while (i < u8.length) {
+    const v = u8[i]; let n = 1;
+    while (i + n < u8.length && u8[i + n] === v) n++;
+    out += (out ? "," : "") + v + ":" + n;
+    i += n;
+  }
+  return out;
+}
+function rleDecode(s) {
+  const out = new Uint8Array(CHUNK * CHUNK);
+  let o = 0;
+  for (const seg of s.split(",")) {
+    const p = seg.indexOf(":");
+    out.fill(+seg.slice(0, p), o, o + +seg.slice(p + 1));
+    o += +seg.slice(p + 1);
+  }
+  return out;
+}
+
+// ---- Float32Array ↔ base64（原始字节；小端序——全平台 JS 引擎一致）----
+function f32ToB64(f32) {
+  if (!f32) return null;
+  return u8ToB64(new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength));
+}
+function b64ToF32(s) {
+  if (!s) return null;
+  const u8 = b64ToU8(s);
+  return new Float32Array(u8.buffer, 0, Math.floor(u8.length / 4));
+}
+
+// ---- CRC32（表驱动，PNG chunk 校验用）----
+const _CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(u8, start, end) {
+  let c = 0xFFFFFFFF;
+  for (let i = start; i < end; i++) c = _CRC_TABLE[(c ^ u8[i]) & 255] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+// ---- PNG chunk 流操作（纯字节，无图片解码）----
+const _PNG_SIG = [137, 80, 78, 71, 13, 10, 26, 10];
+function pngChunkType(u8, off) {
+  return String.fromCharCode(u8[off + 4], u8[off + 5], u8[off + 6], u8[off + 7]);
+}
+// 在 IEND 前插入一个 tEXt chunk（len+type+keyword\0+text+CRC32），返回新字节流；非法 PNG 返回 null
+function pngInjectTExt(png, keyword, text) {
+  if (!png || png.length < 16) return null;
+  for (let i = 0; i < 8; i++) if (png[i] !== _PNG_SIG[i]) return null;
+  let off = 8, iendStart = -1;
+  while (off + 8 <= png.length) {
+    const len = ((png[off] << 24) | (png[off + 1] << 16) | (png[off + 2] << 8) | png[off + 3]) >>> 0;
+    if (pngChunkType(png, off) === "IEND") { iendStart = off; break; }
+    off += 12 + len;
+  }
+  if (iendStart < 0) return null;
+  const data = [];
+  for (let i = 0; i < keyword.length; i++) data.push(keyword.charCodeAt(i) & 255);
+  data.push(0);
+  for (let i = 0; i < text.length; i++) data.push(text.charCodeAt(i) & 255);
+  const dataLen = data.length;
+  const out = new Uint8Array(png.length + 12 + dataLen);
+  out.set(png.subarray(0, iendStart), 0);
+  let o = iendStart;
+  out[o++] = (dataLen >>> 24) & 255; out[o++] = (dataLen >>> 16) & 255;
+  out[o++] = (dataLen >>> 8) & 255; out[o++] = dataLen & 255;
+  out[o++] = 116; out[o++] = 69; out[o++] = 88; out[o++] = 116;   // "tEXt"
+  for (let i = 0; i < dataLen; i++) out[o++] = data[i];
+  const crc = crc32(out, iendStart + 4, o);   // CRC 覆盖 type + data
+  out[o++] = (crc >>> 24) & 255; out[o++] = (crc >>> 16) & 255;
+  out[o++] = (crc >>> 8) & 255; out[o++] = crc & 255;
+  out.set(png.subarray(iendStart), o);
+  return out;
+}
+// 提取指定 keyword 的 tEXt 文本；无则 null
+function pngExtractTExt(png, keyword) {
+  if (!png || png.length < 16) return null;
+  for (let i = 0; i < 8; i++) if (png[i] !== _PNG_SIG[i]) return null;
+  let off = 8;
+  while (off + 8 <= png.length) {
+    const len = ((png[off] << 24) | (png[off + 1] << 16) | (png[off + 2] << 8) | png[off + 3]) >>> 0;
+    const type = pngChunkType(png, off);
+    const d0 = off + 8, d1 = d0 + len;
+    if (d1 + 4 > png.length) return null;
+    if (type === "tEXt") {
+      let z = -1;
+      for (let i = d0; i < d1; i++) if (png[i] === 0) { z = i; break; }
+      if (z > d0) {
+        let kw = "";
+        for (let i = d0; i < z; i++) kw += String.fromCharCode(png[i]);
+        if (kw === keyword) {
+          const parts = [];
+          for (let i = z + 1; i < d1; i += 4096) parts.push(String.fromCharCode.apply(null, png.subarray(i, Math.min(i + 4096, d1))));
+          return parts.join("");
+        }
+      }
+    }
+    if (type === "IEND") return null;
+    off = d1 + 4;
+  }
+  return null;
+}
+
+// ---- deflate 编解码（CompressionStream 'deflate-raw'；缺失退化未压缩，前缀自描述）----
+async function deflateB64(str) {
+  const bytes = new TextEncoder().encode(str);
+  if (typeof CompressionStream !== "function") return "P" + u8ToB64(bytes);
+  const cs = new CompressionStream("deflate-raw");
+  const ab = await new Response(new Blob([bytes]).stream().pipeThrough(cs)).arrayBuffer();
+  return "Z" + u8ToB64(new Uint8Array(ab));
+}
+async function inflateB64(s) {
+  const flag = s[0], payload = s.slice(1);
+  if (flag === "P") return new TextDecoder().decode(b64ToU8(payload));
+  if (typeof DecompressionStream !== "function") return null;   // 有压缩数据但环境不支持：无法还原
+  const ds = new DecompressionStream("deflate-raw");
+  const ab = await new Response(new Blob([b64ToU8(payload)]).stream().pipeThrough(ds)).arrayBuffer();
+  return new TextDecoder().decode(ab);
+}
+
+// ---- 存档 PNG 组装/解析 ----
+async function buildSavePng(mapPngU8, data) {
+  const text = await deflateB64(JSON.stringify(data));
+  const out = pngInjectTExt(mapPngU8, SAVE_KEYWORD, text);
+  if (!out) throw new Error("非法的 PNG 字节流");
+  return out;
+}
+async function readSavePng(pngU8) {
+  const text = pngExtractTExt(pngU8, SAVE_KEYWORD);
+  if (!text) return null;
+  try {
+    const json = await inflateB64(text);
+    const data = JSON.parse(json);
+    return (data && typeof data === "object" && data.saveVersion !== undefined) ? data : null;
+  } catch (e) { return null; }
+}
+
+// ---- 导出：全量状态 → 可 JSON 序列化对象 ----
+// 引用图约定（导出侧）：creature 引用 → 导出序号（creatures 数组下标，导出与重建顺序一致）
+//   task.creature→cr / agent.mount→mcid / agent.rescuing→rcid
+//   creature.owner→owid / riddenBy→rbid / carriedBy→cbid / rescuer→rsid（agent id）
+//   ship.sailor→said（agent id）/ rescue 船 target→tship（ships 下标）
+function dumpPlain(o) {
+  const out = {};
+  if (!o) return out;
+  for (const k of Object.keys(o)) {
+    const v = o[k];
+    if (typeof v !== "function") out[k] = v;   // onArrive 等闭包不可序列化，跳过
+  }
+  return out;
+}
+
+function saveExport() {
+  const w = world;
+  const cidx = new Map();
+  creatures.forEach((c, i) => cidx.set(c, i));
+  const raw = {
+    saveVersion: SAVE_VERSION,
+    build: BUILD_ID,
+    seed: w.seed,
+    rng: rngSnapshot(),
+    time: w.time, timeOfDay: w.timeOfDay, era: w.era,
+    expansions: w.expansions || 0, birthSeq: w.birthSeq || 0,
+    zonesVersion: w.zonesVersion || 0,
+    active: { x0: w.active.x0, y0: w.active.y0, x1: w.active.x1, y1: w.active.y1 },
+    store: { x: w.store.x, y: w.store.y },
+    meteor: w.meteor, meteorNext: w.meteorNext || 0, storm: w.storm,
+    lastBridgeHead: w.lastBridgeHead, lastBridgeDir: w.lastBridgeDir,
+    rivers: w.rivers ? [...w.rivers] : null,
+    foundGrid: [...w.foundGrid], litCells: [...w.litCells],
+    ponds: [...w.ponds], mushrooms: [...w.mushrooms], interBridges: [...w.interBridges],
+    berryStock: [...w.berryStock], fishStock: [...w.fishStock],
+    islands: w.islands.map(dumpPlain),
+    settlements: w.settlements.map(s => { const d = dumpPlain(s); ensureStock(d); return d; }),   // 库存 9 字段规范化（缺省补 0，读档往返稳定）
+    houses: w.houses.map(dumpPlain),
+    farms: w.farms.map(dumpPlain),
+    parks: w.parks.map(dumpPlain),
+    pastures: w.pastures.map(dumpPlain),
+    docks: w.docks.map(dumpPlain),
+    caves: w.caves.map(dumpPlain),
+    quarries: w.quarries.map(dumpPlain),
+    sandpits: w.sandpits.map(dumpPlain),
+    ships: w.ships.map(s => {
+      const d = dumpPlain(s);
+      delete d.sailor; delete d.target;
+      if (s.sailor) d.said = s.sailor.id;
+      if (s.state === "rescue" && s.target) d.tship = w.ships.indexOf(s.target);
+      return d;
+    }),
+    tasks: tasks.list.map(t => {
+      const d = dumpPlain(t);
+      delete d.workers; delete d.creature;
+      if (t.creature) d.cr = cidx.get(t.creature);
+      d.workers = [...t.workers].map(a => a.id);
+      return d;
+    }),
+    agents: agents.map(a => {
+      const d = dumpPlain(a);
+      delete d.task; delete d.mount; delete d.rescuing;
+      if (a.task) d.tid = a.task.id;
+      if (a.mount) d.mcid = cidx.get(a.mount);
+      if (a.rescuing) d.rcid = cidx.get(a.rescuing);
+      return d;
+    }),
+    creatures: creatures.map(c => {
+      const d = dumpPlain(c);
+      delete d.owner; delete d.riddenBy; delete d.carriedBy; delete d.rescuer;
+      if (c.owner) d.owid = c.owner.id;
+      if (c.riddenBy) d.rbid = c.riddenBy.id;
+      if (c.carriedBy) d.cbid = c.carriedBy.id;
+      if (c.rescuer) d.rsid = c.rescuer.id;
+      return d;
+    }),
+    logs: w.logs.slice(0, 100).map(l => ({ t: l.t, text: l.text })),
+    logSeq: w.logSeq || 0,
+    names: agentNamePoolDump(),
+    camera: null,   // 相机由表现层（main.js）填充，逻辑层不感知
+  };
+  raw.chunks = [];
+  for (const [k, c] of w.chunks) {
+    if (!c.gen) continue;   // 未生成 chunk = 全零默认态，读档侧惰性重建，不入档（最少信息）
+    const p = k.split(",");
+    const ch = { cx: +p[0], cy: +p[1], gen: true, tiles: rleEncode(c.tiles), hp: f32ToB64(c.hp) };
+    if (c.elev) ch.elev = f32ToB64(c.elev);
+    raw.chunks.push(ch);
+  }
+  // 深拷贝出即时快照：导出返回与 PNG 组装（相机 toBlob 异步窗口）之间模拟仍在跑，
+  // 共享引用会被并发改动——JSON 往返既冻结现场又顺带验证了全量状态的可序列化性
+  return JSON.parse(JSON.stringify(raw));
+}
+
+// ---- 兼容兜底（hydrate）：缺失字段按构造默认补——历史只加不减 ----
+// 默认表只含构造器必赋字段：完整 v1 档读入时逐项存在（零覆盖），旧档/缺字段档按默认补齐
+const _AGENT_DEFAULTS = {
+  dead: false, native: false, hunger: 100, energy: 100, thirst: 100, mood: 90,
+  depressed: false, cheerT: 0, drunkT: 0, coffeeT: 0, mountCd: 0,
+  face: "down", faceHoldT: 1, task: null, path: null, pi: 0, state: "idle",
+  thinkCd: 0, phase: 0,   starving: false, speed: 1.7, adventure: 0.5, diligence: 0.5,
+  age: 30, job: "farmer", hobby: "none", surname: "", father: null, mother: null, mount: null,
+};
+const _CREATURE_DEFAULTS = {
+  dead: false, pasture: null, face: "down", faceHoldT: 1, moveCd: 0,
+  breedCd: 120, outputCd: 0, tameness: 0, riddenBy: null, migration: null, migNext: 0,
+};
+function hydrateAgent(a) {
+  for (const k in _AGENT_DEFAULTS) if (a[k] === undefined) a[k] = _AGENT_DEFAULTS[k];
+  if (!Array.isArray(a.pack) || a.pack.length !== 10) a.pack = new Array(10).fill(null);
+  else for (let i = 0; i < 10; i++) if (a.pack[i] === undefined) a.pack[i] = null;
+  if (!a.joyProfile) {   // 旧档缺画像：按构造口径 hash2 确定性重建（零 rand 消耗）
+    a.joyProfile = {};
+    for (const k of SIM.JOY_KEYS) {
+      let tier = SIM.JOY_TIERS[(hash2(a.id, SIM.JOY_SALTS[k]) * 5) | 0];
+      if (k === _HOBBY_JOY[a.hobby]) tier = Math.max(tier, SIM.JOY_HOBBY_MIN);
+      a.joyProfile[k] = tier;
+    }
+  }
+  return a;
+}
+function hydrateCreature(c) {
+  for (const k in _CREATURE_DEFAULTS) if (c[k] === undefined) c[k] = _CREATURE_DEFAULTS[k];
+  return c;
+}
+
+// ---- 导入：存档对象 → 世界重建 ----
+// 流程：genWorld(data.seed) 建骨架（种子/噪声，产出全部被覆写）→ 标量覆写 → chunks Map 重建
+// → 集合/映射重建 → 实体重建（agents/creatures 走原型实例，ships/tasks plain assign）
+// → 引用图二次回填 → id 序列/名字池/随机流恢复 → 缓存失效清扫。
+// 返回 true/false（false = 版本不兼容或数据非法）。
+function saveImport(data) {
+  if (!data || typeof data !== "object") return false;
+  const v = data.saveVersion | 0;
+  if (v > SAVE_VERSION) return false;   // 未来版本存档：明确拒绝（兼容方向只有向后）
+
+  genWorld(data.seed);   // 骨架：噪声/chunks Map/初始岛屿——下方全部覆写
+
+  const w = world;
+  w.time = data.time || 0;
+  w.timeOfDay = data.timeOfDay !== undefined ? data.timeOfDay : w.timeOfDay;
+  w.era = data.era || 0;
+  w.expansions = data.expansions || 0;
+  w.birthSeq = data.birthSeq || 0;
+  w.zonesVersion = data.zonesVersion || 0;
+  w.active = data.active ? { x0: data.active.x0 | 0, y0: data.active.y0 | 0, x1: data.active.x1 | 0, y1: data.active.y1 | 0 } : { x0: -26, y0: -26, x1: 26, y1: 26 };
+  w.store = data.store ? { x: data.store.x, y: data.store.y } : w.store;
+  w.meteor = data.meteor || null;
+  w.meteorNext = data.meteorNext || 0;
+  w.storm = data.storm || null;
+  w.lastBridgeHead = data.lastBridgeHead || null;
+  w.lastBridgeDir = data.lastBridgeDir || null;
+  w.rivers = new Set(data.rivers || []);
+  w.foundGrid = new Set(data.foundGrid || []);
+  w.litCells = new Set(data.litCells || []);
+  w.ponds = new Set(data.ponds || []);
+  w.mushrooms = new Set(data.mushrooms || []);
+  w.interBridges = new Set(data.interBridges || []);
+  w.berryStock = new Map(data.berryStock || []);
+  w.fishStock = new Map(data.fishStock || []);
+
+  // chunks 重建：thumbDirty 全部置真（远景缩略图缓存整体失效重建）
+  w.chunks = new Map();
+  for (const cd of (data.chunks || [])) {
+    const c = {
+      tiles: rleDecode(cd.tiles),
+      hp: b64ToF32(cd.hp) || new Float32Array(CHUNK * CHUNK),
+      gen: true,
+      thumbDirty: true,
+    };
+    if (cd.elev) c.elev = b64ToF32(cd.elev);
+    w.chunks.set(cd.cx + "," + cd.cy, c);
+  }
+
+  // 实体表：plain 对象直接重建（引用字段延后回填）
+  w.islands = (data.islands || []).map(o => Object.assign({}, o));
+  w.settlements = (data.settlements || []).map(o => {
+    const s = Object.assign({}, o);
+    ensureStock(s);   // 9 字段缺省补 0（旧档兼容口径与运行时一致）
+    if (s.level === undefined) s.level = 0;
+    if (!s.name) s.name = "无名聚落";
+    return s;
+  });
+  w.houses = (data.houses || []).map(o => Object.assign({}, o));
+  w.farms = (data.farms || []).map(o => Object.assign({}, o));
+  w.parks = (data.parks || []).map(o => Object.assign({}, o));
+  w.pastures = (data.pastures || []).map(o => Object.assign({}, o));
+  w.docks = (data.docks || []).map(o => Object.assign({}, o));
+  w.caves = (data.caves || []).map(o => Object.assign({}, o));
+  w.quarries = (data.quarries || []).map(o => Object.assign({}, o));
+  w.sandpits = (data.sandpits || []).map(o => Object.assign({}, o));
+  w.ships = (data.ships || []).map(o => Object.assign({}, o));
+
+  tasks.list.length = 0;
+  for (const td of (data.tasks || [])) {
+    const t = Object.assign({}, td);
+    t.workers = new Set();
+    delete t.cr;
+    tasks.list.push(t);
+  }
+
+  // creatures：原型实例 + 自有属性覆盖（方法在原型上）
+  creatures.length = 0;
+  const cDump = data.creatures || [];
+  for (const cd of cDump) {
+    const c = Object.create(Creature.prototype);
+    Object.assign(c, cd);
+    hydrateCreature(c);
+    delete c.owid; delete c.rbid; delete c.cbid; delete c.rsid;
+    creatures.push(c);
+  }
+  // agents：原型实例 + 自有属性覆盖
+  agents.length = 0;
+  const aDump = data.agents || [];
+  for (const ad of aDump) {
+    const a = Object.create(Agent.prototype);
+    Object.assign(a, ad);
+    hydrateAgent(a);
+    delete a.tid; delete a.mcid; delete a.rcid;
+    agents.push(a);
+  }
+
+  // 引用图二次回填（先建 id→实体 Map 再挂引用）
+  const aMap = new Map(), cMap = new Map(), tMap = new Map();
+  for (const a of agents) aMap.set(a.id, a);
+  for (let i = 0; i < creatures.length; i++) cMap.set(i, creatures[i]);   // 导出序号 = 数组下标
+  for (const t of tasks.list) tMap.set(t.id, t);
+  for (let i = 0; i < aDump.length; i++) {
+    const d = aDump[i], a = agents[i];
+    if ("tid" in d) a.task = tMap.get(d.tid) || null;
+    if ("mcid" in d) a.mount = cMap.get(d.mcid) || null;
+    if ("rcid" in d) a.rescuing = cMap.get(d.rcid) || null;
+  }
+  for (let i = 0; i < cDump.length; i++) {
+    const d = cDump[i], c = creatures[i];
+    if ("owid" in d) c.owner = aMap.get(d.owid) || null;
+    if ("rbid" in d) c.riddenBy = aMap.get(d.rbid) || null;
+    if ("cbid" in d) c.carriedBy = aMap.get(d.cbid) || null;
+    if ("rsid" in d) c.rescuer = aMap.get(d.rsid) || null;
+  }
+  for (let i = 0; i < (data.tasks || []).length; i++) {
+    const d = data.tasks[i], t = tasks.list[i];
+    if ("cr" in d) t.creature = cMap.get(d.cr) || undefined;
+    for (const aid of (d.workers || [])) { const wa = aMap.get(aid); if (wa) t.workers.add(wa); }
+  }
+  for (let i = 0; i < (data.ships || []).length; i++) {
+    const d = data.ships[i], s = w.ships[i];
+    s.sailor = ("said" in d) ? (aMap.get(d.said) || null) : null;
+    if ("tship" in d) s.target = w.ships[d.tship] || null;
+    delete s.said; delete s.tship;
+  }
+
+  // 纪事与单调计数（logSeq 截断安全：与 logs 内容一并恢复）
+  w.logs = (data.logs || []).map(l => ({ t: l.t, text: l.text }));
+  w.logSeq = data.logSeq || w.logs.length;
+
+  // 名字唯一池 / id 序列 / 随机流（写回必须晚于 genWorld——它会消耗 rand 与名字池）
+  agentNamePoolRestore(data.names);
+  let maxA = 0; for (const a of agents) if (a.id > maxA) maxA = a.id;
+  agentIdSeqSet(maxA + 1);
+  let maxT = 0; for (const t of tasks.list) if (t.id > maxT) maxT = t.id;
+  taskIdSeqSet(maxT + 1);
+  if (data.rng !== undefined) rngRestore(data.rng);
+
+  // 失效清扫：联合库存缓存 / 缩略图 / 视口探索队列 / 受困动物扫描缓存（跨世界引用一律作废）
+  jointStockDirty();
+  for (const [, c] of w.chunks) c.thumbDirty = true;
+  _exploreQueue.length = 0; _queued.clear();
+  _rescueScan.t = -9; _rescueScan.victim = null;
+  _lastPond = null;
+  return true;
 }
 
 "use strict";
@@ -7551,84 +8074,67 @@ function ditherSprite(dir) { // 沙滩格靠草一侧撒上草色碎点（dir = 
 }
 
 // ============================================================
-// 气候要素贴花（v0.6.16）：取代整格 tint——浮冰/积雪斑/雪帽/枯草斑四类 sticker。
-// 透明底、惰性烘焙、每类 3 个 hash 变体；render.js 按强度场概率撒点
-// （深处浓密、交界犬牙稀疏）。固定调色板参照 foam/dither 先例，shade 只喂 hex。
+// 气候要素贴花（v0.6.16 引入；v0.6.19 痕迹化重绘）：取代整格 tint——冰痕/雪迹/枯迹三类
+// 细碎点缀 + 雪帽/房顶雪盖。设计原则：稍微能看出来即可——低对比、小占格、透明底、
+// 像素点阵；render.js 按强度场概率撒点（门槛 0.35、深处封顶，交界带干净）。
+// 固定调色板参照 foam/dither 先例，shade 只喂 hex。
 // ============================================================
-const ICE_SHAPES = [
-  [   // 浮冰 v0：圆棱冰盘，左上受光白、右下厚度缘，斜向裂纹
-    "....WWWWW.....",
-    "..WWWWWWWWB...",
-    ".WWWWWWWCWWD..",
-    ".WWWWWWCCWWD..",
-    "WWWWWWCWWWWWD.",
-    "WWWWWCWWWWWWD.",
-    ".WWWCCWWWWWDD.",
-    "..BBWCWWWDDDD.",
-    "...BBCBBDDDD..",
-    ".....DDDDD....",
-  ],
-  [   // 浮冰 v1：狭长碎冰排，反斜裂纹
-    "...WWWWW......",
-    ".WWWWWWWWWD...",
-    ".WCWWWWWWWWD..",
-    "WWCWWWWWWWWWD.",
-    ".WCWWWWWWWWDD.",
-    ".BWCWWWWWWWDD.",
-    "..BCWWWWWWDDD.",
-    "...BBWCWWDDDD.",
-    "....BBCCBDDD..",
-    "......DDDD....",
-  ],
-];
-const ICE_PAL = { W: "#f2f8fd", B: "#cfe4f2", D: "#a9c9de", C: "#7fa8c4" };
-function iceSprite(v) {   // 浮冰：水面不规则冰块（v2 = v0 镜像），透明底
+function iceSprite(v) {   // 冰痕（v0.6.19 痕迹化重绘，删大冰盘）：水面细碎薄冰纹——1~3 条 1px 细白短线 + 2~3 个 1px 小白点，低饱和淡蓝白，透明底
   return sprGet(`ice${v}`, () => {
     const { cv, g } = sprCtx(SPR, SPR);
-    const rows = v === 2 ? mirrorRows(ICE_SHAPES[0]) : ICE_SHAPES[v % 2];
-    stampArt(g, rows, ICE_PAL, 1, 1, 2);
+    const nLine = 1 + ((hash2(v * 31 + 7, 101) * 3) | 0);            // 1~3 条
+    for (let i = 0; i < nLine; i++) {
+      const diag = hash2(v * 23 + i * 11, 71) < 0.5;                 // 变体差异：横线 / 斜线锯齿
+      const dir = hash2(i * 3, v + 7) < 0.5 ? 1 : -1;                // 斜线走向 ±1
+      const lx = 3 + Math.round(hash2(v * 7 + i * 3, 13) * 6);       // 居中偏随机（占格 ≤40%）
+      const ly = 4 + Math.round(hash2(19, v * 9 + i * 5) * 8);
+      const len = 3 + ((hash2(v + i * 7, 23) * 3) | 0);              // 3~5px 细短线
+      for (let k = 0; k < len; k++) {
+        pxF(g, Math.min(15, lx + k), Math.min(15, Math.max(0, ly + (diag ? (k % 2) * dir : 0))),
+            k === len - 1 ? "#dceef8" : "#a9c9de");                  // 线尾更淡
+      }
+    }
+    for (let i = 0; i < 2 + (v % 2); i++) {                          // 2~3 个 1px 小白点
+      pxF(g, 4 + Math.round(hash2(v * 13 + i * 41, 31) * 8),
+             4 + Math.round(hash2(37, v * 11 + i * 17) * 8),
+          i % 2 ? "#dceef8" : "#a9c9de");
+    }
     return cv;
   });
 }
 
-function snowPatchSprite(v) {   // 草地积雪斑：白斑 + 淡蓝底影 + 露草点
+function snowPatchSprite(v) {   // 雪迹（v0.6.19 痕迹化重绘，删大白斑）：3~5 个 1~2px 细小霜点 + 极淡白晕低覆盖小块，占格 ≤45%，透明底
   return sprGet(`sp${v}`, () => {
     const { cv, g } = sprCtx(SPR, SPR);
-    const P = [[6.4, 3.4, 7.5, 7.5], [5.6, 4.1, 8, 7], [6.8, 3.1, 8, 8.5]][v % 3];
-    fillEllipseF(g, P[2], P[3] + 1.2, P[0], P[1], "#c9dcea");                                  // 淡蓝底影
-    fillEllipseF(g, P[2], P[3], P[0], P[1], "#eef5fb");                                        // 积雪斑
-    fillEllipseF(g, P[2] - P[0] * 0.3, P[3] - P[1] * 0.35, P[0] * 0.5, P[1] * 0.45, "#fbfdff");// 受光高光
-    for (let i = 0; i < 3; i++) {   // 斑缘露草 2~3 点（草尖顶破雪层）
-      const ang = hash2(v * 17 + i * 31, v * 29 + i * 7) * 6.283;
-      pxF(g, Math.round(P[2] + Math.cos(ang) * P[0] * (0.72 + hash2(v + i, i * 13) * 0.36)),
-               Math.round(P[3] + Math.sin(ang) * P[1] * (0.72 + hash2(i * 5, v + i) * 0.36)),
-          i === 2 ? "#4d7842" : "#5e8c4f");
+    // 极淡白晕：2~3 个 2px 低覆盖小块（#f4f9fd 比霜点更淡，垫底）
+    for (let i = 0; i < 2 + (v % 2); i++) {
+      rectF(g, 4 + Math.round(hash2(v * 17 + i * 31, 91) * 6),
+               4 + Math.round(hash2(83, v * 19 + i * 13) * 6), 2, 2, "#f4f9fd");
     }
-    pxF(g, Math.round(P[2] + (hash2(v, 99) - 0.5) * P[0]), Math.round(P[3] + (hash2(99, v) - 0.5) * P[1]), "#3f6838");
+    for (let i = 0; i < 3 + (v % 3); i++) {                          // 3~5 个 1~2px 霜点
+      const two = hash2(v * 7 + i * 5, 47) < 0.4;
+      pxF(g, 4 + Math.round(hash2(v * 29 + i * 3, 61) * 8),
+             4 + Math.round(hash2(53, v * 23 + i * 9) * 8), "#eef5fb");
+      if (two) pxF(g, 5 + Math.round(hash2(v * 29 + i * 3, 61) * 8),
+                      4 + Math.round(hash2(53, v * 23 + i * 9) * 8), "#eef5fb");
+    }
     return cv;
   });
 }
 
-function dryPatchSprite(v) {    // 枯草斑：枯黄斑 + 裸土点 + 干裂纹 + 枯茎
+function dryPatchSprite(v) {    // 枯迹（v0.6.19 痕迹化重绘，删大枯斑）：2~3 根 1px 小枯茎 + 3~4 个枯黄细点，低饱和，占格 ≤40%，透明底
   return sprGet(`dp${v}`, () => {
     const { cv, g } = sprCtx(SPR, SPR);
-    const P = [[6.2, 3.6, 8, 7.5], [5.4, 4.2, 7.5, 8], [6.6, 3.2, 8.5, 7]][v % 3];
-    fillEllipseF(g, P[2], P[3] + 1, P[0], P[1], shade("#a08a3e", 0.85));                       // 落影
-    fillEllipseF(g, P[2], P[3], P[0], P[1], "#c8ae55");                                        // 枯黄斑
-    fillEllipseF(g, P[2] - P[0] * 0.25, P[3] - P[1] * 0.3, P[0] * 0.45, P[1] * 0.4, "#d8c06a");// 亮芯
-    for (let i = 0; i < 3; i++) {   // 裸土点
-      pxF(g, Math.round(P[2] + (hash2(i * 3, v * 11 + i) - 0.5) * 1.6 * P[0]),
-               Math.round(P[3] + (hash2(v * 13 + i * 41, v * 7 + i * 17) - 0.5) * 1.6 * P[1]),
-          i === 1 ? "#8a6b46" : "#9a7b52");
+    for (let i = 0; i < 2 + (v % 2); i++) {                          // 2~3 根 1px 小枯茎（高 2~3px）
+      const sx = 4 + Math.round(hash2(v * 13 + i * 37, 71) * 8);
+      const sy = 5 + Math.round(hash2(43, v * 17 + i * 11) * 6);
+      rectF(g, sx, sy, 1, 2 + (i % 2), i === 1 ? "#96814a" : "#a08a4a");
     }
-    const cx2 = Math.round(P[2] - P[0] * 0.4), cy2 = Math.round(P[3]);
-    rectF(g, cx2, cy2, 3, 1, "#7c6438");                                                       // 干裂纹（两段折线）
-    pxF(g, cx2 + 3, cy2 - 1, "#7c6438");
-    const dx2 = Math.round(P[2] + P[0] * 0.2), dy2 = Math.round(P[3] + P[1] * 0.4);
-    pxF(g, dx2, dy2, "#7c6438"); pxF(g, dx2 + 1, dy2 + 1, "#7c6438"); pxF(g, dx2 + 2, dy2, "#7c6438");
-    const sx2 = Math.round(P[2] + (hash2(v, 57) - 0.5) * P[0]);                                // 枯茎 2 根
-    rectF(g, sx2, Math.round(P[3] - P[1] * 0.6), 1, 3, "#a08a3e");
-    rectF(g, sx2 + 3, Math.round(P[3] - P[1] * 0.3), 1, 3, "#93803a");
+    for (let i = 0; i < 3 + (v % 2); i++) {                          // 3~4 个枯黄细点
+      pxF(g, 4 + Math.round(hash2(v * 11 + i * 23, 67) * 8),
+             4 + Math.round(hash2(59, v * 7 + i * 29) * 8),
+          i % 2 ? "#c8ae55" : "#b89c4e");
+    }
     return cv;
   });
 }
@@ -7642,6 +8148,25 @@ function snowCapSprite(v) {     // 雪帽：山脊/树顶白帽（上白下沿�
   return sprGet(`cap${v}`, () => {
     const { cv, g } = sprCtx(SPR, SPR);
     stampArt(g, CAP_SHAPES[v % 3], { W: "#f4f9fd", B: "#c9dcea" }, 1, 2, 5);
+    return cv;
+  });
+}
+
+function roofSnowSprite(v) {    // 房顶薄雪盖（v0.6.19 新增）：白雪线沿屋脊扁条 + 檐口 1~2 处小垂雪，低对比，透明底（2 变体）
+  return sprGet(`rsnow${v}`, () => {
+    const { cv, g } = sprCtx(SPR, 4);                              // 16×4 扁条，画在屋顶上沿
+    rectF(g, 2, 0, 12, 2, "#f4f9fd");                              // 主雪线（上 2 行）
+    rectF(g, 1, 1, 14, 1, "#f4f9fd");                              // 次行略宽，压住屋脊两肩
+    rectF(g, 2, 2, 12, 1, "#c9dcea");                              // 底沿淡蓝雪棱
+    if (v === 0) {
+      rectF(g, 3, 3, 1, 1, "#c9dcea");                             // 檐口垂雪 ①
+      pxF(g, 4, 3, "#eef5fb");
+      rectF(g, 10, 3, 2, 1, "#c9dcea");                            // 檐口垂雪 ②（2px）
+    } else {
+      rectF(g, 4, 3, 2, 1, "#c9dcea");                             // 垂雪错位（2px）
+      pxF(g, 11, 3, "#c9dcea");                                    // 檐口垂雪 ②（1px）
+      pxF(g, 1, 2, "#eef5fb");                                     // 左端雪粒
+    }
     return cv;
   });
 }
@@ -7950,6 +8475,18 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
         const hspr = houseSprite(floors, stone, granary, night > 0.3);
         const scale = s / SPR;
         ctx.drawImage(hspr, px, py + s - hspr.height * scale, s + 0.5, hspr.height * scale);
+        // 房顶雪帽（v0.6.19）：雪带内按 强度×SNOW_P 掷骰（hash 盐 +53，与地面贴花 +41 区分；
+        // climateAt falsy 容错），roofSnowSprite 扁条压屋脊——
+        // houseSprite 画布 16×28 底锚（同分支 drawImage：sprite 顶 = py+s-28×scale），
+        // 屋顶上沿画布 y = max(0, wallTop-6) = 0/4/8（楼层 3/2/1），雪盖贴 ridge 行（roofTop-1）
+        const hCit = climateItOf(x, y);
+        const hCl = typeof climateAt === "function" ? climateAt(x, y) : null;
+        if (hCit > 0 && hCl === "snow" && hash2(x * 73 + 53, y * 151) < hCit * (SIM.CLIMATE.SNOW_P || 0.28)) {
+          const roofTop = floors >= 3 ? 0 : floors >= 2 ? 4 : 8;       // 屋顶上沿（画布 y，随楼层上移）
+          ctx.drawImage(roofSnowSprite((hash2(x * 73 + 59, y * 151) * 2) | 0),
+                        px + s * 0.05, py + s - 28 * scale + (roofTop - 1) * scale,
+                        s * 0.9, s * 0.25);                            // 与房子同宽 90%、高 1/4，贴屋顶上沿
+        }
         const sett = granary ? settlementAt(x, y) : null;
         if (sett && sett.level >= 2) { // 市政厅旗杆 + 三角旗
           ctx.fillStyle = "#3a2a18";
@@ -8042,27 +8579,28 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
         ctx.fillRect(px, py, s + 0.5, s + 0.5);
       }
 
-      // 气候要素贴花（v0.6.16）：整格 tint 移除（半幅变色+直线分界）——气候只经要素贴花体现。
-      // 概率 = 强度 × 基准P，hash2 确定性掷骰（无每帧随机）：深处浓密、交界犬牙稀疏，边界随
-      // 噪声曲线犬牙交错无任何直线痕迹。画在 tile 之后、建筑/角色之前；s<6 远距不撒（过小成噪点）
+      // 气候要素贴花（v0.6.16 定位；v0.6.19 痕迹化精修）：整格 tint 移除——气候只经要素贴花体现。
+      // 概率 = 基准P × clamp((强度-0.35)/0.65, 0, 1)：强度 <0.35 交界带完全不撒（干净），深处封顶基准P；
+      // hash2 确定性掷骰（无每帧随机）。画在 tile 之后、建筑/角色之前；s<6 远距不撒（过小成噪点）
       if (s >= 6 && (tile === T.WATER || tile === T.DEEP || tile === T.GRASS ||
                      tile === T.MOUNTAIN || tile === T.TREE || tile === T.SAND)) {
         const cit = climateItOf(x, y);
         if (cit > 0) {
           const cl = typeof climateAt === "function" ? climateAt(x, y) : null;
+          const gate = Math.min(1, Math.max(0, (cit - 0.35) / 0.65));   // 边疆 fringe：门槛 0.35、深处封顶
           const roll = hash2(x * 73 + 41, y * 151);
           if (cl === "snow") {
             const dv = (hash2(x * 73 + 47, y * 151) * 3) | 0;
-            if ((tile === T.WATER || tile === T.DEEP) && roll < cit * (SIM.CLIMATE.ICE_P || 0.55))
-              ctx.drawImage(iceSprite(dv), px + s * 0.15, py + s * 0.15, s * 0.7, s * 0.7);        // 占格 70% 居中
-            else if (tile === T.GRASS && roll < cit * (SIM.CLIMATE.SNOW_P || 0.5))
-              ctx.drawImage(snowPatchSprite(dv), px + s * 0.12, py + s * 0.14, s * 0.76, s * 0.72);
-            else if ((tile === T.MOUNTAIN || tile === T.TREE) && roll < cit * (SIM.CLIMATE.SNOW_P || 0.5))
-              ctx.drawImage(snowCapSprite(dv), px + s * 0.2, py + s * 0.04, s * 0.6, s * 0.42);    // 顶 1/3 处小尺寸
+            if ((tile === T.WATER || tile === T.DEEP) && roll < gate * (SIM.CLIMATE.ICE_P || 0.3))
+              ctx.drawImage(iceSprite(dv), px + s * 0.3, py + s * 0.3, s * 0.4, s * 0.4);           // 冰痕占格 40% 居中
+            else if (tile === T.GRASS && roll < gate * (SIM.CLIMATE.SNOW_P || 0.28))
+              ctx.drawImage(snowPatchSprite(dv), px + s * 0.28, py + s * 0.28, s * 0.44, s * 0.44); // 雪迹占格 44% 居中
+            else if ((tile === T.MOUNTAIN || tile === T.TREE) && roll < gate * (SIM.CLIMATE.SNOW_P || 0.28))
+              ctx.drawImage(snowCapSprite(dv), px + s * 0.2, py + s * 0.04, s * 0.6, s * 0.42);     // 雪帽：顶 1/3 处小尺寸（不动）
           } else if (cl === "drought" && (tile === T.GRASS || tile === T.SAND) &&
-                     roll < cit * (SIM.CLIMATE.DRY_P || 0.5) * (tile === T.SAND ? 0.5 : 1)) {
+                     roll < gate * (SIM.CLIMATE.DRY_P || 0.3) * (tile === T.SAND ? 0.5 : 1)) {
             const dv = (hash2(x * 73 + 47, y * 151) * 3) | 0;
-            ctx.drawImage(dryPatchSprite(dv), px + s * 0.14, py + s * 0.14, s * 0.72, s * 0.72);
+            ctx.drawImage(dryPatchSprite(dv), px + s * 0.3, py + s * 0.3, s * 0.4, s * 0.4);        // 枯迹占格 40% 居中
           }
         }
       }
@@ -10376,6 +10914,94 @@ function demoWelcome() {
     sfx.play("click");
     const m = el("changelog-modal");
     if (m && !m.classList.contains("hidden")) closeModal("changelog-modal"); else openModal("changelog-modal");
+  });
+
+  // ---- 存档与读档（v0.7.0）：PNG = 已点亮地图本体（2px/tile），世界状态藏在 tEXt 元数据（save.js 逻辑层）----
+  // 地图图：遍历 litCells 包围盒逐格着色——TILE_META 底色，池塘/河流与海区分，未点亮（VOID）透明
+  function renderMapImage() {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const k of world.litCells) {
+      const p = k.split(","), x = +p[0], y = +p[1];
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    if (x1 < x0) { x0 = y0 = -26; x1 = y1 = 26; }   // 尚无点亮：回退初始区
+    const S = 2;
+    const cv = document.createElement("canvas");
+    cv.width = (x1 - x0 + 1) * S; cv.height = (y1 - y0 + 1) * S;
+    const g = cv.getContext("2d");
+    g.clearRect(0, 0, cv.width, cv.height);
+    for (const k of world.litCells) {
+      const p = k.split(","), x = +p[0], y = +p[1];
+      const t = tileAt(x, y);
+      if (t === T.VOID) continue;
+      let color = TILE_META[t] ? TILE_META[t].color : "#33415a";
+      if (t === T.WATER) {   // 池塘/河流与海区分着色（与主画面同款变体色）
+        if (world.ponds && world.ponds.has(k)) color = POND_VARIANTS[(hash2(x, y) * 4) | 0];
+        else if (world.rivers && world.rivers.has(k)) color = RIVER_VARIANTS[(hash2(x, y) * 4) | 0];
+      }
+      g.fillStyle = color;
+      g.fillRect((x - x0) * S, (y - y0) * S, S, S);
+    }
+    return new Promise(res => cv.toBlob(async b => res(new Uint8Array(await b.arrayBuffer())), "image/png"));
+  }
+  function saveFileName() {
+    const d = new Date(), pad = n => String(n).padStart(2, "0");
+    return `小世界存档${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.png`;
+  }
+  const saveBtn = el("save-btn");
+  if (saveBtn) saveBtn.addEventListener("click", async () => {
+    sfx.play("click");
+    if (typeof saveExport !== "function" || typeof buildSavePng !== "function") { logMsg("存档系统未就绪。"); return; }
+    try {
+      const data = saveExport();
+      data.camera = { x: camera.x, y: camera.y, zoom: camera.zoom };   // 相机由表现层补充
+      const bytes = await buildSavePng(await renderMapImage(), data);
+      const url = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = saveFileName();
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      logMsg("世界已存档。");
+    } catch (err) { logMsg("存档失败：" + err.message); }
+  });
+  const loadBtn = el("load-btn"), loadFile = el("load-file");
+  let pendingLoad = null;
+  if (loadBtn && loadFile) {
+    loadBtn.addEventListener("click", () => { sfx.play("click"); loadFile.click(); });
+    loadFile.addEventListener("change", async () => {
+      const f = loadFile.files && loadFile.files[0];
+      loadFile.value = "";   // 允许连续选择同一文件
+      if (!f) return;
+      try {
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        const data = typeof readSavePng === "function" ? await readSavePng(bytes) : null;
+        if (!data || typeof saveImport !== "function") { logMsg("这不是有效的世界存档。"); return; }
+        pendingLoad = data;
+        const totalDays = Math.floor(world.time / SIM.DAY_LEN);
+        const ct = el("confirm-text");
+        if (ct) ct.textContent = `读档将覆盖当前世界进度（第${Math.floor(totalDays / SIM.YEAR_DAYS) + 1}年${totalDays % SIM.YEAR_DAYS + 1}月），确定？`;
+        openModal("confirm-modal");
+      } catch (err) { logMsg("这不是有效的世界存档。"); }
+    });
+  }
+  const confirmOk = el("confirm-ok");
+  if (confirmOk) confirmOk.addEventListener("click", () => {
+    sfx.play("click");
+    closeModal("confirm-modal");
+    if (!pendingLoad || typeof saveImport !== "function") return;
+    const data = pendingLoad; pendingLoad = null;
+    if (demoState && !el("demo-modal").classList.contains("hidden")) closeModal("demo-modal");   // 演示播放中先收演示
+    saveImport(data);
+    const cam = data.camera || {};
+    camera.x = cam.x !== undefined ? cam.x : world.store.x;
+    camera.y = cam.y !== undefined ? cam.y : world.store.y;
+    if (cam.zoom) camera.zoom = Math.min(6, Math.max(0.1, cam.zoom));
+    syncZoomUI();
+    selectedAgent = null; selectedCreature = null; followMode = false; syncFollowBtn();   // 选中/跟随复位
+    infoPanel.classList.add("hidden");
+    const totalDays = Math.floor(world.time / SIM.DAY_LEN);
+    logMsg(`世界恢复至 第${Math.floor(totalDays / SIM.YEAR_DAYS) + 1}年${totalDays % SIM.YEAR_DAYS + 1}月。`);
   });
   const demoBtn = el("demo-btn");
   if (demoBtn) demoBtn.addEventListener("click", () => {

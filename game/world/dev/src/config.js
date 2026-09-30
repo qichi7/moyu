@@ -1,6 +1,6 @@
 "use strict";
 // ============ 全局配置 ============
-const BUILD_ID = "v0.6.18";
+const BUILD_ID = "v0.7.0";
 
 // tile 类型
 const T = {
@@ -190,9 +190,9 @@ const SIM = {
   METEOR_DUR: 3,
   METEOR_MOOD: 0.3,           // 目睹流星的心情回复/秒
   // ---- 气候与洋流（v0.6.15 定居区北缘雪原/南缘旱带+顺逆流航速+台风；v0.6.16 边界噪声曲线化+连续强度场+浮冰船速）----
-  CLIMATE: { EDGE_INSET: 10, SNOW_FARM: 0.85, SNOW_BERRY: 0.8, DROUGHT_FARM: 0.8, DROUGHT_BERRY: 0.7,
-    WOBBLE: 20, FADE: 30,                    // 雪线/旱线噪声扰动幅度（±格）/ 强度场爬坡带宽（格）
-    ICE_P: 0.55, SNOW_P: 0.5, DRY_P: 0.5,    // 贴花概率基准：浮冰/积雪/干裂贴花出现概率（表现层按概率消费，非强度阈值）
+  CLIMATE: { EDGE_INSET: 4, SNOW_FARM: 0.85, SNOW_BERRY: 0.8, DROUGHT_FARM: 0.8, DROUGHT_BERRY: 0.7,
+    WOBBLE: 20, FADE: 18,                    // 雪线/旱线噪声扰动幅度（±格）/ 强度场爬坡带宽（格）；v0.6.19 收窄：只探入定居区 4 格、总纵深 ~22 格
+    ICE_P: 0.3, SNOW_P: 0.28, DRY_P: 0.3,    // 贴花概率基准（v0.6.19 边疆 fringe：门槛 0.35、深处封顶——强度<0.35 交界带不出现；出现概率 = P × clamp((强度-0.35)/0.65, 0, 1)）
     ICE_SHIP: 0.85 },                        // 浮冰海面船速倍率（水面且 climateIntensity≥0.5）
   CURRENT_SHIP_FAST: 1.15,    // 顺流航速倍率
   CURRENT_SHIP_SLOW: 0.9,     // 逆流航速倍率

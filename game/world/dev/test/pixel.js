@@ -503,7 +503,7 @@ assert(climRes.offVsFull && climRes.callsFull > 0,
   "气候贴花：强度场 0→1 整帧指纹变化（浮冰/积雪/雪帽贴花 + 飘雪粒子生效，强度场调用 " +
   climRes.callsFull + " 次；v0.6.16 整格 tint 已删，视觉全走贴花）");
 assert(climRes.halfVsOff && climRes.halfVsFull,
-  "气候贴花：强度 0.5 帧与 0/1 两端皆不同（贴花密度随强度场线性缩放，hash 概率掷骰生效）");
+  "气候贴花：强度 0.5 帧与 0/1 两端皆不同（v0.6.19 门槛 gate 下贴花密度仍随强度场缩放，hash 概率掷骰生效）");
 assert(climRes.callsOff > 0,
   "气候贴花：强度 0 时逐候选格仍询强度场（门控在 climateItOf，无气候时逐格短路不画）");
 
@@ -511,19 +511,198 @@ assert(climRes.callsOff > 0,
 assert(vm.runInContext(`
   [0,1,2].every(v => sprStats(iceSprite(v)).opaque > 0) &&
   new Set([0,1,2].map(v => __bufKey(iceSprite(v)))).size === 3
-`, ctx), "贴花：浮冰 iceSprite 3 变体非空且互异（v2 为 v0 镜像）");
+`, ctx), "贴花：冰痕 iceSprite 3 变体非空且互异（v0.6.19 痕迹化重绘，hash 变体）");
 assert(vm.runInContext(`
   [0,1,2].every(v => sprStats(snowPatchSprite(v)).opaque > 0) &&
   new Set([0,1,2].map(v => __bufKey(snowPatchSprite(v)))).size === 3
-`, ctx), "贴花：积雪斑 snowPatchSprite 3 变体非空且互异");
+`, ctx), "贴花：雪迹 snowPatchSprite 3 变体非空且互异（v0.6.19 痕迹化重绘）");
 assert(vm.runInContext(`
   [0,1,2].every(v => sprStats(dryPatchSprite(v)).opaque > 0) &&
   new Set([0,1,2].map(v => __bufKey(dryPatchSprite(v)))).size === 3
-`, ctx), "贴花：枯草斑 dryPatchSprite 3 变体非空且互异");
+`, ctx), "贴花：枯迹 dryPatchSprite 3 变体非空且互异（v0.6.19 痕迹化重绘）");
 assert(vm.runInContext(`
   [0,1,2].every(v => sprStats(snowCapSprite(v)).opaque > 0) &&
   new Set([0,1,2].map(v => __bufKey(snowCapSprite(v)))).size === 3
 `, ctx), "贴花：山树雪帽 snowCapSprite 3 变体非空且互异");
+
+// ---- 5d. 房顶雪盖 sprite（v0.6.19 新增）：非空 + 2 变体互异 ----
+assert(vm.runInContext(`
+  [0,1].every(v => sprStats(roofSnowSprite(v)).opaque > 0) &&
+  __bufKey(roofSnowSprite(0)) !== __bufKey(roofSnowSprite(1))
+`, ctx), "贴花：房顶雪盖 roofSnowSprite 2 变体非空且互异（v0.6.19）");
+
+// ---- 5e. 贴花 gate 结构断言（spy 口径，v0.6.19）：门槛 0.35——cit<0.35 交界带整帧零地面贴花 ----
+// 原理：spy 强制 climateIntensity 恒 0.34（gate = clamp((0.34-0.35)/0.65,0,1) = 0，逐格成立、与地理无关）
+// → 地面贴花（冰痕/雪迹/雪帽/枯迹）drawImage 必须整帧 0 次；强制 1（gate=1）后同视野必 >0 对照。
+// 计数按 sprite 画布对象同一性（sprGet 缓存，引用稳定）；roofSnow 不计入——其按设计用裸 cit 不设门槛。
+const gateSpy = vm.runInContext(`
+  (() => {
+    const decalCvs = new Set();
+    for (let v = 0; v < 3; v++) {
+      decalCvs.add(iceSprite(v)); decalCvs.add(snowPatchSprite(v));
+      decalCvs.add(dryPatchSprite(v)); decalCvs.add(snowCapSprite(v));
+    }
+    const countDecals = (cit) => {
+      camera.zoom = 1.6; camera.x = world.store.x; camera.y = world.store.y;
+      const c = __freshCtx();
+      let n = 0;
+      const wrapped = new Proxy(c, {
+        get(t, k) {
+          if (k === "drawImage") return (...a) => { if (decalCvs.has(a[0])) n++; return t.drawImage(...a); };
+          const v = t[k];
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+      const oAt = climateAt, oIt = climateIntensity;
+      climateAt = function () { return "snow"; };
+      climateIntensity = function () { return cit; };
+      drawScene(wrapped, 1280, 800, null, null, 0.5, 1.234);
+      climateAt = oAt; climateIntensity = oIt;
+      return n;
+    };
+    return { lo: countDecals(0.34), hi: countDecals(1) };
+  })()
+`, ctx);
+assert(gateSpy.lo === 0,
+  "贴花 gate（spy）：cit=0.34（<0.35 门槛）整帧地面贴花 drawImage 0 次（实测 " + gateSpy.lo + "，v0.6.19）");
+assert(gateSpy.hi > 0,
+  "贴花 gate（spy）：cit=1 深处贴花正常撒点（实测 " + gateSpy.hi + " 次，同视野对照）");
+
+// ---- 5f. 房顶雪帽渲染分支（v0.6.19）：裸 cit×SNOW_P 掷骰 + 屋顶 y 几何按楼层对齐 ----
+// 真镇 4 屋掷骰全落在窗上段（永不画），故注入合成房屋：先搜 roll53 ∈ [0.34P, P) 的格（cit=1 必画、
+// 0.34 必不画，证明裸 cit 缩放），push {x,y,floors} 进 world.houses（houseInfo 按长度重建缓存）+ setTile 造 HOUSE 格；
+// spy 强制 cit/climateAt，Proxy 记录 roofSnow drawImage 实参，核对 dx/dy/dw/dh 与楼层 roofTop 几何式逐项相等
+const roofRes = vm.runInContext(`
+  (() => {
+    const P = SIM.CLIMATE.SNOW_P || 0.28;
+    const okRoll = (x, y) => { const r = hash2(x * 73 + 53, y * 151); return r >= 0.34 * P && r < P ? r : null; };
+    const savedN = world.houses.length;
+    const picks = [];
+    for (const floors of [2, 3]) {   // 两个楼层档：分别核对 roofTop 0/4/8 映射中的两档
+      let got = null;
+      for (let y = world.store.y - 16; y <= world.store.y + 16 && !got; y++)
+        for (let x = world.store.x - 30; x <= world.store.x + 30; x++) {
+          if (tileAt(x, y) !== T.GRASS || picks.some(p => Math.abs(p.x - x) < 2 && Math.abs(p.y - y) < 2)) continue;
+          if (okRoll(x, y) !== null) { got = { x, y, floors }; break; }
+        }
+      if (!got) return { skip: "无掷骰命中窗的草地格（罕见）" };
+      picks.push(got);
+    }
+    for (const p of picks) { world.houses.push({ x: p.x, y: p.y, floors: p.floors }); setTile(p.x, p.y, T.HOUSE); }
+    const rsCvs = [roofSnowSprite(0), roofSnowSprite(1)];
+    const probe = (cit) => {
+      camera.zoom = 6; camera.x = picks[0].x + 0.5; camera.y = picks[0].y + 0.5;
+      const c = __freshCtx();
+      const hits = [];
+      const wrapped = new Proxy(c, {
+        get(t, k) {
+          if (k === "drawImage") return (...a) => { if (rsCvs.includes(a[0])) hits.push({ dx: a[1], dy: a[2], dw: a[3], dh: a[4] }); return t.drawImage(...a); };
+          const v = t[k];
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+      const oAt = climateAt, oIt = climateIntensity;
+      climateAt = function () { return "snow"; };
+      climateIntensity = function () { return cit; };
+      drawScene(wrapped, 1280, 800, null, null, 0.5, 1.234);
+      climateAt = oAt; climateIntensity = oIt;
+      return hits;
+    };
+    const loHits = probe(0.34), hiHits = probe(1);
+    // 几何核对（帧中心 = picks[0]）：px=592/py=352 精确（相机对准该格），s=96、scale=6
+    const s2 = 16 * 6, scale = s2 / 16, px = 592, py = 352;
+    const roofTop = picks[0].floors >= 3 ? 0 : picks[0].floors >= 2 ? 4 : 8;
+    const e = {
+      dx: px + s2 * 0.05, dy: py + s2 - 28 * scale + (roofTop - 1) * scale, dw: s2 * 0.9, dh: s2 * 0.25,
+    };
+    const near = (a, b) => Math.abs(a - b) < 1e-9;
+    const geoOk = hiHits.some(h => near(h.dx, e.dx) && near(h.dy, e.dy) && near(h.dw, e.dw) && near(h.dh, e.dh));
+    const out = { lo: loHits.length, hi: hiHits.length, geoOk, roofTop, floors: picks[0].floors };
+    for (const p of picks) setTile(p.x, p.y, T.GRASS);
+    world.houses.length = savedN;   // 还原（houseInfo/_climBase 按长度重建缓存，自动失效）
+    return out;
+  })()
+`, ctx);
+if (roofRes.skip) {
+  console.log("SKIP", roofRes.skip + "，房顶雪帽分支人工验收");
+} else {
+  assert(roofRes.lo === 0 && roofRes.hi > 0,
+    "房顶雪帽（v0.6.19）：掷骰命中屋 cit=1 画 / cit=0.34 不画（裸 cit×SNOW_P 缩放，实测 lo=" +
+    roofRes.lo + " hi=" + roofRes.hi + "）");
+  assert(roofRes.geoOk,
+    "房顶雪帽（v0.6.19）：drawImage 几何逐项吻合（floors=" + roofRes.floors + " → roofTop=" +
+    roofRes.roofTop + "，雪盖贴屋脊行 90%×25%）");
+}
+
+// ---- 5g. 贴花 gate 真场边缘带对照（v0.6.19）：注入 houses 造纵深带，逐格扫描视口 gate 后对照整帧计数 ----
+// 真实定居区仅 3 格高、雪旱带在原点附近交叠，无法提供干净边缘带——注入纵向拉长的 houses 把雪带搬进
+// 有纵深空域（houses 只是气候基线锚点，无 HOUSE 格不参与绘制）。zoom 6 帧视口 = x±7 / y-4..+5 行；
+// 浅带帧（雪线外 1 格，cit≈1/18）先逐格核实视口内 gate≡0 再断言贴花 0 次（零侧无反例漏网）；
+// 深带帧（雪线外 19 格，cit≥1）逐格核实 gate≥0.4 再断言贴花 >0（真场 climateIntensity→gate 全链路）
+const gateField = vm.runInContext(`
+  (() => {
+    const gateOf = it => Math.min(1, Math.max(0, (it - 0.35) / 0.65));
+    const savedHouses = world.houses;
+    world.houses = [{ x: world.store.x, y: world.store.y + 56 }, { x: world.store.x + 2, y: world.store.y + 120 }];
+    world.time += 61;   // 强制刷 _climBase 缓存
+    const decalCvs = new Set();
+    for (let v = 0; v < 3; v++) {
+      decalCvs.add(iceSprite(v)); decalCvs.add(snowPatchSprite(v));
+      decalCvs.add(dryPatchSprite(v)); decalCvs.add(snowCapSprite(v));
+    }
+    let pick = null;
+    for (let xC = world.store.x - 70; xC <= world.store.x + 70 && !pick; xC++) {
+      const se = snowEdgeY(xC);
+      const yA = Math.round(se - 1), yB = Math.round(se - 19);
+      if (yB < 8) continue;   // 深带帧视口顶不越界
+      let maxGA = 0, minGB = 1;
+      for (let x = xC - 7; x <= xC + 7; x++) {
+        for (let y = yA - 4; y <= yA + 5; y++) maxGA = Math.max(maxGA, gateOf(climateIntensity(x, y)));
+        for (let y = yB - 4; y <= yB + 5; y++) minGB = Math.min(minGB, gateOf(climateIntensity(x, y)));
+      }
+      if (maxGA > 0 || minGB < 0.4) continue;
+      ensureChunksFor(xC - 9, yB - 9, xC + 9, yA + 9);
+      revealArea(xC, yA, 14); revealArea(xC, yB, 14);   // 点亮两帧视口（未探索=VOID 会跳过绘制）
+      const elig = y => { const t2 = tileAt(xC, y); return t2 === T.WATER || t2 === T.DEEP || t2 === T.GRASS || t2 === T.MOUNTAIN || t2 === T.TREE; };
+      let nA = 0, nB = 0;
+      for (let y = yA - 4; y <= yA + 5; y++) if (elig(y)) nA++;
+      for (let y = yB - 4; y <= yB + 5; y++) if (elig(y)) nB++;
+      if (nA >= 5 && nB >= 5) pick = { xC, yA, yB };   // 两帧各有足量可撒格：零侧非空洞成立
+    }
+    if (!pick) {
+      world.houses = savedHouses; world.time += 61;
+      return { skip: true };
+    }
+    const countDecals = (cx, cy) => {
+      camera.zoom = 6; camera.x = cx + 0.5; camera.y = cy + 0.5;
+      const c = __freshCtx();
+      let n = 0;
+      const wrapped = new Proxy(c, {
+        get(t, k) {
+          if (k === "drawImage") return (...a) => { if (decalCvs.has(a[0])) n++; return t.drawImage(...a); };
+          const v = t[k];
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+      drawScene(wrapped, 1280, 800, null, null, 0.5, 1.234);
+      return n;
+    };
+    const shallow = countDecals(pick.xC, pick.yA), deep = countDecals(pick.xC, pick.yB);
+    world.houses = savedHouses; world.time += 61;   // 还原并刷缓存
+    climateAt(world.store.x, world.store.y);
+    return { pick, shallow, deep };
+  })()
+`, ctx);
+if (gateField.skip) {
+  console.log("SKIP 贴花 gate 真场边缘带（无可行列，地理罕见），spy 口径已覆盖");
+} else {
+  assert(gateField.shallow === 0,
+    "贴花 gate（真场）：注入边缘带浅处（雪线外 1 格，视口逐格 gate≡0）整帧贴花 0 次（实测 " +
+    gateField.shallow + "，@x=" + gateField.pick.xC + ",y=" + gateField.pick.yA + "）");
+  assert(gateField.deep > 0,
+    "贴花 gate（真场）：深处（雪线外 19 格，视口逐格 gate≥0.4）贴花正常撒点（实测 " +
+    gateField.deep + " 次，@x=" + gateField.pick.xC + ",y=" + gateField.pick.yB + "）");
+}
 
 console.log(failed ? "\n== 渲染冒烟存在失败 ==" : "\n== 渲染冒烟全部通过 ==");
 process.exitCode = failed ? 1 : 0;

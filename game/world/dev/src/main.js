@@ -876,6 +876,94 @@
     const m = el("changelog-modal");
     if (m && !m.classList.contains("hidden")) closeModal("changelog-modal"); else openModal("changelog-modal");
   });
+
+  // ---- 存档与读档（v0.7.0）：PNG = 已点亮地图本体（2px/tile），世界状态藏在 tEXt 元数据（save.js 逻辑层）----
+  // 地图图：遍历 litCells 包围盒逐格着色——TILE_META 底色，池塘/河流与海区分，未点亮（VOID）透明
+  function renderMapImage() {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const k of world.litCells) {
+      const p = k.split(","), x = +p[0], y = +p[1];
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    if (x1 < x0) { x0 = y0 = -26; x1 = y1 = 26; }   // 尚无点亮：回退初始区
+    const S = 2;
+    const cv = document.createElement("canvas");
+    cv.width = (x1 - x0 + 1) * S; cv.height = (y1 - y0 + 1) * S;
+    const g = cv.getContext("2d");
+    g.clearRect(0, 0, cv.width, cv.height);
+    for (const k of world.litCells) {
+      const p = k.split(","), x = +p[0], y = +p[1];
+      const t = tileAt(x, y);
+      if (t === T.VOID) continue;
+      let color = TILE_META[t] ? TILE_META[t].color : "#33415a";
+      if (t === T.WATER) {   // 池塘/河流与海区分着色（与主画面同款变体色）
+        if (world.ponds && world.ponds.has(k)) color = POND_VARIANTS[(hash2(x, y) * 4) | 0];
+        else if (world.rivers && world.rivers.has(k)) color = RIVER_VARIANTS[(hash2(x, y) * 4) | 0];
+      }
+      g.fillStyle = color;
+      g.fillRect((x - x0) * S, (y - y0) * S, S, S);
+    }
+    return new Promise(res => cv.toBlob(async b => res(new Uint8Array(await b.arrayBuffer())), "image/png"));
+  }
+  function saveFileName() {
+    const d = new Date(), pad = n => String(n).padStart(2, "0");
+    return `小世界存档${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.png`;
+  }
+  const saveBtn = el("save-btn");
+  if (saveBtn) saveBtn.addEventListener("click", async () => {
+    sfx.play("click");
+    if (typeof saveExport !== "function" || typeof buildSavePng !== "function") { logMsg("存档系统未就绪。"); return; }
+    try {
+      const data = saveExport();
+      data.camera = { x: camera.x, y: camera.y, zoom: camera.zoom };   // 相机由表现层补充
+      const bytes = await buildSavePng(await renderMapImage(), data);
+      const url = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = saveFileName();
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      logMsg("世界已存档。");
+    } catch (err) { logMsg("存档失败：" + err.message); }
+  });
+  const loadBtn = el("load-btn"), loadFile = el("load-file");
+  let pendingLoad = null;
+  if (loadBtn && loadFile) {
+    loadBtn.addEventListener("click", () => { sfx.play("click"); loadFile.click(); });
+    loadFile.addEventListener("change", async () => {
+      const f = loadFile.files && loadFile.files[0];
+      loadFile.value = "";   // 允许连续选择同一文件
+      if (!f) return;
+      try {
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        const data = typeof readSavePng === "function" ? await readSavePng(bytes) : null;
+        if (!data || typeof saveImport !== "function") { logMsg("这不是有效的世界存档。"); return; }
+        pendingLoad = data;
+        const totalDays = Math.floor(world.time / SIM.DAY_LEN);
+        const ct = el("confirm-text");
+        if (ct) ct.textContent = `读档将覆盖当前世界进度（第${Math.floor(totalDays / SIM.YEAR_DAYS) + 1}年${totalDays % SIM.YEAR_DAYS + 1}月），确定？`;
+        openModal("confirm-modal");
+      } catch (err) { logMsg("这不是有效的世界存档。"); }
+    });
+  }
+  const confirmOk = el("confirm-ok");
+  if (confirmOk) confirmOk.addEventListener("click", () => {
+    sfx.play("click");
+    closeModal("confirm-modal");
+    if (!pendingLoad || typeof saveImport !== "function") return;
+    const data = pendingLoad; pendingLoad = null;
+    if (demoState && !el("demo-modal").classList.contains("hidden")) closeModal("demo-modal");   // 演示播放中先收演示
+    saveImport(data);
+    const cam = data.camera || {};
+    camera.x = cam.x !== undefined ? cam.x : world.store.x;
+    camera.y = cam.y !== undefined ? cam.y : world.store.y;
+    if (cam.zoom) camera.zoom = Math.min(6, Math.max(0.1, cam.zoom));
+    syncZoomUI();
+    selectedAgent = null; selectedCreature = null; followMode = false; syncFollowBtn();   // 选中/跟随复位
+    infoPanel.classList.add("hidden");
+    const totalDays = Math.floor(world.time / SIM.DAY_LEN);
+    logMsg(`世界恢复至 第${Math.floor(totalDays / SIM.YEAR_DAYS) + 1}年${totalDays % SIM.YEAR_DAYS + 1}月。`);
+  });
   const demoBtn = el("demo-btn");
   if (demoBtn) demoBtn.addEventListener("click", () => {
     const m = el("demo-modal");

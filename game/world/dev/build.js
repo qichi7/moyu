@@ -6,7 +6,7 @@ const root = __dirname;              // dev/
 const outRoot = path.join(root, ".."); // 项目根（index.html 所在）
 const read = f => fs.readFileSync(path.join(root, "src", f), "utf8");
 
-const logicFiles = ["events.js", "config.js", "noise.js", "path.js", "world.js", "tasks.js", "creature.js", "agent.js", "sim.js"];
+const logicFiles = ["events.js", "config.js", "noise.js", "path.js", "world.js", "tasks.js", "creature.js", "agent.js", "sim.js", "save.js"];
 const logic = logicFiles.map(read).join("\n\n");
 const render = read("audio.js") + "\n\n" + read("sprites.js") + "\n\n" + read("render.js") + "\n\n" + read("demo.js");
 const main = read("main.js");

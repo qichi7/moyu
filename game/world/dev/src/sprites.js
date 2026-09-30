@@ -1663,84 +1663,67 @@ function ditherSprite(dir) { // 沙滩格靠草一侧撒上草色碎点（dir = 
 }
 
 // ============================================================
-// 气候要素贴花（v0.6.16）：取代整格 tint——浮冰/积雪斑/雪帽/枯草斑四类 sticker。
-// 透明底、惰性烘焙、每类 3 个 hash 变体；render.js 按强度场概率撒点
-// （深处浓密、交界犬牙稀疏）。固定调色板参照 foam/dither 先例，shade 只喂 hex。
+// 气候要素贴花（v0.6.16 引入；v0.6.19 痕迹化重绘）：取代整格 tint——冰痕/雪迹/枯迹三类
+// 细碎点缀 + 雪帽/房顶雪盖。设计原则：稍微能看出来即可——低对比、小占格、透明底、
+// 像素点阵；render.js 按强度场概率撒点（门槛 0.35、深处封顶，交界带干净）。
+// 固定调色板参照 foam/dither 先例，shade 只喂 hex。
 // ============================================================
-const ICE_SHAPES = [
-  [   // 浮冰 v0：圆棱冰盘，左上受光白、右下厚度缘，斜向裂纹
-    "....WWWWW.....",
-    "..WWWWWWWWB...",
-    ".WWWWWWWCWWD..",
-    ".WWWWWWCCWWD..",
-    "WWWWWWCWWWWWD.",
-    "WWWWWCWWWWWWD.",
-    ".WWWCCWWWWWDD.",
-    "..BBWCWWWDDDD.",
-    "...BBCBBDDDD..",
-    ".....DDDDD....",
-  ],
-  [   // 浮冰 v1：狭长碎冰排，反斜裂纹
-    "...WWWWW......",
-    ".WWWWWWWWWD...",
-    ".WCWWWWWWWWD..",
-    "WWCWWWWWWWWWD.",
-    ".WCWWWWWWWWDD.",
-    ".BWCWWWWWWWDD.",
-    "..BCWWWWWWDDD.",
-    "...BBWCWWDDDD.",
-    "....BBCCBDDD..",
-    "......DDDD....",
-  ],
-];
-const ICE_PAL = { W: "#f2f8fd", B: "#cfe4f2", D: "#a9c9de", C: "#7fa8c4" };
-function iceSprite(v) {   // 浮冰：水面不规则冰块（v2 = v0 镜像），透明底
+function iceSprite(v) {   // 冰痕（v0.6.19 痕迹化重绘，删大冰盘）：水面细碎薄冰纹——1~3 条 1px 细白短线 + 2~3 个 1px 小白点，低饱和淡蓝白，透明底
   return sprGet(`ice${v}`, () => {
     const { cv, g } = sprCtx(SPR, SPR);
-    const rows = v === 2 ? mirrorRows(ICE_SHAPES[0]) : ICE_SHAPES[v % 2];
-    stampArt(g, rows, ICE_PAL, 1, 1, 2);
+    const nLine = 1 + ((hash2(v * 31 + 7, 101) * 3) | 0);            // 1~3 条
+    for (let i = 0; i < nLine; i++) {
+      const diag = hash2(v * 23 + i * 11, 71) < 0.5;                 // 变体差异：横线 / 斜线锯齿
+      const dir = hash2(i * 3, v + 7) < 0.5 ? 1 : -1;                // 斜线走向 ±1
+      const lx = 3 + Math.round(hash2(v * 7 + i * 3, 13) * 6);       // 居中偏随机（占格 ≤40%）
+      const ly = 4 + Math.round(hash2(19, v * 9 + i * 5) * 8);
+      const len = 3 + ((hash2(v + i * 7, 23) * 3) | 0);              // 3~5px 细短线
+      for (let k = 0; k < len; k++) {
+        pxF(g, Math.min(15, lx + k), Math.min(15, Math.max(0, ly + (diag ? (k % 2) * dir : 0))),
+            k === len - 1 ? "#dceef8" : "#a9c9de");                  // 线尾更淡
+      }
+    }
+    for (let i = 0; i < 2 + (v % 2); i++) {                          // 2~3 个 1px 小白点
+      pxF(g, 4 + Math.round(hash2(v * 13 + i * 41, 31) * 8),
+             4 + Math.round(hash2(37, v * 11 + i * 17) * 8),
+          i % 2 ? "#dceef8" : "#a9c9de");
+    }
     return cv;
   });
 }
 
-function snowPatchSprite(v) {   // 草地积雪斑：白斑 + 淡蓝底影 + 露草点
+function snowPatchSprite(v) {   // 雪迹（v0.6.19 痕迹化重绘，删大白斑）：3~5 个 1~2px 细小霜点 + 极淡白晕低覆盖小块，占格 ≤45%，透明底
   return sprGet(`sp${v}`, () => {
     const { cv, g } = sprCtx(SPR, SPR);
-    const P = [[6.4, 3.4, 7.5, 7.5], [5.6, 4.1, 8, 7], [6.8, 3.1, 8, 8.5]][v % 3];
-    fillEllipseF(g, P[2], P[3] + 1.2, P[0], P[1], "#c9dcea");                                  // 淡蓝底影
-    fillEllipseF(g, P[2], P[3], P[0], P[1], "#eef5fb");                                        // 积雪斑
-    fillEllipseF(g, P[2] - P[0] * 0.3, P[3] - P[1] * 0.35, P[0] * 0.5, P[1] * 0.45, "#fbfdff");// 受光高光
-    for (let i = 0; i < 3; i++) {   // 斑缘露草 2~3 点（草尖顶破雪层）
-      const ang = hash2(v * 17 + i * 31, v * 29 + i * 7) * 6.283;
-      pxF(g, Math.round(P[2] + Math.cos(ang) * P[0] * (0.72 + hash2(v + i, i * 13) * 0.36)),
-               Math.round(P[3] + Math.sin(ang) * P[1] * (0.72 + hash2(i * 5, v + i) * 0.36)),
-          i === 2 ? "#4d7842" : "#5e8c4f");
+    // 极淡白晕：2~3 个 2px 低覆盖小块（#f4f9fd 比霜点更淡，垫底）
+    for (let i = 0; i < 2 + (v % 2); i++) {
+      rectF(g, 4 + Math.round(hash2(v * 17 + i * 31, 91) * 6),
+               4 + Math.round(hash2(83, v * 19 + i * 13) * 6), 2, 2, "#f4f9fd");
     }
-    pxF(g, Math.round(P[2] + (hash2(v, 99) - 0.5) * P[0]), Math.round(P[3] + (hash2(99, v) - 0.5) * P[1]), "#3f6838");
+    for (let i = 0; i < 3 + (v % 3); i++) {                          // 3~5 个 1~2px 霜点
+      const two = hash2(v * 7 + i * 5, 47) < 0.4;
+      pxF(g, 4 + Math.round(hash2(v * 29 + i * 3, 61) * 8),
+             4 + Math.round(hash2(53, v * 23 + i * 9) * 8), "#eef5fb");
+      if (two) pxF(g, 5 + Math.round(hash2(v * 29 + i * 3, 61) * 8),
+                      4 + Math.round(hash2(53, v * 23 + i * 9) * 8), "#eef5fb");
+    }
     return cv;
   });
 }
 
-function dryPatchSprite(v) {    // 枯草斑：枯黄斑 + 裸土点 + 干裂纹 + 枯茎
+function dryPatchSprite(v) {    // 枯迹（v0.6.19 痕迹化重绘，删大枯斑）：2~3 根 1px 小枯茎 + 3~4 个枯黄细点，低饱和，占格 ≤40%，透明底
   return sprGet(`dp${v}`, () => {
     const { cv, g } = sprCtx(SPR, SPR);
-    const P = [[6.2, 3.6, 8, 7.5], [5.4, 4.2, 7.5, 8], [6.6, 3.2, 8.5, 7]][v % 3];
-    fillEllipseF(g, P[2], P[3] + 1, P[0], P[1], shade("#a08a3e", 0.85));                       // 落影
-    fillEllipseF(g, P[2], P[3], P[0], P[1], "#c8ae55");                                        // 枯黄斑
-    fillEllipseF(g, P[2] - P[0] * 0.25, P[3] - P[1] * 0.3, P[0] * 0.45, P[1] * 0.4, "#d8c06a");// 亮芯
-    for (let i = 0; i < 3; i++) {   // 裸土点
-      pxF(g, Math.round(P[2] + (hash2(i * 3, v * 11 + i) - 0.5) * 1.6 * P[0]),
-               Math.round(P[3] + (hash2(v * 13 + i * 41, v * 7 + i * 17) - 0.5) * 1.6 * P[1]),
-          i === 1 ? "#8a6b46" : "#9a7b52");
+    for (let i = 0; i < 2 + (v % 2); i++) {                          // 2~3 根 1px 小枯茎（高 2~3px）
+      const sx = 4 + Math.round(hash2(v * 13 + i * 37, 71) * 8);
+      const sy = 5 + Math.round(hash2(43, v * 17 + i * 11) * 6);
+      rectF(g, sx, sy, 1, 2 + (i % 2), i === 1 ? "#96814a" : "#a08a4a");
     }
-    const cx2 = Math.round(P[2] - P[0] * 0.4), cy2 = Math.round(P[3]);
-    rectF(g, cx2, cy2, 3, 1, "#7c6438");                                                       // 干裂纹（两段折线）
-    pxF(g, cx2 + 3, cy2 - 1, "#7c6438");
-    const dx2 = Math.round(P[2] + P[0] * 0.2), dy2 = Math.round(P[3] + P[1] * 0.4);
-    pxF(g, dx2, dy2, "#7c6438"); pxF(g, dx2 + 1, dy2 + 1, "#7c6438"); pxF(g, dx2 + 2, dy2, "#7c6438");
-    const sx2 = Math.round(P[2] + (hash2(v, 57) - 0.5) * P[0]);                                // 枯茎 2 根
-    rectF(g, sx2, Math.round(P[3] - P[1] * 0.6), 1, 3, "#a08a3e");
-    rectF(g, sx2 + 3, Math.round(P[3] - P[1] * 0.3), 1, 3, "#93803a");
+    for (let i = 0; i < 3 + (v % 2); i++) {                          // 3~4 个枯黄细点
+      pxF(g, 4 + Math.round(hash2(v * 11 + i * 23, 67) * 8),
+             4 + Math.round(hash2(59, v * 7 + i * 29) * 8),
+          i % 2 ? "#c8ae55" : "#b89c4e");
+    }
     return cv;
   });
 }
@@ -1754,6 +1737,25 @@ function snowCapSprite(v) {     // 雪帽：山脊/树顶白帽（上白下沿�
   return sprGet(`cap${v}`, () => {
     const { cv, g } = sprCtx(SPR, SPR);
     stampArt(g, CAP_SHAPES[v % 3], { W: "#f4f9fd", B: "#c9dcea" }, 1, 2, 5);
+    return cv;
+  });
+}
+
+function roofSnowSprite(v) {    // 房顶薄雪盖（v0.6.19 新增）：白雪线沿屋脊扁条 + 檐口 1~2 处小垂雪，低对比，透明底（2 变体）
+  return sprGet(`rsnow${v}`, () => {
+    const { cv, g } = sprCtx(SPR, 4);                              // 16×4 扁条，画在屋顶上沿
+    rectF(g, 2, 0, 12, 2, "#f4f9fd");                              // 主雪线（上 2 行）
+    rectF(g, 1, 1, 14, 1, "#f4f9fd");                              // 次行略宽，压住屋脊两肩
+    rectF(g, 2, 2, 12, 1, "#c9dcea");                              // 底沿淡蓝雪棱
+    if (v === 0) {
+      rectF(g, 3, 3, 1, 1, "#c9dcea");                             // 檐口垂雪 ①
+      pxF(g, 4, 3, "#eef5fb");
+      rectF(g, 10, 3, 2, 1, "#c9dcea");                            // 檐口垂雪 ②（2px）
+    } else {
+      rectF(g, 4, 3, 2, 1, "#c9dcea");                             // 垂雪错位（2px）
+      pxF(g, 11, 3, "#c9dcea");                                    // 檐口垂雪 ②（1px）
+      pxF(g, 1, 2, "#eef5fb");                                     // 左端雪粒
+    }
     return cv;
   });
 }

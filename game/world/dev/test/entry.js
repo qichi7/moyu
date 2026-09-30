@@ -140,6 +140,17 @@ assert(html.includes("v0.6.18") && html.includes("36 / 城市 90") && html.inclu
 assert(html.includes('id="demo-cv" width="600" height="400"') && html.includes("min(940px"),
   "构建产物 demo 画布 600×400、demo-box 940px（v0.6.13 沙盘扩容同步）");
 
+// ---- 存档与读档契约（v0.7.0）：顶栏按钮 + 隐藏文件选择 + 确认弹窗 + save.js 已入构建 ----
+assert(html.includes('id="save-btn"') && html.includes('id="load-btn"') &&
+  html.includes('id="load-file"') && html.includes('accept="image/png"'),
+  "构建产物含存档/读档按钮与 PNG 文件选择 #load-file（v0.7.0）");
+assert(html.includes('id="confirm-modal"') && html.includes('id="confirm-ok"') &&
+  html.includes('id="confirm-cancel"'),
+  "构建产物含读档确认弹窗 #confirm-modal（v0.7.0）");
+assert(html.includes("saveExport") && html.includes("XJSJ_SAVE") && html.includes("saveImport"),
+  "save.js 已入构建（产物含 saveExport/saveImport 与 XJSJ_SAVE 元数据键）（v0.7.0）");
+assert(html.includes("v0.7.0"), "changelog 含 v0.7.0 存档与读档条目");
+
 // ---- 机制演示契约（v0.6.0）：主题数据完整 + 全部绘制回调在 stub ctx 上无引用错误 ----
 {
   const fakeSpr = { width: 16, height: 16 };

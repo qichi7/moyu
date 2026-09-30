@@ -704,6 +704,7 @@ function processExplore(budget) {
 
 // ---- 初始生成：主岛在原点，5 座无人岛环布四周 ----
 function genWorld(seed) {
+  world.seed = seed || 1;   // v0.7.0 存档：记录生成种子（saveExport 序列化，读档经 genWorld(data.seed) 重建骨架）
   world.noise = makeNoise(seed || 1);
   _jsCache.t = -1;   // 新世界：联合库存缓存失效
   world.chunks = new Map();

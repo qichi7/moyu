@@ -10,11 +10,23 @@ function mulberry32(seed) {
   };
 }
 
-// 全局模拟用 rng（有种子，可复现）
-const rng = mulberry32(20260916);
+// 全局模拟用 rng（有种子，可复现）——状态外置 _rngState（v0.7.0 存档/读档：快照与写回，
+// rand 序列逐位续演）。算术与 mulberry32 完全同款（s 已是 int32，省去入口 |0，逐位等价）
+const _rngState = { s: 20260916 | 0 };
+function rngNext() {
+  _rngState.s = (_rngState.s + 0x6D2B79F5) | 0;
+  let t = Math.imul(_rngState.s ^ (_rngState.s >>> 15), 1 | _rngState.s);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const rng = rngNext;
 const rand = () => rng();
 const randRange = (a, b) => a + rng() * (b - a);
 const randInt = (a, b) => Math.floor(a + rng() * (b - a + 1));
+
+// 存档系统入口（v0.7.0）：全局随机流快照/写回（save.js 调用）
+function rngSnapshot() { return _rngState.s; }
+function rngRestore(s) { _rngState.s = s | 0; }
 
 function makeNoise(seed) {
   const next = mulberry32(seed);

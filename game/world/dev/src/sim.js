@@ -1017,6 +1017,9 @@ function weatherTick(dt) {
   }
   if (!world.meteor && !isDaytime() && world.time >= (world.meteorNext || 0) && rand() < 0.02) {
     world.meteor = { t0: world.time, dur: SIM.METEOR_DUR };
+    // 纪事播报：三文案 hash 轮换（不耗 rand 流；约每 2~4 游戏夜一颗，一年 3~6 条不刷屏）
+    const _meteorMsgs = ["一颗流星划过夜空。", "流星拖着长尾坠向海平线。", "有人对着流星许了愿。"];
+    logMsg(_meteorMsgs[(hash2(world.meteor.t0, 911) * 3) | 0]);
   }
   // 台风：偶起于主仓 40~90 格外的深海格（方向随机单位向量，寿命 60~120 秒）
   if (!world.storm && rand() < SIM.TYPHOON_CHANCE) {

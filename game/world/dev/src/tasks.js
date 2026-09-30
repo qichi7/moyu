@@ -2,6 +2,10 @@
 // ============ 任务系统：建造 / 开荒 / 移山 / 填海 ============
 
 let _taskId = 1;
+
+// 存档系统入口（v0.7.0）：任务 id 序列快照/写回——读档后新任务不再与存量任务撞号（save.js 调用）
+function taskIdSeqGet() { return _taskId; }
+function taskIdSeqSet(v) { _taskId = v | 0; }
 let _lastPond = null;   // 最近挖的塘（池塘聚簇：下一个塘贴着它挖）
 const tasks = {
   list: [],

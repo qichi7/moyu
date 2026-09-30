@@ -201,6 +201,13 @@
   .modal-body { padding: 10px 14px 14px; color: #aeb6c6; font-size: 12px; }
   /* 更新日志（v0.6.5）：一条 = 版本号+标题（高亮）+ 破折号一句描述 */
   #changelog-modal .cl-line b { color: #d8dee9; font-weight: 600; }
+  /* 读档确认弹窗（v0.7.0）：复用 modal 结构，按钮沿用顶栏深色系 */
+  #confirm-modal .modal-box { width: min(400px, 92vw); }
+  #confirm-modal button {
+    background: #161c2a; border: 1px solid #2a3448; color: #aeb6c6;
+    border-radius: 4px; padding: 4px 16px; cursor: pointer; font-size: 12px;
+  }
+  #confirm-modal button:hover { color: #fff; border-color: #3d4c68; }
   .help-sec { color: #8a93a8; font-size: 10px; letter-spacing: 2px; margin: 10px 0 4px; }
   .help-sec:first-child { margin-top: 0; }
   .help-grid { display: grid; grid-template-columns: 72px 1fr; gap: 5px 10px; }
@@ -288,6 +295,11 @@
       <button id="sfx-toggle">音效:开</button>
     </span>
     <span class="grp">
+      <button id="save-btn" title="导出当前世界（PNG 存档）">存档</button>
+      <button id="load-btn" title="导入世界存档">读档</button>
+      <input type="file" id="load-file" accept="image/png" style="display:none">
+    </span>
+    <span class="grp">
       <button id="help-btn" title="玩法教程">教程</button>
       <button id="changelog-btn" title="更新日志">日志</button>
       <button id="demo-btn" title="机制演示（会暂停主世界）">▶ 演示</button>
@@ -335,9 +347,14 @@
       <div class="help-grid">
         <span>流星夜空</span><span>夜晚偶有流星划过——清醒的人看见了心情微涨</span>
         <span>迁徙</span><span>兽群、候鸟与鲸群会周期性远行迁徙，来去有时</span>
-        <span>气候带</span><span>北方海面见浮冰、草地有积雪斑、山树戴雪帽；南方草地现枯黄斑——越深入越浓密，无变色分区；农场与采集轻微放缓</span>
+        <span>气候带</span><span>定居区北缘越走越冷：草地现细碎雪迹、海面飘薄冰痕、山树与屋顶尖戴雪帽；南缘草地见枯迹——痕迹随深入渐密，无变色分区；农场与采集轻微放缓</span>
         <span>洋流</span><span>海上洋流顺流提速、逆流减速，出航看流向</span>
         <span>台风</span><span>小概率台风过境：船速放慢、渔船歇网，风雨过后如常</span>
+      </div>
+      <div class="help-sec">存档与读档</div>
+      <div class="help-grid">
+        <span>存档</span><span>顶栏「存档」：导出一张 PNG 世界存档——图片本身即已点亮的完整地图，世界状态藏在图片元数据里；文件名形如「小世界存档2026-09-30_1435.png」</span>
+        <span>读档</span><span>顶栏「读档」选择存档 PNG：确认覆盖后，世界（含每个人、每只动物、每项任务与随机序列）完全恢复到存档时刻继续演化</span>
       </div>
       <div class="help-sec">进阶</div>
       <div class="help-grid">
@@ -387,6 +404,8 @@
       <div class="cl-line"><b>v0.6.16 气候视觉重做</b>——去掉整格变色：北缘海面浮冰、草地积雪、山树雪帽，南缘枯草斑，密度向深处渐增，随地形犬牙交错无直线分界；浮冰密集海域船速轻微放缓</div>
       <div class="cl-line"><b>v0.6.17 生态平衡</b>——野生动物繁衍按种群规模与寿命均衡出生（不再随机抽亲代）；物种上限补全（山羊/鹿/野猪/狼）；狩猎保护线：物种仅剩 4 只及以下不再新立狩猎/捕获任务；驯服的动物不再掏空野生种群；迁徙周期修正为 4~6 游戏月</div>
       <div class="cl-line"><b>v0.6.18 时代提速</b>——聚落升级线下调（城镇 36 / 城市 90 分），疆土每 30 人生长一片——酒坊、岛际大桥与游乐园有望在自然演化中更早出现</div>
+      <div class="cl-line"><b>v0.6.19 气候贴花精修</b>——雪迹/冰痕/枯迹更细腻克制（范围收窄、交界干净），新增房顶积雪与山树雪帽点缀边疆</div>
+      <div class="cl-line"><b>v0.7.0 存档与读档</b>——顶栏「存档/读档」：世界状态藏进 PNG 图片元数据（图片即已点亮地图），读档确认覆盖后完整还原进度与随机序列；新版本兼容旧存档</div>
     </div>
   </div>
 </div>
@@ -408,6 +427,20 @@
           <button id="demo-replay">↻ 重播</button>
           <span id="demo-prog"></span>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 读档确认弹窗（v0.7.0）：复用 modal 结构；确定按钮由 main.js 接线，取消走 data-close 委托 -->
+<div id="confirm-modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">读档确认<span class="modal-close" data-close="confirm-modal">×</span></div>
+    <div class="modal-body">
+      <div id="confirm-text" style="line-height:1.8">读档将覆盖当前世界进度，确定？</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+        <button id="confirm-cancel" data-close="confirm-modal">取消</button>
+        <button id="confirm-ok">确定</button>
       </div>
     </div>
   </div>

@@ -248,11 +248,20 @@ for (let i = 0; i < 400 && hB.sick; i++) { topUp(hB); hB.hunger = 100; hB.energy
 assert(!hB.sick && !hB.dead, "走出抑郁即痊愈：sick 清除且存活");
 
 // ===== 17. 尽兴而归余韵：cheerT>0 衰减 ×0.35 =====
-const cA = agents[16], cB = agents[17];
+// v0.6.19 接缝：EDGE_INSET/FADE 收窄改变气候因子→farmTick 作用范围，存粮轨迹漂移后自然丰收
+// 宴席（全体 mood +25，totalFood>60+pop×5 且过 3 天节流即设宴）可能恰好落进本节 10s 窗口，
+// 把两个对照一起抬高（实测 dCheer=-24.02 / dPlain=-22.20 双负）。直修：窗口前把各聚落存粮压到
+// 宴席线下（10s 农产补不回 150+ 线，宴席确定性不发火），窗口后还原；对照改身份式选取
+// （防窗口内他人死亡 splice 挪位，同 16 节收口先例）
+const savedStocks = world.settlements.map(s => ensureStock(s).food);
+for (const s of world.settlements) ensureStock(s).food = 0;
+const cA = agents.find(a => !a.dead && a.age >= 15);
+const cB = agents.find(a => !a.dead && a.age >= 15 && a !== cA);
 freeze(cA); freeze(cB);
 cA.mood = 50; cB.mood = 50; cA.cheerT = 300;
 for (let i = 0; i < 100; i++) simUpdate(STEP);
 const dCheer = 50 - cA.mood, dPlain = 50 - cB.mood;
+world.settlements.forEach((s, i) => { ensureStock(s).food = savedStocks[i]; });
 assert(dCheer < dPlain * 0.6 && dCheer > 0, "余韵生效：cheer 期间衰减明显放缓（" + dCheer.toFixed(2) + " < " + dPlain.toFixed(2) + "×0.6）");
 
 // ===== 18. 宴席全体心情+（plannerTick 直调：存粮超线即触发）=====
@@ -611,26 +620,29 @@ SIM.ACCIDENT = savedAcc;   // 还原概率（后续长跑保持真实节奏）
   world.houses = [];
   assert(climateAt(0, -9999) === "temperate" && climateAt(0, 9999) === "temperate",
     "气候：无房屋恒 temperate（南北极通吃）");
-  // 注入已知边缘：minY=100 / maxY=130 / EDGE_INSET=10 → 雪线基线 110、旱线基线 120；
-  // v0.6.16：边界 = 基线 ±WOBBLE(20) 噪声曲线（按 x 摆动）→ 雪线 ∈ [90,130]、旱线 ∈ [100,140]
+  // 注入已知边缘：minY=100 / maxY=130 / EDGE_INSET=4（v0.6.19 收窄）→ 雪线基线 104、旱线基线 126；
+  // v0.6.16：边界 = 基线 ±WOBBLE(20) 噪声曲线（按 x 摆动）→ 雪线 ∈ [84,124]、旱线 ∈ [106,146]
   // （houses.length 与真实不同即缓存失效入口之一——注入后立即可读新带；下方每次换屋仍 +61 强制刷，双保险）
   world.houses = [{ x: 0, y: 100 }, { x: 5, y: 130 }];
   world.time += 61;
-  // 深处必雪/必旱（噪声摆动最内界 90/140 之外的深带，任何 x 都不可逃出）
+  // 深处必雪/必旱（噪声摆动最内界 84/146 之外的深带，任何 x 都不可逃出）
   let deepOk = true, deepItOk = true, rangeOk = true;
   for (let x = -240; x <= 240; x += 2) {
-    if (climateAt(x, 40) !== "snow") deepOk = false;            // 深雪：40 < 雪线最小值 90
-    if (climateIntensity(x, 40) !== 1) deepItOk = false;        // 强度饱和（40 距最近雪线 ≥50 > FADE 30）
-    if (climateAt(x, 170) !== "drought") deepOk = false;        // 深旱：170 > 旱线最大值 140
-    if (climateIntensity(x, 170) !== 1) deepItOk = false;
+    if (climateAt(x, 40) !== "snow") deepOk = false;            // 深雪：40 < 雪线最小值 84
+    if (climateIntensity(x, 40) !== 1) deepItOk = false;        // 强度饱和（40 距最近雪线 ≥44 > FADE 18）
+    if (climateAt(x, 170) !== "drought") deepOk = false;        // 深旱：170 > 旱线最大值 146
+    if (climateIntensity(x, 170) !== 1) deepItOk = false;       // （170 距最近旱线 ≥24 > FADE 18）
   }
   assert(deepOk, "气候 v0.6.16：深带必雪/必旱（±WOBBLE 曲线边界最内界外无例外）");
   assert(deepItOk, "气候 v0.6.16：深带 climateIntensity 饱和 1（距边界 > FADE 带宽）");
-  // 强度值域 + 单调性：深带(1) > 交界带（交界最饱和也只有 (25/30)<1），温带核 0
+  // 强度值域 + 单调性：深带(=1) > 交界带。v0.6.19 FADE 30→18 后固定 y=105/125 锚点失效——
+  // 边界 ±WOBBLE 摆动可把交界带推过锚点 19+ 格（(20-1)/18 ≥ 1 饱和，"交界带必 <1"不再恒真），
+  // 改为逐 x 取雪线/旱线外侧 FADE/2 格处采样：爬坡带中点强度恒 0.5（对 FADE/INSET/WOBBLE 取值鲁棒）
   let monoOk = true;
   for (let x = -240; x <= 240; x += 2) {
-    const itN = climateIntensity(x, 105), itS = climateIntensity(x, 125);
-    if (!(itN >= 0 && itN < 1) || !(itS >= 0 && itS < 1)) monoOk = false;   // 交界带必不满强度
+    const itN = climateIntensity(x, snowEdgeY(x) - SIM.CLIMATE.FADE / 2);
+    const itS = climateIntensity(x, droughtEdgeY(x) + SIM.CLIMATE.FADE / 2);
+    if (!(itN > 0 && itN < 1) || !(itS > 0 && itS < 1)) monoOk = false;   // 交界带中点必在爬坡内
     if (!(climateIntensity(x, 40) > itN) || !(climateIntensity(x, 170) > itS)) monoOk = false;
   }
   for (let x = -240; x <= 240; x += 4) for (let y = 40; y <= 170; y += 3) {
@@ -654,13 +666,14 @@ SIM.ACCIDENT = savedAcc;   // 还原概率（后续长跑保持真实节奏）
   assert(snowN > 0 && otherN > 0 && snowN < 481,
     "气候 v0.6.16：边界带 mixed（y=110 行 snow " + snowN + " / 非雪 " + otherN + "，无直线分界）");
   // 同长度换屋不即时失效（60s 缓存窗）：minY/maxY 移到 200~230，立即读仍是旧图结果；
-  // 选 y=185 做噪声摆动鲁棒锚点：旧图（minY100）185 恒旱带（>旱线最大 140），新图（minY200）恒雪带（<雪线最小 190）
+  // v0.6.19 EDGE_INSET 10→4 后重选噪声鲁棒锚点 y=180：旧图（minY100）180 恒旱带（> 旱线最大 146），
+  // 新图（minY200）恒雪带（< 雪线最小 184）——旧锚点 185 距雪线最小值仅 1 格，摆动可击穿，不再鲁棒
   world.houses = [{ x: 0, y: 200 }, { x: 5, y: 230 }];
-  assert(climateAt(0, 185) === "drought",
-    "气候：同长度换屋读旧缓存（60s 窗内不刷新，185 在旧图恒为旱带——噪声边界也摆不进来）");
+  assert(climateAt(0, 180) === "drought",
+    "气候：同长度换屋读旧缓存（60s 窗内不刷新，180 在旧图恒为旱带——噪声边界也摆不进来）");
   world.time += 61;
-  assert(climateAt(0, 185) === "snow",
-    "气候：越过 60s 缓存窗后刷新新图（185 落新雪带——雪线最小值 190 之外恒雪）");
+  assert(climateAt(0, 180) === "snow",
+    "气候：越过 60s 缓存窗后刷新新图（180 落新雪带——雪线最小值 184 之外恒雪）");
   // 还原真实房屋并强制刷缓存（时间单调前进不回拨：同长度撞车时 60s 窗是唯一失效入口，+61 保平安）
   world.houses = savedHouses;
   world.time += 61;
@@ -688,7 +701,7 @@ SIM.ACCIDENT = savedAcc;   // 还原概率（后续长跑保持真实节奏）
 // 合成田：waterCd 拉满跳过水源复检、irrigated 预置真——farmTick 纯走气候因子分支
 {
   const savedHouses = world.houses, savedFarmN = world.farms.length;
-  world.houses = [{ x: 0, y: 100 }, { x: 5, y: 130 }];   // 雪线基线 110 / 旱线基线 120（±WOBBLE 20 曲线）
+  world.houses = [{ x: 0, y: 100 }, { x: 5, y: 130 }];   // 雪线基线 104 / 旱线基线 126（EDGE_INSET 4，v0.6.19；±WOBBLE 20 曲线）
   world.time += 61;   // 强制刷 climateAt 缓存（同长度换屋的唯一失效入口，28 留下的旧图不得污染）
   // v0.6.16 曲线边界：固定 x 上 wobble 冻结 → 带仍是 y 阶跃。深雪 y=40 恒雪（雪线最内界 90 之外）；
   // 温带 y 自适应扫描（90.5~139.5 找 temperate——旱线可能摆到 100 之下，固定 y 不再保证温带）
@@ -835,7 +848,7 @@ SIM.ACCIDENT = savedAcc;   // 还原概率（后续长跑保持真实节奏）
     world.houses = [{ x: wS3.x, y: wS3.y - 40 }, { x: wS3.x + 3, y: wS3.y + 40 }];
     world.time += 61;
     const mTemp = shipEnvMul(ship, perp.x, perp.y);
-    // 深雪带：雪线基线 = wS3.y+70（±WOBBLE 20）→ 船位距线 ≥50 > FADE 30 → 强度饱和 1 ≥ 0.5
+    // 深雪带：雪线基线 = wS3.y+64（EDGE_INSET 4，±WOBBLE 20）→ 船位距线 ≥43.5 > FADE 18 → 强度饱和 1 ≥ 0.5
     world.houses = [{ x: wS3.x, y: wS3.y + 60 }, { x: wS3.x + 3, y: wS3.y + 62 }];
     world.time += 61;
     const mIce = shipEnvMul(ship, perp.x, perp.y);

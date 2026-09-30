@@ -301,6 +301,18 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
         const hspr = houseSprite(floors, stone, granary, night > 0.3);
         const scale = s / SPR;
         ctx.drawImage(hspr, px, py + s - hspr.height * scale, s + 0.5, hspr.height * scale);
+        // 房顶雪帽（v0.6.19）：雪带内按 强度×SNOW_P 掷骰（hash 盐 +53，与地面贴花 +41 区分；
+        // climateAt falsy 容错），roofSnowSprite 扁条压屋脊——
+        // houseSprite 画布 16×28 底锚（同分支 drawImage：sprite 顶 = py+s-28×scale），
+        // 屋顶上沿画布 y = max(0, wallTop-6) = 0/4/8（楼层 3/2/1），雪盖贴 ridge 行（roofTop-1）
+        const hCit = climateItOf(x, y);
+        const hCl = typeof climateAt === "function" ? climateAt(x, y) : null;
+        if (hCit > 0 && hCl === "snow" && hash2(x * 73 + 53, y * 151) < hCit * (SIM.CLIMATE.SNOW_P || 0.28)) {
+          const roofTop = floors >= 3 ? 0 : floors >= 2 ? 4 : 8;       // 屋顶上沿（画布 y，随楼层上移）
+          ctx.drawImage(roofSnowSprite((hash2(x * 73 + 59, y * 151) * 2) | 0),
+                        px + s * 0.05, py + s - 28 * scale + (roofTop - 1) * scale,
+                        s * 0.9, s * 0.25);                            // 与房子同宽 90%、高 1/4，贴屋顶上沿
+        }
         const sett = granary ? settlementAt(x, y) : null;
         if (sett && sett.level >= 2) { // 市政厅旗杆 + 三角旗
           ctx.fillStyle = "#3a2a18";
@@ -393,27 +405,28 @@ function drawScene(ctx, cw, ch, selected, selectedCreature, visualTod, waveT) {
         ctx.fillRect(px, py, s + 0.5, s + 0.5);
       }
 
-      // 气候要素贴花（v0.6.16）：整格 tint 移除（半幅变色+直线分界）——气候只经要素贴花体现。
-      // 概率 = 强度 × 基准P，hash2 确定性掷骰（无每帧随机）：深处浓密、交界犬牙稀疏，边界随
-      // 噪声曲线犬牙交错无任何直线痕迹。画在 tile 之后、建筑/角色之前；s<6 远距不撒（过小成噪点）
+      // 气候要素贴花（v0.6.16 定位；v0.6.19 痕迹化精修）：整格 tint 移除——气候只经要素贴花体现。
+      // 概率 = 基准P × clamp((强度-0.35)/0.65, 0, 1)：强度 <0.35 交界带完全不撒（干净），深处封顶基准P；
+      // hash2 确定性掷骰（无每帧随机）。画在 tile 之后、建筑/角色之前；s<6 远距不撒（过小成噪点）
       if (s >= 6 && (tile === T.WATER || tile === T.DEEP || tile === T.GRASS ||
                      tile === T.MOUNTAIN || tile === T.TREE || tile === T.SAND)) {
         const cit = climateItOf(x, y);
         if (cit > 0) {
           const cl = typeof climateAt === "function" ? climateAt(x, y) : null;
+          const gate = Math.min(1, Math.max(0, (cit - 0.35) / 0.65));   // 边疆 fringe：门槛 0.35、深处封顶
           const roll = hash2(x * 73 + 41, y * 151);
           if (cl === "snow") {
             const dv = (hash2(x * 73 + 47, y * 151) * 3) | 0;
-            if ((tile === T.WATER || tile === T.DEEP) && roll < cit * (SIM.CLIMATE.ICE_P || 0.55))
-              ctx.drawImage(iceSprite(dv), px + s * 0.15, py + s * 0.15, s * 0.7, s * 0.7);        // 占格 70% 居中
-            else if (tile === T.GRASS && roll < cit * (SIM.CLIMATE.SNOW_P || 0.5))
-              ctx.drawImage(snowPatchSprite(dv), px + s * 0.12, py + s * 0.14, s * 0.76, s * 0.72);
-            else if ((tile === T.MOUNTAIN || tile === T.TREE) && roll < cit * (SIM.CLIMATE.SNOW_P || 0.5))
-              ctx.drawImage(snowCapSprite(dv), px + s * 0.2, py + s * 0.04, s * 0.6, s * 0.42);    // 顶 1/3 处小尺寸
+            if ((tile === T.WATER || tile === T.DEEP) && roll < gate * (SIM.CLIMATE.ICE_P || 0.3))
+              ctx.drawImage(iceSprite(dv), px + s * 0.3, py + s * 0.3, s * 0.4, s * 0.4);           // 冰痕占格 40% 居中
+            else if (tile === T.GRASS && roll < gate * (SIM.CLIMATE.SNOW_P || 0.28))
+              ctx.drawImage(snowPatchSprite(dv), px + s * 0.28, py + s * 0.28, s * 0.44, s * 0.44); // 雪迹占格 44% 居中
+            else if ((tile === T.MOUNTAIN || tile === T.TREE) && roll < gate * (SIM.CLIMATE.SNOW_P || 0.28))
+              ctx.drawImage(snowCapSprite(dv), px + s * 0.2, py + s * 0.04, s * 0.6, s * 0.42);     // 雪帽：顶 1/3 处小尺寸（不动）
           } else if (cl === "drought" && (tile === T.GRASS || tile === T.SAND) &&
-                     roll < cit * (SIM.CLIMATE.DRY_P || 0.5) * (tile === T.SAND ? 0.5 : 1)) {
+                     roll < gate * (SIM.CLIMATE.DRY_P || 0.3) * (tile === T.SAND ? 0.5 : 1)) {
             const dv = (hash2(x * 73 + 47, y * 151) * 3) | 0;
-            ctx.drawImage(dryPatchSprite(dv), px + s * 0.14, py + s * 0.14, s * 0.72, s * 0.72);
+            ctx.drawImage(dryPatchSprite(dv), px + s * 0.3, py + s * 0.3, s * 0.4, s * 0.4);        // 枯迹占格 40% 居中
           }
         }
       }
