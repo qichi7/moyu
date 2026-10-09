@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>越玩越菜 · 生存退化 · v0.1.0</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #14181f; position: fixed; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; color: #cfd6e4; touch-action: none; }
+  #cv { display: block; touch-action: none; image-rendering: pixelated; }
+
+  /* ---- HUD 顶栏 ---- */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: baseline; gap: 16px;
+    padding: 8px 14px; background: rgba(10, 13, 20, 0.82); border-bottom: 1px solid #1c2333;
+    font-size: 13px; z-index: 10; user-select: none; line-height: 1.5;
+  }
+  #hud.hidden { display: none; }
+  #hud .stat { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+  #hud .lab { color: #6b7688; font-size: 11px; }
+  #hud b { color: #fff; font-weight: 600; font-variant-numeric: tabular-nums; }
+  #hud-form { color: #e8d9a0 !important; }
+  #hud-cd.danger b { color: #e86a4a; }
+
+  #build-id {
+    position: fixed; right: 10px; bottom: 8px; z-index: 10;
+    border: 1px solid #3a4468; color: #8f9ab0; border-radius: 999px;
+    font-size: 10px; padding: 1px 8px; white-space: nowrap; user-select: none;
+  }
+
+  /* ---- 屏幕遮罩（开始/结算） ---- */
+  .screen {
+    position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; text-align: center;
+    background: rgba(10, 13, 20, 0.86); padding: 20px; overflow-y: auto;
+  }
+  .screen.hidden { display: none; }
+  .screen .title { font-size: 52px; font-weight: 700; color: #e8d9a0; letter-spacing: 6px; }
+  .screen .subtitle { font-size: 17px; color: #8f9ab0; letter-spacing: 10px; margin-bottom: 4px; }
+  .screen .lore { max-width: 520px; font-size: 13px; line-height: 1.9; color: #aeb7c9; }
+  .screen .lore em { color: #e8d9a0; font-style: normal; }
+  .chain { display: flex; align-items: center; gap: 6px; margin: 4px 0; flex-wrap: wrap; justify-content: center; }
+  .chain .node { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 76px; }
+  .chain img, .chain .ph { width: 40px; height: 40px; image-rendering: pixelated; }
+  .chain .nm { font-size: 11px; color: #cfd6e4; }
+  .chain .mu { font-size: 10px; color: #6b7688; }
+  .chain .arr { color: #6b7688; font-size: 16px; }
+  .screen .hint { font-size: 12px; color: #56617a; }
+  .screen .best { font-size: 13px; color: #8f9ab0; }
+  .screen .best b { color: #e8d9a0; }
+
+  button.btn {
+    background: #2c3a58; color: #fff; border: 1px solid #4a5f8a; border-radius: 6px;
+    height: 44px; padding: 0 34px; cursor: pointer; font-size: 16px; letter-spacing: 2px;
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s;
+  }
+  button.btn:hover { background: #3a4a6e; }
+  button.btn:active { transform: scale(0.96); }
+
+  /* ---- 结算 ---- */
+  #over-mol { font-size: 30px; font-weight: 700; color: #e8d9a0; }
+  #over-formal { font-size: 13px; color: #8f9ab0; }
+  #over-stats { font-size: 14px; color: #cfd6e4; }
+  #over-quip { font-size: 13px; color: #6b7688; max-width: 420px; }
+  #over-best { font-size: 13px; color: #8f9ab0; }
+  #over-best b { color: #e8d9a0; }
+  #over-best .new { color: #e86a4a; font-weight: 700; }
+
+  /* ---- 分子形态结束按钮 ---- */
+  #btn-end {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 26px; z-index: 20;
+    background: #2c3a58; color: #fff; border: 1px solid #4a5f8a; border-radius: 999px;
+    height: 40px; padding: 0 24px; cursor: pointer; font-size: 14px;
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  #btn-end:active { transform: translateX(-50%) scale(0.95); }
+  #btn-end.hidden { display: none; }
+
+  /* ---- 触屏冲刺按钮 ---- */
+  #btn-dash {
+    position: fixed; right: 22px; bottom: 64px; z-index: 20;
+    width: 64px; height: 64px; border-radius: 50%;
+    background: rgba(44, 58, 88, 0.75); color: #fff; border: 1px solid #4a5f8a;
+    font-size: 14px; cursor: pointer; touch-action: none;
+  }
+  #btn-dash:active { background: rgba(74, 95, 138, 0.9); }
+  #btn-dash.hidden { display: none; }
+
+  /* ---- 虚拟摇杆 ---- */
+  #joy-base, #joy-stick {
+    position: fixed; border-radius: 50%; pointer-events: none; z-index: 15;
+    border: 2px solid rgba(143, 154, 176, 0.4); background: rgba(143, 154, 176, 0.08);
+  }
+  #joy-base { width: 96px; height: 96px; }
+  #joy-stick { width: 44px; height: 44px; background: rgba(143, 154, 176, 0.35); }
+  #joy-base.hidden, #joy-stick.hidden { display: none; }
+
+  /* ---- Toast ---- */
+  #toasts {
+    position: fixed; top: 54px; left: 50%; transform: translateX(-50%); z-index: 25;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none;
+    width: max-content; max-width: 92vw;
+  }
+  .toast {
+    background: rgba(10, 13, 20, 0.92); border: 1px solid #3a4468; border-radius: 6px;
+    padding: 7px 16px; font-size: 13px; color: #e8d9a0;
+    opacity: 0; transform: translateY(-6px);
+    transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1), transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  /* ---- 手机端适配 ---- */
+  @media (max-width: 700px) {
+    .screen .title { font-size: 38px; letter-spacing: 4px; }
+    .screen .subtitle { font-size: 14px; letter-spacing: 7px; }
+    #hud { gap: 9px; padding: 6px 8px; font-size: 11px; }
+    #hud .lab { font-size: 10px; }
+    .chain .node { width: 64px; }
+    #btn-dash { right: 14px; bottom: 90px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div id="hud" class="hidden">
+  <div class="stat"><span class="lab">存活</span><b id="hud-time">0.0s</b></div>
+  <div class="stat"><span class="lab">形态</span><b id="hud-form">牛马</b></div>
+  <div class="stat"><span class="lab">已退化</span><b id="hud-mult">0倍</b></div>
+  <div class="stat" id="hud-cd"><span class="lab">下次退化</span><b id="hud-cd-v">20s</b></div>
+  <div class="stat"><span class="lab">纪录</span><b id="hud-best">-</b></div>
+</div>
+
+<div id="build-id">v0.1.0</div>
+
+<button id="btn-end" class="hidden">假期结束，回去上班</button>
+<button id="btn-dash" class="hidden">冲刺</button>
+<div id="joy-base" class="hidden"></div>
+<div id="joy-stick" class="hidden"></div>
+<div id="toasts"></div>
+
+<div id="screen-start" class="screen">
+  <div class="title">越玩越菜</div>
+  <div class="subtitle">—— 生存退化 ——</div>
+  <div class="lore">
+    PC宇宙·背景：牛马们没日没夜高强度工作，直到有一天，<em>放假了</em>。
+    大部分人退化了一万倍，变成了猴子；放假太久的，退化了一亿倍，成了草履虫；
+    草履虫再退化一万倍，就是分子——比如<em>阿巴阿巴分子</em>（二阿化二巴），
+    在布朗运动中发出阿巴阿巴的声音。<br>
+    你的目标：在被老板抓住之前，<em>尽量晚一点退化</em>。
+  </div>
+  <div class="chain" id="chain-preview"></div>
+  <div class="best" id="start-best"></div>
+  <button class="btn" id="btn-start">开始放假</button>
+  <div class="hint">方向键 / WASD 移动 · 空格冲刺（仅牛马） · 手机摇杆同理</div>
+</div>
+
+<div id="screen-over" class="screen hidden">
+  <div style="font-size:13px;color:#6b7688;">你最终菜成了 ——</div>
+  <div id="over-mol">阿巴阿巴分子</div>
+  <div id="over-formal">二阿化二巴（阿2巴2）</div>
+  <div id="over-stats"></div>
+  <div id="over-quip"></div>
+  <div id="over-best"></div>
+  <button class="btn" id="btn-again">重新打工</button>
+</div>
+
+<script>
+"use strict";
+// ============ 全局配置：PC宇宙 · 越玩越菜（副标题：生存退化） ============
+const BUILD_ID = "v0.1.0";
+
+// 退化链四形态：牛马 →（1万倍）猴子 →（1亿倍）草履虫 →（再1万倍）阿巴阿巴分子
+const FORMS = [
+  { key: "worker",     name: "牛马",       multLabel: "0",    speed: 150, radius: 10, dash: true },
+  { key: "monkey",     name: "猴子",       multLabel: "1万",  speed: 112, radius: 13, dash: false },
+  { key: "paramecium", name: "草履虫",     multLabel: "1亿",  speed: 68,  radius: 6,  dash: false },
+  { key: "molecule",   name: "阿巴阿巴分子", multLabel: "1万亿", speed: 0,   radius: 5,  dash: false, brownian: true },
+];
+
+// 累计退化倍数（HUD 计数器按形态跳变）
+const MULTIPLIERS = [1, 1e4, 1e8, 1e12];
+
+// 分子变异体（彩蛋）：学名=几X化几Y 计数法；化学式=元素名+数字；俗名=按分子式原子排列顺序连读
+// 分子式必须按读音节拍排列（阿-巴-阿-巴 → 阿巴阿巴；嗯-嗯-阿-阿 → 嗯嗯阿阿）
+const MOLECULES = [
+  { key: "ababa",  folk: "阿巴阿巴", formal: "二阿化二巴", formula: "阿2巴2",
+    atoms: ["a", "b", "a", "b"], sigma: 260, damp: 1.2, vmax: 220, sound: ["a", "b", "a", "b"] },
+  { key: "enenaa", folk: "嗯嗯阿阿", formal: "二嗯化二阿", formula: "嗯2阿2",
+    atoms: ["e", "e", "a", "a"], sigma: 90,  damp: 2.2, vmax: 90,  sound: ["e", "e", "a", "a"] },
+  { key: "wayaya", folk: "哇呀哇呀", formal: "二哇化二呀", formula: "哇2呀2",
+    atoms: ["w", "y", "w", "y"], sigma: 420, damp: 1.6, vmax: 300, sound: ["w", "y", "w", "y"] },
+];
+
+// 捕食者（老板同步退化）：下标=形态；分子形态无敌，无天敌
+const PREDATORS = [
+  { key: "boss",    name: "西装老板", speed: 105, radius: 12 },
+  { key: "gorilla", name: "猩猩老板", speed: 95,  radius: 15 },
+  { key: "flea",    name: "水蚤",     speed: 60,  radius: 6  },
+  null,
+];
+
+// 模拟参数
+const SIM = {
+  STEP: 1 / 60,            // 固定步长
+  DEVOLVE_SECONDS: 20,     // 强制退化周期
+  INVULN_AFTER_DEVOLVE: 2, // 退化后无敌秒数（防连环抓）
+  PRED_STUN_ON_DEVOLVE: 1.2, // 退化瞬间天敌集体愣神
+  DASH_SPEED: 340, DASH_TIME: 0.25, DASH_CD: 2.5,
+  KNOCKBACK_SPEED: 300, KNOCKBACK_TIME: 0.45,  // 被抓击退（防墙角被永久钉死）
+  PRED_GROW_TIME: 240, PRED_GROW_MAX: 0.35,  // 天敌速度成长 ×(1+min(t/240, .35))
+  PRED_COUNT_BASE: 2, PRED_COUNT_EVERY: 15, PRED_COUNT_CAP: 6,
+  SPAWN_MIN_DIST: 140,     // 天敌生成点离玩家最小距离
+  CATALYST_EVERY: 8, CATALYST_LIFE: 12, CATALYST_RADIUS: 9, // 分子形态触媒
+};
+
+// 退化/事件文案（{form}=形态名 {mult}=倍数 {pred}=天敌 {mol}=俗名 {formal}=学名）
+const DEVOLVE_TOASTS = {
+  timer: [
+    "假越放越长，你退化成了{form}（已退化{mult}倍）",
+    "没人叫你上班，你退化成了{form}",
+    "工位都长草了，你退化成了{form}（已退化{mult}倍）",
+  ],
+  caught: [
+    "被{pred}当场抓获！你退化成了{form}（已退化{mult}倍）",
+    "{pred}：上班时间想去哪？你退化成了{form}",
+  ],
+  molecule: "再退化1万倍……你变成了{mol}分子（{formal}），布朗运动开始，无限遨游",
+  mutate: "触媒摄入！你变异成了{mol}分子（{formal}）",
+};
+
+// 结算吐槽（按存活时长分档）
+const OVER_QUIPS = [
+  { min: 0,  text: "退化速度惊人，老板看了都沉默。" },
+  { min: 15, text: "这退化效率，年终奖是没戏了。" },
+  { min: 35, text: "坚持得不错，可惜假期才是最强的进化压力。" },
+  { min: 58, text: "满分牛马！硬撑到分子才肯罢休，敬佩。" },
+];
+
+
+"use strict";
+// ============ 种子随机与哈希（mulberry32） ============
+let _rngState = 1;
+
+function rngInit(seed) {
+  _rngState = (seed >>> 0) || 1;
+}
+
+function rand() {
+  _rngState = (_rngState + 0x6D2B79F5) >>> 0;
+  let t = _rngState;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+function randRange(a, b) {
+  return a + rand() * (b - a);
+}
+
+// 标准正态（Box-Muller），布朗运动用
+function randn() {
+  let u = 0, v = 0;
+  while (u === 0) u = rand();
+  while (v === 0) v = rand();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+// 坐标确定性哈希 0~1（背景装饰撒点用，无每帧随机）
+function hash2(x, y) {
+  let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+
+"use strict";
+// ============ 事件总线：逻辑层 emit，表现层订阅；headless 下无订阅者即空转 ============
+const _evListeners = {};
+
+function onEvent(name, fn) {
+  if (!_evListeners[name]) _evListeners[name] = [];
+  _evListeners[name].push(fn);
+}
+
+function emit(name, data) {
+  const l = _evListeners[name];
+  if (!l) return;
+  for (const fn of l.slice()) fn(data);
+}
+
+
+"use strict";
+// ============ 模拟核心（零 DOM，node headless 可跑） ============
+// PC宇宙退化链：牛马放假后不断退化。每 20 秒强制退化一级；
+// 被天敌（老板同步退化）抓到立即退化一级；分子形态布朗运动、无敌、分数冻结、手动结束。
+
+const sim = {
+  running: false, over: false,
+  w: 800, h: 600,
+  time: 0,              // 存活计分（分子形态冻结）
+  formIdx: 0,
+  devolveIn: 0,         // 距下次强制退化
+  player: null,
+  preds: [],            // 天敌（形态决定种类，位置跨形态保留——老板同步退化）
+  cats: [],             // 触媒（分子形态彩蛋）
+  catTimer: 0,
+  molIdx: 0,            // 当前分子变异体（MOLECULES 下标）
+  input: { x: 0, y: 0 },
+  seed: 0,
+  stats: { catches: 0, dashes: 0, mutations: 0 },
+};
+
+function simInit(seed, w, h) {
+  sim.seed = seed >>> 0;
+  rngInit(sim.seed);
+  sim.w = w || 800;
+  sim.h = h || 600;
+  sim.running = false;
+  sim.over = false;
+  sim.time = 0;
+  sim.formIdx = 0;
+  sim.devolveIn = SIM.DEVOLVE_SECONDS;
+  sim.player = { x: sim.w / 2, y: sim.h / 2, px: sim.w / 2, py: sim.h / 2, vx: 0, vy: 0,
+                 face: 1, dashT: 0, dashCd: 0, dashVx: 0, dashVy: 0, invulnT: SIM.INVULN_AFTER_DEVOLVE };
+  sim.preds = [];
+  sim.cats = [];
+  sim.catTimer = 0;
+  sim.molIdx = 0;
+  sim.input = { x: 0, y: 0 };
+  sim.stats = { catches: 0, dashes: 0, mutations: 0 };
+  _predSyncCount();
+}
+
+function simStart() {
+  if (sim.over) return;
+  sim.running = true;
+  emit("start", {});
+}
+
+function simEndRun() {
+  if (sim.over || !sim.running) return;
+  sim.over = true;
+  sim.running = false;
+  emit("end", { time: sim.time, formIdx: sim.formIdx, mol: MOLECULES[sim.molIdx], stats: sim.stats });
+}
+
+function simResize(w, h) {
+  sim.w = Math.max(200, w);
+  sim.h = Math.max(200, h);
+  if (!sim.player) return;
+  const clampE = (e, r) => {
+    e.x = Math.min(Math.max(e.x, r), sim.w - r);
+    e.y = Math.min(Math.max(e.y, r), sim.h - r);
+  };
+  clampE(sim.player, FORMS[sim.formIdx].radius);
+  for (const p of sim.preds) {
+    const def = PREDATORS[sim.formIdx];
+    if (def) clampE(p, def.radius);
+  }
+  for (const c of sim.cats) clampE(c, SIM.CATALYST_RADIUS);
+}
+
+function simSetInput(x, y) {
+  const l = Math.hypot(x, y);
+  sim.input.x = l > 1 ? x / l : x;
+  sim.input.y = l > 1 ? y / l : y;
+}
+
+function simDash() {
+  const p = sim.player;
+  if (!sim.running || sim.over || sim.formIdx !== 0 || p.dashCd > 0) return;
+  let dx = sim.input.x, dy = sim.input.y;
+  if (!dx && !dy) { dx = p.face; dy = 0; }
+  const len = Math.hypot(dx, dy) || 1;
+  p.dashVx = dx / len * SIM.DASH_SPEED;
+  p.dashVy = dy / len * SIM.DASH_SPEED;
+  p.dashT = SIM.DASH_TIME;
+  p.dashCd = SIM.DASH_CD;
+  sim.stats.dashes++;
+  emit("dash", {});
+}
+
+function simUpdate(dt) {
+  if (!sim.running || sim.over) return;
+  dt = Math.min(dt, 0.1);
+  const form = FORMS[sim.formIdx];
+  const def = PREDATORS[sim.formIdx];
+  const molecule = sim.formIdx === 3;
+
+  if (molecule) {
+    _catalystTick(dt);        // 分子形态：分数冻结，只有触媒与布朗运动
+  } else {
+    sim.time += dt;
+    sim.devolveIn -= dt;
+    if (sim.devolveIn <= 0) { _devolve("timer"); return; }
+  }
+
+  _updatePlayer(dt, form, molecule);
+  _updatePreds(dt, def);
+  if (def) _collide(def);
+}
+
+// ---- 玩家 ----
+function _updatePlayer(dt, form, molecule) {
+  const p = sim.player;
+  p.px = p.x; p.py = p.y;                       // 记录本帧起点（扫掠碰撞用）
+  p.dashCd = Math.max(0, p.dashCd - dt);
+  p.invulnT = Math.max(0, p.invulnT - dt);
+  p.dashT = Math.max(0, p.dashT - dt);
+
+  if (molecule) {
+    // 布朗运动（Ornstein-Uhlenbeck 抖动 + 限速 + 弹墙），输入无效——越玩越菜的最高境界
+    const mol = MOLECULES[sim.molIdx];
+    p.vx += (mol.sigma * randn() - mol.damp * p.vx) * dt;
+    p.vy += (mol.sigma * randn() - mol.damp * p.vy) * dt;
+    const sp = Math.hypot(p.vx, p.vy);
+    if (sp > mol.vmax) { p.vx *= mol.vmax / sp; p.vy *= mol.vmax / sp; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    if (p.x < form.radius) { p.x = form.radius; p.vx = Math.abs(p.vx) * 0.8; }
+    if (p.x > sim.w - form.radius) { p.x = sim.w - form.radius; p.vx = -Math.abs(p.vx) * 0.8; }
+    if (p.y < form.radius) { p.y = form.radius; p.vy = Math.abs(p.vy) * 0.8; }
+    if (p.y > sim.h - form.radius) { p.y = sim.h - form.radius; p.vy = -Math.abs(p.vy) * 0.8; }
+    return;
+  }
+
+  let vx = sim.input.x * form.speed;
+  let vy = sim.input.y * form.speed;
+  if (form.key === "paramecium") {
+    // 纤毛滑行：移动方向随时间摆动，一顿一顿的 struggled 感
+    const wob = Math.sin(sim.time * 9) * 0.55;
+    const c = Math.cos(wob), s = Math.sin(wob);
+    const tx = vx * c - vy * s, ty = vx * s + vy * c;
+    vx = tx; vy = ty;
+  }
+  if (p.dashT > 0) {
+    const k = p.dashT / SIM.DASH_TIME;
+    vx = p.dashVx * k + vx * 0.4;
+    vy = p.dashVy * k + vy * 0.4;
+  }
+  p.vx = vx; p.vy = vy;
+  if (Math.abs(vx) > 4) p.face = vx > 0 ? 1 : -1;
+  p.x += vx * dt; p.y += vy * dt;
+  if (p.x < form.radius) { p.x = form.radius; }
+  if (p.x > sim.w - form.radius) { p.x = sim.w - form.radius; }
+  if (p.y < form.radius) { p.y = form.radius; }
+  if (p.y > sim.h - form.radius) { p.y = sim.h - form.radius; }
+}
+
+// ---- 天敌 ----
+function _predTargetCount() {
+  return Math.min(SIM.PRED_COUNT_BASE + Math.floor(sim.time / SIM.PRED_COUNT_EVERY), SIM.PRED_COUNT_CAP);
+}
+
+function _predSpeedMul() {
+  return 1 + Math.min(sim.time / SIM.PRED_GROW_TIME, SIM.PRED_GROW_MAX);
+}
+
+function _spawnPred() {
+  const def = PREDATORS[sim.formIdx];
+  if (!def) return;
+  let x = sim.w / 2, y = 0;
+  for (let tries = 0; tries < 24; tries++) {
+    const edge = (rand() * 4) | 0;
+    if (edge === 0) { x = randRange(0, sim.w); y = 0; }
+    else if (edge === 1) { x = sim.w; y = randRange(0, sim.h); }
+    else if (edge === 2) { x = randRange(0, sim.w); y = sim.h; }
+    else { x = 0; y = randRange(0, sim.h); }
+    if (Math.hypot(x - sim.player.x, y - sim.player.y) >= SIM.SPAWN_MIN_DIST) break;
+  }
+  sim.preds.push({ x, y, vx: 0, vy: 0, phase: rand() * 6.28, burstT: randRange(0.6, 1.4), burst: 0, stun: 0 });
+}
+
+// 数量对齐 + 形态切换时天敌同步退化（原地改种，位置保留）
+function _predSyncCount() {
+  const def = PREDATORS[sim.formIdx];
+  if (!def) { sim.preds.length = 0; return; }
+  while (sim.preds.length < _predTargetCount()) _spawnPred();
+}
+
+function _updatePreds(dt, def) {
+  if (!def) return;
+  const mul = _predSpeedMul();
+  const p = sim.player;
+  for (const pr of sim.preds) {
+    pr.stun = Math.max(0, pr.stun - dt);
+    if (pr.stun > 0) continue;
+    const dx = p.x - pr.x, dy = p.y - pr.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    let sp = def.speed * mul;
+    let ang = Math.atan2(dy, dx);
+    if (def.key === "flea") {
+      // 水蚤：慢速游走 + 猝发冲刺（草履虫的天敌捕食方式）
+      pr.burstT -= dt;
+      if (pr.burstT <= 0) { pr.burstT = randRange(0.9, 1.6); pr.burst = 0.28; }
+      if (pr.burst > 0) { pr.burst -= dt; sp *= 2.6; ang += randRange(-0.25, 0.25); }
+      else sp *= 0.35;
+    } else {
+      // 老板系：直线追击 + 包抄摆动
+      ang += Math.sin(sim.time * (def.key === "gorilla" ? 1.7 : 2.3) + pr.phase) * 0.35;
+    }
+    pr.vx = Math.cos(ang) * sp;
+    pr.vy = Math.sin(ang) * sp;
+    pr.x += pr.vx * dt; pr.y += pr.vy * dt;
+    const r = def.radius;
+    if (pr.x < r) pr.x = r;
+    if (pr.x > sim.w - r) pr.x = sim.w - r;
+    if (pr.y < r) pr.y = r;
+    if (pr.y > sim.h - r) pr.y = sim.h - r;
+  }
+}
+
+// ---- 碰撞（扫掠采样防高速穿越） ----
+function _collide(def) {
+  const p = sim.player;
+  if (p.invulnT > 0) return;
+  const rr = def.radius + FORMS[sim.formIdx].radius;
+  for (const pr of sim.preds) {
+    if (pr.stun > 0) continue;
+    let hit = Math.hypot(p.x - pr.x, p.y - pr.y) < rr;
+    if (!hit) {
+      const mx = (p.px + p.x) / 2, my = (p.py + p.y) / 2;   // 中间位置采样
+      hit = Math.hypot(mx - pr.x, my - pr.y) < rr;
+    }
+    if (hit) { _onCatch(pr); return; }
+  }
+}
+
+function _onCatch(pr) {
+  sim.stats.catches++;
+  emit("catch", { pred: PREDATORS[sim.formIdx].name });
+  for (const q of sim.preds) q.stun = SIM.PRED_STUN_ON_DEVOLVE;   // 全体愣神看退化
+  _devolve("caught");
+  // 击退：朝「远离捕食者 + 偏向场心」方向弹飞（防墙角被永久钉死）
+  const p = sim.player;
+  const ax = p.x - pr.x, ay = p.y - pr.y;
+  const al = Math.hypot(ax, ay) || 1;
+  const cx = sim.w / 2 - p.x, cy = sim.h / 2 - p.y;
+  const cl = Math.hypot(cx, cy) || 1;
+  const kx = ax / al + 0.6 * cx / cl, ky = ay / al + 0.6 * cy / cl;
+  const kl = Math.hypot(kx, ky) || 1;
+  p.dashVx = kx / kl * SIM.KNOCKBACK_SPEED;
+  p.dashVy = ky / kl * SIM.KNOCKBACK_SPEED;
+  p.dashT = SIM.KNOCKBACK_TIME;
+}
+
+// ---- 退化链 ----
+function _devolve(cause) {
+  if (sim.formIdx >= 3) return;
+  const from = sim.formIdx;
+  sim.formIdx++;
+  sim.devolveIn = SIM.DEVOLVE_SECONDS;
+  const p = sim.player;
+  p.invulnT = SIM.INVULN_AFTER_DEVOLVE;
+  p.dashT = 0;
+  p.vx *= 0.3; p.vy *= 0.3;
+  _predSyncCount();
+  emit("devolve", { from, to: sim.formIdx, cause,
+                    formName: FORMS[sim.formIdx].name, multLabel: FORMS[sim.formIdx].multLabel });
+  if (sim.formIdx === 3) emit("molecule", { mol: MOLECULES[sim.molIdx] });
+}
+
+// ---- 触媒与分子变异（彩蛋） ----
+function _catalystTick(dt) {
+  sim.catTimer -= dt;
+  const p = sim.player;
+  for (let i = sim.cats.length - 1; i >= 0; i--) {
+    const c = sim.cats[i];
+    c.t -= dt;
+    if (c.t <= 0) { sim.cats.splice(i, 1); continue; }
+    if (Math.hypot(c.x - p.x, c.y - p.y) < SIM.CATALYST_RADIUS + FORMS[3].radius + 4) {
+      sim.cats.splice(i, 1);
+      _mutate();
+    }
+  }
+  if (sim.catTimer <= 0 && sim.cats.length < 1) {
+    sim.catTimer = SIM.CATALYST_EVERY;
+    sim.cats.push({ x: randRange(30, sim.w - 30), y: randRange(30, sim.h - 30), t: SIM.CATALYST_LIFE });
+    emit("catalyst", {});
+  }
+}
+
+function _mutate() {
+  let idx = (rand() * (MOLECULES.length - 1)) | 0;
+  if (idx >= sim.molIdx) idx++;
+  const from = sim.molIdx;
+  sim.molIdx = idx;
+  sim.stats.mutations++;
+  emit("mutate", { from, to: idx, mol: MOLECULES[idx] });
+}
+
+"use strict";
+// ============ 像素点阵图集：16×16 点阵惰性烘焙（缓存键=全部视觉输入），渲染帧只做 drawImage ============
+const SPRITE_SIZE = 16;
+
+const ATOM_COLORS = {
+  a: ["#e86a4a", "#b03a20"],  // 阿原子
+  b: ["#4a9de8", "#2060b0"],  // 巴原子
+  e: ["#8ad04a", "#4a9020"],  // 嗯原子
+  w: ["#e84a9d", "#a02060"],  // 哇原子
+  y: ["#e8d04a", "#a09020"],  // 呀原子
+};
+
+const _spriteCache = new Map();
+
+function getSprite(key) {
+  let cv = _spriteCache.get(key);
+  if (cv) return cv;
+  const parts = key.split(":");
+  cv = document.createElement("canvas");
+  cv.width = SPRITE_SIZE;
+  cv.height = SPRITE_SIZE;
+  const c = cv.getContext("2d");
+  _paintSprite(c, parts[0], parseInt(parts[1], 10) || 0);
+  _spriteCache.set(key, cv);
+  return cv;
+}
+
+// 按 face 水平翻转贴图（-1=左），scale 为放大倍数
+function drawSprite(ctx, key, cx, cy, face, scale) {
+  const cv = getSprite(key);
+  const s = SPRITE_SIZE * scale, half = s / 2;
+  if (face === -1) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(-1, 1);
+    ctx.drawImage(cv, -half, -half, s, s);
+    ctx.restore();
+  } else {
+    ctx.drawImage(cv, cx - half, cy - half, s, s);
+  }
+}
+
+// ---- 点阵绘制助手（全部 fillRect，保证软件光栅化可测） ----
+function _px(c, x, y, col) { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), 1, 1); }
+function _rect(c, x, y, w, h, col) { c.fillStyle = col; c.fillRect(x, y, w, h); }
+function _disc(c, cx, cy, r, col) {
+  c.fillStyle = col;
+  for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++)
+    for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++)
+      if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r + 0.4) c.fillRect(x, y, 1, 1);
+}
+
+// ---- 各 sprite 画家（frame 为动画帧 0/1） ----
+const _painters = {
+
+  // 牛马：白衬衫红领带打工人，两帧交替迈腿
+  worker(c, f) {
+    _rect(c, 4, 1, 8, 2, "#2a2a33");                       // 头发
+    _rect(c, 5, 3, 6, 3, "#e8b88a");                       // 脸
+    _px(c, 6, 4, "#2a2a33"); _px(c, 9, 4, "#2a2a33");      // 眼
+    _rect(c, 4, 6, 8, 5, "#e8e8f0");                       // 衬衫
+    _rect(c, 4, 6, 8, 1, "#c8c8d8");
+    _rect(c, 7, 7, 2, 4, "#c0392b");                       // 领带
+    _rect(c, 3, 7, 1, 3, "#e8e8f0"); _rect(c, 12, 7, 1, 3, "#e8e8f0"); // 手臂
+    if (f === 0) { _rect(c, 5, 11, 2, 4, "#3a3a4a"); _rect(c, 9, 11, 2, 3, "#3a3a4a"); }
+    else { _rect(c, 5, 11, 2, 3, "#3a3a4a"); _rect(c, 9, 11, 2, 4, "#3a3a4a"); }
+    _rect(c, 5, 14, 2, 1, "#1a1a22"); _rect(c, 9, 14, 2, 1, "#1a1a22"); // 鞋
+    _rect(c, 12, 9, 3, 3, "#7a4a2a");                      // 工牌包
+  },
+
+  // 猴子：圆头招耳长尾，两帧四肢交替
+  monkey(c, f) {
+    _disc(c, 3, 5, 2, "#8a5a2e"); _disc(c, 13, 5, 2, "#8a5a2e");   // 耳
+    _disc(c, 8, 5, 4, "#8a5a2e");                          // 头
+    _rect(c, 6, 5, 5, 3, "#d9a86c");                       // 脸
+    _px(c, 6, 5, "#33281e"); _px(c, 9, 5, "#33281e");
+    _px(c, 8, 7, "#33281e");
+    _rect(c, 5, 9, 6, 4, "#8a5a2e");                       // 身
+    _rect(c, 6, 10, 4, 2, "#c9986a");                      // 肚皮
+    _px(c, 12, 11, "#8a5a2e"); _px(c, 13, 10, "#8a5a2e"); _px(c, 13, 9, "#8a5a2e"); // 尾
+    if (f === 0) { _rect(c, 4, 12, 2, 3, "#6a421e"); _rect(c, 10, 12, 2, 2, "#6a421e"); }
+    else { _rect(c, 4, 12, 2, 2, "#6a421e"); _rect(c, 10, 12, 2, 3, "#6a421e"); }
+    _px(c, 5, 9, "#6a421e"); _px(c, 11, 9, "#6a421e");     // 手
+  },
+
+  // 草履虫：靴形纤毛虫，纤毛两帧摆动
+  paramecium(c, f) {
+    for (let y = 4; y <= 12; y++)
+      for (let x = 2; x <= 13; x++) {
+        const dx = (x - 7.5) / 5.4, dy = (y - 8) / 3.2;
+        const d = dx * dx + dy * dy;
+        if (d <= 1) _px(c, x, y, d > 0.55 ? "#6a4fa0" : "#9b7fd4");
+      }
+    _px(c, 5, 7, "#c0aef0"); _px(c, 10, 9, "#c0aef0"); _px(c, 8, 6, "#c0aef0"); // 空泡
+    _px(c, 11, 7, "#c0aef0");
+    for (let a = 0; a < 12; a++) {                          // 纤毛
+      const ang = a / 12 * Math.PI * 2;
+      const bx = 7.5 + Math.cos(ang) * 5.8, by = 8 + Math.sin(ang) * 3.6;
+      const wob = (a + f) % 2 === 0 ? 1 : 0;
+      _px(c, bx, by + (wob ? -1 : 1) * 0.8, "#c0aef0");
+    }
+  },
+
+  // 西装老板：黑西装红领带，眉毛倒竖
+  boss(c, f) {
+    _rect(c, 5, 1, 6, 1, "#181820");                       // 发
+    _rect(c, 5, 2, 6, 4, "#e0b088");                       // 脸
+    _rect(c, 5, 3, 2, 1, "#181820"); _rect(c, 9, 3, 2, 1, "#181820"); // 倒眉
+    _px(c, 6, 4, "#c0392b"); _px(c, 9, 4, "#c0392b");      // 怒目
+    _rect(c, 4, 6, 8, 5, "#2a2a3a");                       // 西装
+    _rect(c, 7, 6, 2, 2, "#e8e8f0");                       // 衬领
+    _rect(c, 7, 7, 1, 3, "#c0392b");                       // 领带
+    _rect(c, 3, 7, 1, 3, "#2a2a3a"); _rect(c, 12, 7, 1, 3, "#2a2a3a");
+    if (f === 0) { _rect(c, 5, 11, 2, 4, "#1a1a26"); _rect(c, 9, 11, 2, 3, "#1a1a26"); }
+    else { _rect(c, 5, 11, 2, 3, "#1a1a26"); _rect(c, 9, 11, 2, 4, "#1a1a26"); }
+  },
+
+  // 猩猩老板：西装配红领带的退化老板，两帧挥臂
+  gorilla(c, f) {
+    _disc(c, 8, 4, 3, "#4a3a2e");                          // 头
+    _rect(c, 6, 3, 4, 1, "#33281e");                       // 眉
+    _rect(c, 6, 4, 4, 2, "#8a6a4a");                       // 脸
+    _px(c, 7, 4, "#1a120a"); _px(c, 9, 4, "#1a120a");
+    _disc(c, 8, 9, 4, "#4a3a2e");                          // 身
+    _px(c, 8, 8, "#c0392b"); _px(c, 8, 9, "#8a2020");      // 小领带
+    if (f === 0) { _rect(c, 2, 6, 2, 7, "#4a3a2e"); _rect(c, 12, 7, 2, 6, "#4a3a2e"); }
+    else { _rect(c, 2, 7, 2, 6, "#4a3a2e"); _rect(c, 12, 6, 2, 7, "#4a3a2e"); }
+    _rect(c, 5, 13, 2, 2, "#33281e"); _rect(c, 9, 13, 2, 2, "#33281e"); // 指节
+  },
+
+  // 水蚤：半透明猝发游者，两帧蹬腿
+  flea(c, f) {
+    for (let y = 5; y <= 11; y++)
+      for (let x = 5; x <= 11; x++) {
+        const dx = (x - 8) / 3.2, dy = (y - 8) / 2.8;
+        const d = dx * dx + dy * dy;
+        if (d <= 1) _px(c, x, y, d > 0.45 ? "#3a9a8e" : "#7fd4c9");
+      }
+    _rect(c, 7, 8, 2, 1, "#2a5a52");                       // 核
+    _px(c, 6, 5, "#3a9a8e"); _px(c, 5, 4, "#3a9a8e");      // 触角
+    _px(c, 10, 5, "#3a9a8e"); _px(c, 11, 4, "#3a9a8e");
+    if (f === 0) { _px(c, 5, 11, "#3a9a8e"); _px(c, 11, 10, "#3a9a8e"); }
+    else { _px(c, 5, 10, "#3a9a8e"); _px(c, 11, 11, "#3a9a8e"); }
+  },
+
+  // 分子：四原子按分子式节拍排列（正弦链），两帧震动；key= mol_<variant>
+  mol(c, f, variant) {
+    const mol = MOLECULES[variant];
+    if (!mol) return;
+    for (let i = 0; i < 3; i++) {                          // 原子间键线
+      const x0 = 3 + i * 3.3, y0 = 8 + Math.sin(i * 1.7 + f * Math.PI) * 2.4;
+      const x1 = 3 + (i + 1) * 3.3, y1 = 8 + Math.sin((i + 1) * 1.7 + f * Math.PI) * 2.4;
+      const steps = Math.ceil(Math.hypot(x1 - x0, y1 - y0));
+      for (let s = 0; s <= steps; s++)
+        _px(c, x0 + (x1 - x0) * s / steps, y0 + (y1 - y0) * s / steps, "#3a3f4c");
+    }
+    for (let i = 0; i < 4; i++) {
+      const col = ATOM_COLORS[mol.atoms[i]];
+      if (!col) continue;
+      const cx = 3 + i * 3.3, cy = 8 + Math.sin(i * 1.7 + f * Math.PI) * 2.4;
+      _disc(c, cx, cy, 2, col[1]);
+      _disc(c, cx, cy, 1.3, col[0]);
+      _px(c, cx - 1, cy - 1, "#ffffff");                   // 高光
+    }
+  },
+
+  // 触媒：四芒星闪烁
+  catalyst(c, f) {
+    if (f === 0) {
+      _rect(c, 7, 4, 2, 9, "#f0e0a0"); _rect(c, 4, 7, 9, 2, "#f0e0a0");
+      _px(c, 5, 5, "#c0a040"); _px(c, 11, 5, "#c0a040");
+      _px(c, 5, 11, "#c0a040"); _px(c, 11, 11, "#c0a040");
+    } else {
+      for (let i = 0; i < 5; i++) { _px(c, 5 + i, 5 + i, "#f0e0a0"); _px(c, 11 - i, 5 + i, "#f0e0a0"); }
+      _disc(c, 8, 8, 1.4, "#f0e0a0");
+      _px(c, 8, 2, "#c0a040"); _px(c, 8, 14, "#c0a040");
+    }
+  },
+
+  // 背景装饰：草丛/小花/碎石（深色低调）
+  decor(c, v) {
+    if (v === 0) {
+      _rect(c, 7, 6, 1, 4, "#243528"); _rect(c, 9, 7, 1, 3, "#2c4030"); _rect(c, 5, 8, 1, 2, "#2c4030");
+    } else if (v === 1) {
+      _px(c, 7, 7, "#4a3f63"); _px(c, 9, 7, "#4a3f63"); _px(c, 8, 6, "#4a3f63");
+      _px(c, 8, 8, "#4a3f63"); _px(c, 8, 7, "#6a5a8a");
+    } else {
+      _rect(c, 7, 8, 3, 2, "#33333c"); _px(c, 8, 7, "#3a3a42");
+    }
+  },
+};
+
+function _paintSprite(c, name, frame) {
+  if (name.startsWith("mol_")) {
+    const variant = MOLECULES.findIndex(m => "mol_" + m.key === name);
+    _painters.mol(c, frame, variant);
+    return;
+  }
+  const p = _painters[name];
+  if (p) p(c, frame);
+}
+
+
+"use strict";
+// ============ 程序化音效（振荡器+噪声合成，零资源文件；AudioContext 首次用户手势后初始化） ============
+const sfx = {
+  ac: null, master: null, enabled: true,
+
+  init() {
+    if (this.ac || !this.enabled) return;
+    const AC = typeof AudioContext !== "undefined" ? AudioContext
+             : (typeof webkitAudioContext !== "undefined" ? webkitAudioContext : null);
+    if (!AC) { this.enabled = false; return; }
+    try {
+      this.ac = new AC();
+      this.master = this.ac.createGain();
+      this.master.gain.value = 0.22;
+      this.master.connect(this.ac.destination);
+    } catch (e) { this.enabled = false; }
+  },
+
+  tone(freq, dur, type, vol, slideTo, delay) {
+    if (!this.ac || !this.enabled) return;
+    const t0 = this.ac.currentTime + (delay || 0);
+    const o = this.ac.createOscillator();
+    const g = this.ac.createGain();
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, t0);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t0 + dur);
+    g.gain.setValueAtTime(vol || 0.3, t0);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    o.connect(g); g.connect(this.master);
+    o.start(t0); o.stop(t0 + dur + 0.02);
+  },
+
+  noise(dur, vol, delay) {
+    if (!this.ac || !this.enabled) return;
+    const t0 = this.ac.currentTime + (delay || 0);
+    const n = Math.floor(this.ac.sampleRate * dur);
+    const buf = this.ac.createBuffer(1, n, this.ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    const src = this.ac.createBufferSource();
+    src.buffer = buf;
+    const g = this.ac.createGain();
+    g.gain.value = vol || 0.15;
+    src.connect(g); g.connect(this.master);
+    src.start(t0);
+  },
+
+  // 分子说话：按 sound 数组（原子音节序列）依次发声——每种分子念自己的连读名
+  speak(syllables) {
+    if (!this.ac || !this.enabled) return;
+    const FREQ = { a: [330, "sine"], b: [196, "square"], e: [262, "triangle"], w: [392, "sine"], y: [294, "sawtooth"] };
+    (syllables || []).forEach((s, i) => {
+      const f = FREQ[s] || FREQ.a;
+      this.tone(f[0], 0.14, f[1], 0.22, null, i * 0.19);
+      if (s === "b") this.noise(0.05, 0.1, i * 0.19);      // 巴=爆破感
+    });
+  },
+
+  play(name) {
+    if (!this.ac || !this.enabled) return;
+    switch (name) {
+      case "tick": this.tone(660, 0.05, "square", 0.12); break;
+      case "start": this.tone(330, 0.1, "triangle", 0.2); this.tone(494, 0.14, "triangle", 0.2, null, 0.1); break;
+      case "dash": this.tone(220, 0.12, "sawtooth", 0.15, 520); break;
+      case "devolve": this.tone(500, 0.45, "triangle", 0.3, 110); this.noise(0.25, 0.12); break;
+      case "catch": this.tone(140, 0.18, "square", 0.3, 90); this.noise(0.12, 0.2); break;
+      case "molecule": this.tone(110, 0.6, "sine", 0.25, 90); this.tone(220, 0.5, "sine", 0.1, 180, 0.1); break;
+      case "pickup": [660, 880, 1320].forEach((f, i) => this.tone(f, 0.07, "sine", 0.15, null, i * 0.06)); break;
+      case "end": this.tone(300, 0.8, "sine", 0.25, 80); break;
+    }
+  },
+};
+
+
+"use strict";
+// ============ 渲染编排：drawScene 贴 sprite 图集 + 背景装饰 + 氛围层（全部 hash 确定性，暂停冻结） ============
+const BG_COLOR = "#14181f";
+const DECOR_CELL = 44;
+
+function drawScene(ctx, sim, t) {
+  ctx.fillStyle = BG_COLOR;
+  ctx.fillRect(0, 0, sim.w, sim.h);
+  _drawDecor(ctx, sim);
+
+  const f2 = ((t * 4) | 0) % 2;
+  for (const c of sim.cats) drawSprite(ctx, "catalyst:" + f2, c.x, c.y, 1, 2);
+
+  const def = PREDATORS[sim.formIdx];
+  if (def) {
+    const f6 = ((t * 6) | 0) % 2;
+    for (const pr of sim.preds) {
+      const face = pr.vx < -2 ? -1 : 1;
+      drawSprite(ctx, def.key + ":" + f6, pr.x, pr.y, face, 2);
+    }
+  }
+
+  // 玩家（退化后短暂无敌闪烁）
+  const p = sim.player;
+  const blink = p.invulnT > 0 && ((t * 10) | 0) % 2 === 0;
+  if (!blink) {
+    let key;
+    if (sim.formIdx === 3) key = "mol_" + MOLECULES[sim.molIdx].key + ":" + ((t * 8) | 0) % 2;
+    else key = FORMS[sim.formIdx].key + ":" + ((t * 6) | 0) % 2;
+    drawSprite(ctx, key, p.x, p.y, p.face, 2);
+  }
+
+  if (sim.formIdx === 3) _drawMolAmbient(ctx, sim, t);
+}
+
+// 背景装饰撒点：格子 hash 确定性（同格永远同一结果，无每帧随机）
+function _drawDecor(ctx, sim) {
+  const cols = Math.ceil(sim.w / DECOR_CELL), rows = Math.ceil(sim.h / DECOR_CELL);
+  for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < cols; cx++) {
+      const v = hash2(cx * 7 + 3, cy * 11 + 5);
+      if (v >= 0.22) continue;
+      const variant = v < 0.08 ? 0 : (v < 0.15 ? 1 : 2);
+      const ox = (hash2(cx * 13 + 1, cy) * 24) | 0;
+      const oy = (hash2(cx, cy * 17 + 2) * 24) | 0;
+      drawSprite(ctx, "decor:" + variant, cx * DECOR_CELL + 10 + ox, cy * DECOR_CELL + 10 + oy, 1, 2);
+    }
+  }
+}
+
+// 分子形态氛围：漂浮原子微粒（颜色随当前变异体）
+function _drawMolAmbient(ctx, sim, t) {
+  const mol = MOLECULES[sim.molIdx];
+  ctx.globalAlpha = 0.35;
+  for (let i = 0; i < 12; i++) {
+    const hx = hash2(i, 7), hy = hash2(i, 13);
+    const x = ((hx * sim.w + t * (10 + hx * 20) * (hx > 0.5 ? 1 : -1)) % sim.w + sim.w) % sim.w;
+    const y = ((hy * sim.h + t * 6 * (hy - 0.5)) % sim.h + sim.h) % sim.h;
+    const col = ATOM_COLORS[mol.atoms[i % 4]];
+    ctx.fillStyle = col ? col[0] : "#888";
+    ctx.fillRect(x, y, 2, 2);
+  }
+  ctx.globalAlpha = 1;
+}
+
+"use strict";
+// ============ 主入口：主循环、相机画布、键盘/触屏输入、界面与 HUD、事件接线 ============
+(function () {
+  const el = (id) => document.getElementById(id);   // 必须在 IIFE 首行（防 TDZ 黑屏）
+
+  const cv = el("cv");
+  const ctx = cv.getContext("2d");
+  const hud = el("hud"), hudTime = el("hud-time"), hudForm = el("hud-form"),
+        hudMult = el("hud-mult"), hudCd = el("hud-cd"), hudCdV = el("hud-cd-v"), hudBest = el("hud-best");
+  const screenStart = el("screen-start"), screenOver = el("screen-over");
+  const btnStart = el("btn-start"), btnAgain = el("btn-again"), btnEnd = el("btn-end"), btnDash = el("btn-dash");
+  const joyBase = el("joy-base"), joyStick = el("joy-stick"), toastsBox = el("toasts");
+  const chainBox = el("chain-preview"), startBest = el("start-best");
+  const overMol = el("over-mol"), overFormal = el("over-formal"), overStats = el("over-stats"),
+        overQuip = el("over-quip"), overBest = el("over-best");
+
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const isTouch = "ontouchstart" in window;
+  let viewW = 800, viewH = 600;
+
+  // ---- 画布尺寸（resize 防抖 120ms，同步 simResize） ----
+  let resizeTimer = null;
+  function applySize() {
+    viewW = window.innerWidth;
+    viewH = window.innerHeight;
+    cv.width = Math.round(viewW * DPR);
+    cv.height = Math.round(viewH * DPR);
+    cv.style.width = viewW + "px";
+    cv.style.height = viewH + "px";
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    simResize(viewW, viewH);
+  }
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(applySize, 120);
+  });
+
+  // ---- 最高纪录（localStorage 容错） ----
+  function loadBest() {
+    try { const v = parseFloat(localStorage.getItem("getting-worse-best")); return isFinite(v) ? v : 0; }
+    catch (e) { return 0; }
+  }
+  function saveBest(t) {
+    try { localStorage.setItem("getting-worse-best", String(t)); } catch (e) {}
+  }
+  function fmtTime(t) { return t >= 60 ? Math.floor(t / 60) + "分" + (t % 60).toFixed(0) + "秒" : t.toFixed(1) + "秒"; }
+
+  // ---- Toast ----
+  function toast(text) {
+    const d = document.createElement("div");
+    d.className = "toast";
+    d.textContent = text;
+    toastsBox.appendChild(d);
+    requestAnimationFrame(() => d.classList.add("show"));
+    setTimeout(() => {
+      d.classList.remove("show");
+      setTimeout(() => d.remove(), 220);
+    }, 2600);
+    while (toastsBox.children.length > 3) toastsBox.firstChild.remove();
+  }
+  function pick(arr) { return arr[(Math.random() * arr.length) | 0]; }
+  function fill(str, map) { return str.replace(/\{(\w+)\}/g, (_, k) => map[k] != null ? map[k] : ""); }
+
+  // ---- 开始界面形态链预览 ----
+  function buildChainPreview() {
+    if (!chainBox || chainBox.children.length) return;
+    const labels = ["0倍", "1万倍", "1亿倍", "1万亿倍"];
+    FORMS.forEach((f, i) => {
+      if (i > 0) {
+        const a = document.createElement("span");
+        a.className = "arr"; a.textContent = "→";
+        chainBox.appendChild(a);
+      }
+      const node = document.createElement("div");
+      node.className = "node";
+      const img = document.createElement("img");
+      const key = (i === 3 ? "mol_" + MOLECULES[0].key : f.key) + ":0";
+      try { img.src = getSprite(key).toDataURL(); } catch (e) { img.style.display = "none"; }
+      const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = f.name;
+      const mu = document.createElement("span"); mu.className = "mu"; mu.textContent = labels[i];
+      node.appendChild(img); node.appendChild(nm); node.appendChild(mu);
+      chainBox.appendChild(node);
+    });
+  }
+
+  // ---- 流程 ----
+  function refreshBestUi() {
+    const b = loadBest();
+    hudBest.textContent = b > 0 ? fmtTime(b) : "-";
+    if (startBest) startBest.innerHTML = b > 0 ? "最高纪录：<b>" + fmtTime(b) + "</b>" : "尚无纪录——去创造最菜的纪录吧";
+  }
+
+  function startRun() {
+    sfx.init();
+    sfx.play("start");
+    simInit((Math.random() * 1e9) | 0, viewW, viewH);
+    simStart();
+    screenStart.classList.add("hidden");
+    screenOver.classList.add("hidden");
+    hud.classList.remove("hidden");
+    btnEnd.classList.add("hidden");
+    sfx.play("tick");
+  }
+
+  function endRun(d) {
+    const b0 = loadBest();
+    const isNew = d.time > b0;
+    if (isNew) saveBest(d.time);
+    overMol.textContent = d.mol.folk + "分子";
+    overFormal.textContent = d.mol.formal + "（" + d.mol.formula + "）";
+    overStats.textContent = "存活 " + fmtTime(d.time) + " · 被抓 " + d.stats.catches +
+                            " 次 · 冲刺 " + d.stats.dashes + " 次 · 变异 " + d.stats.mutations + " 次";
+    let quip = OVER_QUIPS[0].text;
+    for (const q of OVER_QUIPS) if (d.time >= q.min) quip = q.text;
+    overQuip.textContent = quip;
+    overBest.innerHTML = "最高纪录：<b>" + fmtTime(Math.max(b0, d.time)) + "</b>" + (isNew ? ' <span class="new">新纪录！</span>' : "");
+    screenOver.classList.remove("hidden");
+    hud.classList.add("hidden");
+    btnEnd.classList.add("hidden");
+    btnDash.classList.add("hidden");
+    refreshBestUi();
+  }
+
+  // ---- 事件接线（逻辑层 emit，表现层订阅） ----
+  // 捕获事件先于退化事件发生：缓存天敌名供 caught 文案使用
+  let _lastPredName = "老板";
+  let molTalkTimer = null;
+
+  onEvent("catch", (d) => { sfx.play("catch"); _lastPredName = d.pred; });
+  onEvent("devolve", (d) => {
+    sfx.play("devolve");
+    if (d.cause === "caught") {
+      toast(fill(pick(DEVOLVE_TOASTS.caught), { form: d.formName, mult: d.multLabel, pred: _lastPredName }));
+    } else {
+      toast(fill(pick(DEVOLVE_TOASTS.timer), { form: d.formName, mult: d.multLabel }));
+    }
+  });
+  onEvent("molecule", (d) => {
+    sfx.play("molecule");
+    toast(fill(DEVOLVE_TOASTS.molecule, { mol: d.mol.folk, formal: d.mol.formal }));
+    btnEnd.classList.remove("hidden");
+    clearInterval(molTalkTimer);
+    molTalkTimer = setInterval(() => {         // 分子自言自语：念自己的连读名
+      if (sim.running && sim.formIdx === 3 && !sim.over) sfx.speak(MOLECULES[sim.molIdx].sound);
+    }, 2400);
+  });
+  onEvent("mutate", (d) => {
+    sfx.play("pickup");
+    toast(fill(DEVOLVE_TOASTS.mutate, { mol: d.mol.folk, formal: d.mol.formal }));
+  });
+  onEvent("dash", () => sfx.play("dash"));
+  onEvent("end", (d) => {
+    sfx.play("end");
+    clearInterval(molTalkTimer);
+    endRun(d);
+  });
+
+  // ---- 输入：键盘 ----
+  const keys = new Set();
+  window.addEventListener("keydown", (e) => {
+    if (e.repeat) return;
+    sfx.init();
+    const k = e.key.toLowerCase();
+    if (k === " " || e.code === "Space") {
+      e.preventDefault();
+      simDash();
+      return;
+    }
+    if (k === "enter") {
+      if (!screenStart.classList.contains("hidden") || !screenOver.classList.contains("hidden")) startRun();
+      return;
+    }
+    keys.add(k);
+  });
+  window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+  window.addEventListener("blur", () => keys.clear());
+
+  function keyVector() {
+    let x = 0, y = 0;
+    if (keys.has("arrowleft") || keys.has("a")) x -= 1;
+    if (keys.has("arrowright") || keys.has("d")) x += 1;
+    if (keys.has("arrowup") || keys.has("w")) y -= 1;
+    if (keys.has("arrowdown") || keys.has("s")) y += 1;
+    const l = Math.hypot(x, y);
+    return l ? { x: x / l, y: y / l } : null;
+  }
+
+  // ---- 输入：触屏摇杆（监听整个 document；按钮/弹窗元素排除） ----
+  let joyId = null, joyOx = 0, joyOy = 0, joyActive = false, touchSeen = false;
+  const JOY_R = 44;
+
+  function isUiTarget(t) { return !!(t && t.closest && t.closest("button, .screen")); }
+
+  document.addEventListener("touchstart", (e) => {
+    touchSeen = true;
+    sfx.init();
+    if (isUiTarget(e.target)) return;
+    if (joyId !== null) return;
+    const t = e.changedTouches[0];
+    joyId = t.identifier;
+    joyOx = t.clientX; joyOy = t.clientY;
+    joyActive = true;
+    joyBase.style.left = (joyOx - 48) + "px"; joyBase.style.top = (joyOy - 48) + "px";
+    joyStick.style.left = (joyOx - 22) + "px"; joyStick.style.top = (joyOy - 22) + "px";
+    joyBase.classList.remove("hidden"); joyStick.classList.remove("hidden");
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener("touchmove", (e) => {
+    if (joyId === null) return;
+    for (const t of e.changedTouches) {
+      if (t.identifier !== joyId) continue;
+      let dx = t.clientX - joyOx, dy = t.clientY - joyOy;
+      const l = Math.hypot(dx, dy);
+      if (l > JOY_R) { dx = dx / l * JOY_R; dy = dy / l * JOY_R; }
+      simSetInput(dx / JOY_R, dy / JOY_R);
+      joyStick.style.left = (joyOx + dx - 22) + "px";
+      joyStick.style.top = (joyOy + dy - 22) + "px";
+    }
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
+
+  function joyEnd(e) {
+    for (const t of e.changedTouches) {
+      if (t.identifier !== joyId) continue;
+      joyId = null; joyActive = false;
+      simSetInput(0, 0);
+      joyBase.classList.add("hidden"); joyStick.classList.add("hidden");
+    }
+  }
+  document.addEventListener("touchend", joyEnd);
+  document.addEventListener("touchcancel", joyEnd);
+
+  btnDash.addEventListener("touchstart", (e) => { e.stopPropagation(); simDash(); }, { passive: true });
+  btnDash.addEventListener("click", () => simDash());
+
+  // ---- 按钮 ----
+  btnStart.addEventListener("click", startRun);
+  btnAgain.addEventListener("click", startRun);
+  btnEnd.addEventListener("click", () => { sfx.play("tick"); simEndRun(); });
+
+  // ---- HUD ----
+  function updateHud() {
+    if (sim.over) return;
+    hudTime.textContent = fmtTime(sim.time);
+    hudForm.textContent = sim.formIdx === 3 ? MOLECULES[sim.molIdx].folk + "分子" : FORMS[sim.formIdx].name;
+    hudMult.textContent = FORMS[sim.formIdx].multLabel + "倍";
+    if (sim.formIdx === 3) {
+      hudCd.classList.add("hidden");
+    } else {
+      hudCd.classList.remove("hidden");
+      hudCdV.textContent = Math.ceil(sim.devolveIn) + "s";
+      hudCd.classList.toggle("danger", sim.devolveIn < 5);
+    }
+    if (touchSeen) btnDash.classList.toggle("hidden", !(sim.running && sim.formIdx === 0));
+  }
+
+  // ---- 主循环：固定步长 + rAF ----
+  let last = 0, acc = 0;
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const realDt = last ? Math.min((now - last) / 1000, 0.1) : 0;
+    last = now;
+
+    if (sim.running && !sim.over) {
+      const kv = keyVector();
+      if (kv && !joyActive) simSetInput(kv.x, kv.y);
+      else if (!joyActive && !kv) simSetInput(0, 0);
+    }
+    acc += realDt;
+    let steps = 0;
+    while (acc >= SIM.STEP && steps < 6) { simUpdate(SIM.STEP); acc -= SIM.STEP; steps++; }
+    drawScene(ctx, sim, now / 1000);
+    updateHud();
+  }
+
+  // ---- 启动 ----
+  applySize();
+  simInit((Math.random() * 1e9) | 0, viewW, viewH);   // 预初始化：开始界面背后已是待命赛场
+  buildChainPreview();
+  refreshBestUi();
+  requestAnimationFrame(frame);
+})();
+
+</script>
+</body>
+</html>

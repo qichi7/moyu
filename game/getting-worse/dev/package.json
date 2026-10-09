@@ -1,0 +1,9 @@
+{
+  "name": "getting-worse",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "node build.js",
+    "test": "node test/smoke.js && node test/sprite.js && node test/entry.js"
+  }
+}

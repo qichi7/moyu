@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>越玩越菜 · 生存退化 · __BUILD_ID__</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #14181f; position: fixed; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; color: #cfd6e4; touch-action: none; }
+  #cv { display: block; touch-action: none; image-rendering: pixelated; }
+
+  /* ---- HUD 顶栏 ---- */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: baseline; gap: 16px;
+    padding: 8px 14px; background: rgba(10, 13, 20, 0.82); border-bottom: 1px solid #1c2333;
+    font-size: 13px; z-index: 10; user-select: none; line-height: 1.5;
+  }
+  #hud.hidden { display: none; }
+  #hud .stat { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+  #hud .lab { color: #6b7688; font-size: 11px; }
+  #hud b { color: #fff; font-weight: 600; font-variant-numeric: tabular-nums; }
+  #hud-form { color: #e8d9a0 !important; }
+  #hud-cd.danger b { color: #e86a4a; }
+
+  #build-id {
+    position: fixed; right: 10px; bottom: 8px; z-index: 10;
+    border: 1px solid #3a4468; color: #8f9ab0; border-radius: 999px;
+    font-size: 10px; padding: 1px 8px; white-space: nowrap; user-select: none;
+  }
+
+  /* ---- 屏幕遮罩（开始/结算） ---- */
+  .screen {
+    position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; text-align: center;
+    background: rgba(10, 13, 20, 0.86); padding: 20px; overflow-y: auto;
+  }
+  .screen.hidden { display: none; }
+  .screen .title { font-size: 52px; font-weight: 700; color: #e8d9a0; letter-spacing: 6px; }
+  .screen .subtitle { font-size: 17px; color: #8f9ab0; letter-spacing: 10px; margin-bottom: 4px; }
+  .screen .lore { max-width: 520px; font-size: 13px; line-height: 1.9; color: #aeb7c9; }
+  .screen .lore em { color: #e8d9a0; font-style: normal; }
+  .chain { display: flex; align-items: center; gap: 6px; margin: 4px 0; flex-wrap: wrap; justify-content: center; }
+  .chain .node { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 76px; }
+  .chain img, .chain .ph { width: 40px; height: 40px; image-rendering: pixelated; }
+  .chain .nm { font-size: 11px; color: #cfd6e4; }
+  .chain .mu { font-size: 10px; color: #6b7688; }
+  .chain .arr { color: #6b7688; font-size: 16px; }
+  .screen .hint { font-size: 12px; color: #56617a; }
+  .screen .best { font-size: 13px; color: #8f9ab0; }
+  .screen .best b { color: #e8d9a0; }
+
+  button.btn {
+    background: #2c3a58; color: #fff; border: 1px solid #4a5f8a; border-radius: 6px;
+    height: 44px; padding: 0 34px; cursor: pointer; font-size: 16px; letter-spacing: 2px;
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s;
+  }
+  button.btn:hover { background: #3a4a6e; }
+  button.btn:active { transform: scale(0.96); }
+
+  /* ---- 结算 ---- */
+  #over-mol { font-size: 30px; font-weight: 700; color: #e8d9a0; }
+  #over-formal { font-size: 13px; color: #8f9ab0; }
+  #over-stats { font-size: 14px; color: #cfd6e4; }
+  #over-quip { font-size: 13px; color: #6b7688; max-width: 420px; }
+  #over-best { font-size: 13px; color: #8f9ab0; }
+  #over-best b { color: #e8d9a0; }
+  #over-best .new { color: #e86a4a; font-weight: 700; }
+
+  /* ---- 分子形态结束按钮 ---- */
+  #btn-end {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 26px; z-index: 20;
+    background: #2c3a58; color: #fff; border: 1px solid #4a5f8a; border-radius: 999px;
+    height: 40px; padding: 0 24px; cursor: pointer; font-size: 14px;
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  #btn-end:active { transform: translateX(-50%) scale(0.95); }
+  #btn-end.hidden { display: none; }
+
+  /* ---- 触屏冲刺按钮 ---- */
+  #btn-dash {
+    position: fixed; right: 22px; bottom: 64px; z-index: 20;
+    width: 64px; height: 64px; border-radius: 50%;
+    background: rgba(44, 58, 88, 0.75); color: #fff; border: 1px solid #4a5f8a;
+    font-size: 14px; cursor: pointer; touch-action: none;
+  }
+  #btn-dash:active { background: rgba(74, 95, 138, 0.9); }
+  #btn-dash.hidden { display: none; }
+
+  /* ---- 虚拟摇杆 ---- */
+  #joy-base, #joy-stick {
+    position: fixed; border-radius: 50%; pointer-events: none; z-index: 15;
+    border: 2px solid rgba(143, 154, 176, 0.4); background: rgba(143, 154, 176, 0.08);
+  }
+  #joy-base { width: 96px; height: 96px; }
+  #joy-stick { width: 44px; height: 44px; background: rgba(143, 154, 176, 0.35); }
+  #joy-base.hidden, #joy-stick.hidden { display: none; }
+
+  /* ---- Toast ---- */
+  #toasts {
+    position: fixed; top: 54px; left: 50%; transform: translateX(-50%); z-index: 25;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none;
+    width: max-content; max-width: 92vw;
+  }
+  .toast {
+    background: rgba(10, 13, 20, 0.92); border: 1px solid #3a4468; border-radius: 6px;
+    padding: 7px 16px; font-size: 13px; color: #e8d9a0;
+    opacity: 0; transform: translateY(-6px);
+    transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1), transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  /* ---- 手机端适配 ---- */
+  @media (max-width: 700px) {
+    .screen .title { font-size: 38px; letter-spacing: 4px; }
+    .screen .subtitle { font-size: 14px; letter-spacing: 7px; }
+    #hud { gap: 9px; padding: 6px 8px; font-size: 11px; }
+    #hud .lab { font-size: 10px; }
+    .chain .node { width: 64px; }
+    #btn-dash { right: 14px; bottom: 90px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div id="hud" class="hidden">
+  <div class="stat"><span class="lab">存活</span><b id="hud-time">0.0s</b></div>
+  <div class="stat"><span class="lab">形态</span><b id="hud-form">牛马</b></div>
+  <div class="stat"><span class="lab">已退化</span><b id="hud-mult">0倍</b></div>
+  <div class="stat" id="hud-cd"><span class="lab">下次退化</span><b id="hud-cd-v">20s</b></div>
+  <div class="stat"><span class="lab">纪录</span><b id="hud-best">-</b></div>
+</div>
+
+<div id="build-id">__BUILD_ID__</div>
+
+<button id="btn-end" class="hidden">假期结束，回去上班</button>
+<button id="btn-dash" class="hidden">冲刺</button>
+<div id="joy-base" class="hidden"></div>
+<div id="joy-stick" class="hidden"></div>
+<div id="toasts"></div>
+
+<div id="screen-start" class="screen">
+  <div class="title">越玩越菜</div>
+  <div class="subtitle">—— 生存退化 ——</div>
+  <div class="lore">
+    PC宇宙·背景：牛马们没日没夜高强度工作，直到有一天，<em>放假了</em>。
+    大部分人退化了一万倍，变成了猴子；放假太久的，退化了一亿倍，成了草履虫；
+    草履虫再退化一万倍，就是分子——比如<em>阿巴阿巴分子</em>（二阿化二巴），
+    在布朗运动中发出阿巴阿巴的声音。<br>
+    你的目标：在被老板抓住之前，<em>尽量晚一点退化</em>。
+  </div>
+  <div class="chain" id="chain-preview"></div>
+  <div class="best" id="start-best"></div>
+  <button class="btn" id="btn-start">开始放假</button>
+  <div class="hint">方向键 / WASD 移动 · 空格冲刺（仅牛马） · 手机摇杆同理</div>
+</div>
+
+<div id="screen-over" class="screen hidden">
+  <div style="font-size:13px;color:#6b7688;">你最终菜成了 ——</div>
+  <div id="over-mol">阿巴阿巴分子</div>
+  <div id="over-formal">二阿化二巴（阿2巴2）</div>
+  <div id="over-stats"></div>
+  <div id="over-quip"></div>
+  <div id="over-best"></div>
+  <button class="btn" id="btn-again">重新打工</button>
+</div>
+
+<script>
+/*__LOGIC__*/
+/*__RENDER__*/
+/*__MAIN__*/
+</script>
+</body>
+</html>
